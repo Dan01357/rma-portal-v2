@@ -175,8 +175,17 @@ function parseWorksheetRows(sheetXml, sharedStrings = []) {
  */
 export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {}) {
   const entries = parseZipEntriesFromBuffer(buffer);
-  const sharedStrings = entries.has('xl/sharedStrings.xml')
-    ? parseSharedStringsXml(entries.get('xl/sharedStrings.xml').toString('utf8'))
+  let sharedStringsEntry = entries.get('xl/sharedStrings.xml');
+  if (!sharedStringsEntry) {
+    for (const [k, v] of entries.entries()) {
+      if (/^xl\/sharedstrings\.xml$/i.test(k)) {
+        sharedStringsEntry = v;
+        break;
+      }
+    }
+  }
+  const sharedStrings = sharedStringsEntry
+    ? parseSharedStringsXml(sharedStringsEntry.toString('utf8'))
     : [];
 
   let sheetEntryName = 'xl/worksheets/sheet1.xml';
@@ -197,6 +206,7 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
   let manifestHeaderRowIdx = -1;
   let fieldColIdx = -1;
   let valueColIdx = -1;
+  let hasRmaHeaderBanner = false;
 
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i] || [];
@@ -216,7 +226,10 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
       continue;
     }
 
-    if (trimmedCells.some((c) => /^(?:\[TEST\]\s*)?WHOLESALE RMA|2-WAY EMAIL/i.test(c))) continue;
+    if (trimmedCells.some((c) => /^(?:\[TEST\]\s*)?WHOLESALE RMA|2-WAY EMAIL/i.test(c))) {
+      hasRmaHeaderBanner = true;
+      continue;
+    }
 
     const effFieldIdx = fieldColIdx >= 0 ? fieldColIdx : 0;
     const effValueIdx = valueColIdx >= 0 ? valueColIdx : 1;
@@ -278,6 +291,25 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
   };
 
   const rmaNumber = String(getField('RMA Number', 'rma_number') || '').trim().toUpperCase();
+  const hasFieldValueHeader = fieldColIdx >= 0 && valueColIdx >= 0;
+  const hasRmaNumberLabel =
+    Object.prototype.hasOwnProperty.call(fieldMap, 'rma number') ||
+    Object.prototype.hasOwnProperty.call(fieldMap, 'rma_number');
+  const hasValidRmaFormat = /^RMA-(?:TEST-)?\d{4}-/i.test(rmaNumber);
+  const hasKnownRmaMetaLabel = [
+    'test mode',
+    'logistics stream',
+    'supplier / vendor name',
+    'supplier / vendor',
+    'defect / return reason',
+    'barcode',
+    'product description'
+  ].some((k) => Object.prototype.hasOwnProperty.call(fieldMap, k));
+  const isRmaWorksheet = Boolean(
+    hasRmaHeaderBanner ||
+    (hasRmaNumberLabel && (hasValidRmaFormat || hasFieldValueHeader || hasKnownRmaMetaLabel))
+  );
+
   const testModeVal = String(getField('Test Mode', 'is_test') || '').trim().toLowerCase();
   const emailSubjectVal = String(subjectHint || getField('Email Subject', 'Subject') || '').trim();
   const hasTestSubjectTag = /\[TEST\]/i.test(emailSubjectVal);
@@ -307,6 +339,7 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
   };
 
   return {
+    isRmaWorksheet,
     rmaNumber,
     isTestHint,
     fieldMap,
@@ -489,6 +522,18 @@ export async function applyRmaXlsxUpdates({
   bypassSenderCheck = false
 }) {
   const parsed = extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint });
+  if (!parsed.isRmaWorksheet) {
+    if (bypassSenderCheck) {
+      throw new Error('Uploaded .xlsx is not a recognized RMA Alert worksheet (missing RMA Number field).');
+    }
+    return {
+      skipped: true,
+      nonRmaWorksheet: true,
+      reason: 'NOT_AN_RMA_WORKSHEET',
+      rmaNumber: null,
+      senderEmail
+    };
+  }
   const targetRma = parsed.rmaNumber || String(rmaNumberHint || '').trim().toUpperCase();
   if (!targetRma || !/^RMA-(?:TEST-)?\d{4}-/i.test(targetRma)) {
     throw new Error(`Invalid or missing RMA Number in uploaded .xlsx (${targetRma || 'blank'}).`);
@@ -1445,12 +1490,26 @@ export async function handleIngestXlsxReply(req, res, payload = {}) {
 }
 
 function buildSyncLogDedupeSignature(status, errorInfo, results) {
-  if (status === 'error' && errorInfo) {
-    return `err:${errorInfo.code || ''}:${String(errorInfo.message || '').slice(0, 120)}`;
+  if (status === 'error' || status === 'partial') {
+    if (errorInfo) {
+      return `err:${errorInfo.code || ''}:${String(errorInfo.message || '').slice(0, 120)}`;
+    }
+    const errItems = (results || [])
+      .filter((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER' && r.reason !== 'NOT_AN_RMA_WORKSHEET')
+      .map((r) => `${r.messageId || r.filename || ''}:${String(r.error || '').slice(0, 60)}`);
+    if (errItems.length > 0) {
+      return `item_err:${status}:${errItems.slice(0, 8).join('|')}`;
+    }
   }
   if (status === 'unauthorized') {
     const first = (results || []).find((r) => r.reason === 'UNAUTHORIZED_SENDER');
     if (first) return `unauth:${first.messageId || ''}:${first.from || first.senderEmail || ''}:${first.rmaNumber || ''}`;
+  }
+  if (status === 'skipped_non_rma') {
+    const skipIds = (results || [])
+      .filter((r) => r.reason === 'NOT_AN_RMA_WORKSHEET')
+      .map((r) => r.messageId || r.filename || '');
+    if (skipIds.length > 0) return `skip_non_rma:${skipIds.slice(0, 8).join('|')}`;
   }
   return null;
 }
@@ -1472,9 +1531,14 @@ async function persistSyncOutcome({
   const prevStatus = parseSettingJson(settingsMap.get(SYNC_STATUS_KEY), {});
   const updatedCount = results.filter((r) => r.success && !r.noChanges).length;
   const noChangesCount = results.filter((r) => r.success && r.noChanges).length;
+  const skippedNonRmaCount = results.filter((r) => r.reason === 'NOT_AN_RMA_WORKSHEET').length;
   const unauthorizedCount = results.filter((r) => r.reason === 'UNAUTHORIZED_SENDER').length;
-  const errorCount = results.filter((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER').length;
-  const firstItemErr = results.find((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER')?.error || null;
+  const errorCount = results.filter(
+    (r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER' && r.reason !== 'NOT_AN_RMA_WORKSHEET'
+  ).length;
+  const firstItemErr =
+    results.find((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER' && r.reason !== 'NOT_AN_RMA_WORKSHEET')?.error ||
+    null;
 
   const nextStatus = {
     lastRunAt: nowIso,
@@ -1494,6 +1558,7 @@ async function persistSyncOutcome({
       messagesWithXlsx: scanStats?.messagesWithXlsx || 0,
       updatedCount,
       noChangesCount,
+      skippedNonRmaCount,
       unauthorizedCount,
       errorCount
     }
@@ -1532,7 +1597,9 @@ async function persistSyncOutcome({
     messageId: r.messageId || null,
     status: r.success
       ? (r.noChanges ? 'no_changes' : 'updated')
-      : (r.reason === 'UNAUTHORIZED_SENDER' ? 'unauthorized' : 'error'),
+      : (r.reason === 'UNAUTHORIZED_SENDER'
+          ? 'unauthorized'
+          : (r.reason === 'NOT_AN_RMA_WORKSHEET' ? 'skipped' : 'error')),
     changedFields: Array.isArray(r.changedFields) ? r.changedFields : [],
     reason: r.reason || null,
     error: r.error || null
@@ -1552,6 +1619,7 @@ async function persistSyncOutcome({
     messagesWithXlsx: scanStats?.messagesWithXlsx || 0,
     updatedCount,
     noChangesCount,
+    skippedNonRmaCount,
     unauthorizedCount,
     errorCount,
     errorCode: nextStatus.lastErrorCode,
@@ -1644,11 +1712,11 @@ export async function syncEmailRepliesInternal({
         for (const msg of messages) {
           const dedupeKey = msg.dedupeKey || msg.messageId || `uid-${msg.uid}-${msg.from}`;
           if (processedSet.has(dedupeKey)) {
-            seenUidsToMark.push(msg.uid);
             continue;
           }
 
-          let allAttachmentsClean = msg.attachments.length > 0;
+          let allAttachmentsResolved = msg.attachments.length > 0;
+          let hasGenuineRmaSuccess = false;
           for (const att of msg.attachments) {
             try {
               const applyRes = await applyXlsxFn({
@@ -1658,11 +1726,17 @@ export async function syncEmailRepliesInternal({
                 sourceLabel: msg.from || 'Email Reply .xlsx'
               });
               results.push({ ...applyRes, filename: att.filename, from: msg.from, messageId: msg.messageId });
+              if (applyRes?.reason === 'NOT_AN_RMA_WORKSHEET') {
+                // Cleanly skip unrelated workbooks and cache Message-ID without marking Gmail \Seen
+                continue;
+              }
               if (applyRes?.skipped || applyRes?.success === false) {
-                allAttachmentsClean = false;
+                allAttachmentsResolved = false;
+              } else {
+                hasGenuineRmaSuccess = true;
               }
             } catch (attErr) {
-              allAttachmentsClean = false;
+              allAttachmentsResolved = false;
               results.push({
                 success: false,
                 error: attErr?.message || 'Failed applying .xlsx reply update.',
@@ -1673,10 +1747,13 @@ export async function syncEmailRepliesInternal({
             }
           }
 
-          // Only mark as processed & \Seen if every attachment succeeded (never burn failed or unauthorized replies)
-          if (allAttachmentsClean) {
+          // Cache Message-ID if every attachment succeeded OR was cleanly skipped as NOT_AN_RMA_WORKSHEET.
+          // Never burn failed or UNAUTHORIZED_SENDER replies, and only mark Gmail \Seen for genuine RMA workbooks.
+          if (allAttachmentsResolved) {
             processedSet.add(dedupeKey);
-            seenUidsToMark.push(msg.uid);
+            if (hasGenuineRmaSuccess) {
+              seenUidsToMark.push(msg.uid);
+            }
           }
         }
         return seenUidsToMark;
@@ -1684,14 +1761,17 @@ export async function syncEmailRepliesInternal({
     });
 
     if (seenUidsToMark.length > 0 || processedSet.size !== initialSize) {
-      const nextList = Array.from(processedSet).slice(-400);
+      const nextList = Array.from(processedSet).slice(-800);
       await upsertSetting(dbClient, PROCESSED_IDS_KEY, nextList);
     }
 
     const updatedCount = results.filter((r) => r.success && !r.noChanges).length;
     const noChangesCount = results.filter((r) => r.success && r.noChanges).length;
+    const skippedNonRmaCount = results.filter((r) => r.reason === 'NOT_AN_RMA_WORKSHEET').length;
     const unauthorizedCount = results.filter((r) => r.reason === 'UNAUTHORIZED_SENDER').length;
-    const errorCount = results.filter((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER').length;
+    const errorCount = results.filter(
+      (r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER' && r.reason !== 'NOT_AN_RMA_WORKSHEET'
+    ).length;
 
     let runStatus = 'idle';
     if (errorCount > 0 && updatedCount > 0) runStatus = 'partial';
@@ -1699,6 +1779,7 @@ export async function syncEmailRepliesInternal({
     else if (unauthorizedCount > 0) runStatus = 'unauthorized';
     else if (updatedCount > 0) runStatus = 'updated';
     else if (noChangesCount > 0) runStatus = 'no_changes';
+    else if (skippedNonRmaCount > 0) runStatus = 'skipped_non_rma';
 
     const nowIso = new Date().toISOString();
     const durationMs = Date.now() - startedAt;
@@ -1725,6 +1806,7 @@ export async function syncEmailRepliesInternal({
       scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
       updatedCount,
       noChangesCount,
+      skippedNonRmaCount,
       unauthorizedCount,
       errorCount,
       syncStatus,

@@ -4,14 +4,16 @@ import {
   getImapTlsConnectOptions,
   categorizeImapError,
   parseHeaderAndBodystructure,
+  parseZipEntriesFromBuffer,
   extractRmaUpdatesFromXlsxBuffer,
+  applyRmaXlsxUpdates,
   extractAuthorizedEmailsFromSettings,
   extractInviteEmailsForReport,
   isSenderAuthorizedForReport,
   syncEmailRepliesInternal
 } from '../api/_lib/imapReplySyncHandler.js';
 import { buildRmaAlertXlsxBytes } from '../src/utils/rmaAlertXlsx.js';
-import { buildStoredZip } from '../src/utils/exportXlsx.js';
+import { buildTableXlsxBytes, buildStoredZip } from '../src/utils/exportXlsx.js';
 
 function createMockSupabase(initialSettings = {}) {
   const store = new Map(Object.entries(initialSettings));
@@ -276,6 +278,163 @@ test('parseHeaderAndBodystructure separates headers and skips non-XLSX BODYSTRUC
   const xlsxFrame = `* 2 FETCH (UID 11 BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)] {${headerBytes.length}}\r\n${headerBytes} BODYSTRUCTURE (("TEXT" "HTML" NIL NIL NIL "7BIT" 200 5 NIL NIL NIL)("APPLICATION" "VND.OPENXMLFORMATS-OFFICEDOCUMENT.SPREADSHEETML.SHEET" ("NAME" "reply.xlsx") NIL NIL "BASE64" 8000 NIL ("ATTACHMENT" ("FILENAME" "reply.xlsx")) NIL) "MIXED"))`;
   const xlsxRes = parseHeaderAndBodystructure(Buffer.from(xlsxFrame, 'latin1'));
   assert.equal(xlsxRes.maybeHasXlsx, true);
+});
+
+test('extractRmaUpdatesFromXlsxBuffer & applyRmaXlsxUpdates classify non-RMA Statement of Account workbooks as NOT_AN_RMA_WORKSHEET', async () => {
+  const soaBytes = Buffer.from(
+    buildTableXlsxBytes({
+      sheetName: 'Statement of Account',
+      title: 'PINGCON MARKETING CORP.',
+      subtitle: 'STATEMENT OF ACCOUNT - ACME CORP',
+      columns: [
+        { header: 'Date', type: 'text' },
+        { header: 'Reference No.', type: 'text' },
+        { header: 'Balance', type: 'currency' }
+      ],
+      rows: [['2026-11-25', 'SI-9001', 12500]]
+    })
+  );
+
+  const parsed = extractRmaUpdatesFromXlsxBuffer(soaBytes, {
+    subjectHint: 'Statement of Account - ACME Corp as of Report Date Nov 25, 2026'
+  });
+  assert.equal(parsed.isRmaWorksheet, false);
+
+  // During IMAP polling (bypassSenderCheck: false), cleanly return NOT_AN_RMA_WORKSHEET without touching DB
+  const skipRes = await applyRmaXlsxUpdates({
+    buffer: soaBytes,
+    senderEmail: 'finance@pingconmarketing.com',
+    subjectHint: 'Statement of Account - ACME Corp',
+    bypassSenderCheck: false
+  });
+  assert.equal(skipRes.skipped, true);
+  assert.equal(skipRes.reason, 'NOT_AN_RMA_WORKSHEET');
+
+  // Manual upload (bypassSenderCheck: true) still rejects invalid template
+  await assert.rejects(
+    () => applyRmaXlsxUpdates({ buffer: soaBytes, senderEmail: 'finance2@keysysincorporated.com', bypassSenderCheck: true }),
+    /not a recognized RMA Alert worksheet/i
+  );
+});
+
+test('corrupted RMA Alert worksheet with banner/Field header and blank RMA Number still throws instead of silent skip', () => {
+  const origBytes = Buffer.from(
+    buildRmaAlertXlsxBytes(
+      { rma_number: 'RMA-TEST-2026-0190-7GZK', supplier_name: 'Pending Assignment' },
+      { subject: '[TEST] [RMA Alert] RMA-TEST-2026-0190-7GZK' }
+    )
+  );
+  const entries = parseZipEntriesFromBuffer(origBytes);
+  const wipedSheet = entries
+    .get('xl/worksheets/sheet1.xml')
+    .toString('utf8')
+    .replaceAll('RMA-TEST-2026-0190-7GZK', '');
+  const repacked = [];
+  for (const [k, v] of entries.entries()) {
+    repacked.push({ name: k, content: k === 'xl/worksheets/sheet1.xml' ? wipedSheet : v });
+  }
+  const corruptedBuf = Buffer.from(buildStoredZip(repacked));
+  const parsed = extractRmaUpdatesFromXlsxBuffer(corruptedBuf, { subjectHint: 'Re: Broken edit' });
+  assert.equal(parsed.isRmaWorksheet, true);
+  assert.equal(parsed.rmaNumber, '');
+});
+
+test('genuine renamed .xlsx RMA reply with changed subject and stripped banner still parses RMA fields cleanly', () => {
+  const origBytes = Buffer.from(
+    buildRmaAlertXlsxBytes(
+      {
+        rma_number: 'RMA-TEST-2026-0190-7GZK',
+        barcode: 'Testgsbdjdn',
+        name: 'Tesvahbdj',
+        supplier_name: 'Pending Assignment',
+        ai_document_metadata: { is_test: true, test_mode: true }
+      },
+      { subject: '[TEST] [RMA Alert] RMA-TEST-2026-0190-7GZK' }
+    )
+  );
+  const entries = parseZipEntriesFromBuffer(origBytes);
+  // Strip both banners inside XML while editing supplier to Suysing and using a non-RMA email subject
+  const editedSheet = entries
+    .get('xl/worksheets/sheet1.xml')
+    .toString('utf8')
+    .replace('WHOLESALE RMA ALERT WORKSHEET', 'EDITED COPY')
+    .replace('2-WAY EMAIL REPLY EDITABLE WORKSHEET', 'VENDOR SHEET')
+    .replace('<t>Pending Assignment</t>', '<t>Suysing</t>');
+  const repacked = [];
+  for (const [k, v] of entries.entries()) {
+    repacked.push({ name: k, content: k === 'xl/worksheets/sheet1.xml' ? editedSheet : v });
+  }
+  const renamedBuf = Buffer.from(buildStoredZip(repacked));
+  const parsed = extractRmaUpdatesFromXlsxBuffer(renamedBuf, {
+    subjectHint: 'Updated vendor details for our call'
+  });
+  assert.equal(parsed.isRmaWorksheet, true);
+  assert.equal(parsed.rmaNumber, 'RMA-TEST-2026-0190-7GZK');
+  assert.equal(parsed.isTestHint, true);
+  assert.equal(parsed.patch.supplier_name, 'Suysing');
+});
+
+test('syncEmailRepliesInternal caches non-RMA Statement of Account Message-IDs without error status or marking Gmail \\Seen', async () => {
+  const mockDb = createMockSupabase();
+  const soaBytes = Buffer.from(
+    buildTableXlsxBytes({
+      sheetName: 'Statement of Account',
+      title: 'PINGCON MARKETING CORP.',
+      subtitle: 'SOA',
+      columns: [{ header: 'Client', type: 'text' }, { header: 'Amount', type: 'currency' }],
+      rows: [['ACME', 5000]]
+    })
+  );
+
+  const soaMsg = {
+    uid: 77,
+    dedupeKey: '<soa-123@mail.gmail.com>',
+    messageId: '<soa-123@mail.gmail.com>',
+    from: 'finance@pingconmarketing.com',
+    subject: 'Statement of Account - ACME Nov 25, 2026',
+    attachments: [{ filename: 'Statement of Account - ACME.xlsx', buffer: soaBytes }]
+  };
+
+  const makeMockImapFetcher = (seenHolder) => async ({ processedSet, onProcessMessages }) => {
+    const msgs = processedSet.has(soaMsg.dedupeKey) ? [] : [soaMsg];
+    const seen = await onProcessMessages(msgs, []);
+    seenHolder.push(...seen);
+    return { scannedRecentMessages: 1, messagesWithXlsx: msgs.length };
+  };
+
+  // Run 1: cleanly skipped as NOT_AN_RMA_WORKSHEET, Message-ID cached, email stays unread (seen1 = []), no error status
+  const seen1 = [];
+  const res1 = await syncEmailRepliesInternal({
+    triggerSource: 'cron_job_org',
+    caller: 'cron',
+    imapFetcher: makeMockImapFetcher(seen1),
+    dbClient: mockDb,
+    credentials: { user: 'finance2@keysysincorporated.com', pass: 'abcdabcdabcdabcd' }
+  });
+  assert.equal(res1.success, true);
+  assert.equal(res1.status, 'skipped_non_rma');
+  assert.equal(res1.errorCount, 0);
+  assert.equal(res1.skippedNonRmaCount, 1);
+  assert.deepEqual(seen1, []);
+  assert.deepEqual(mockDb.store.get('processed_reply_message_ids'), ['<soa-123@mail.gmail.com>']);
+  assert.equal(mockDb.store.get('email_reply_sync_status').lastStatus, 'skipped_non_rma');
+  assert.equal(mockDb.store.get('email_reply_sync_status').lastErrorMessage, null);
+  assert.equal(mockDb.store.get('email_reply_sync_logs')[0].details[0].status, 'skipped');
+  assert.equal(mockDb.store.get('email_reply_sync_logs')[0].details[0].reason, 'NOT_AN_RMA_WORKSHEET');
+
+  // Run 2: cached Message-ID skipped at header probe -> 0 attachments scanned, idle
+  const seen2 = [];
+  const res2 = await syncEmailRepliesInternal({
+    triggerSource: 'cron_job_org',
+    caller: 'cron',
+    imapFetcher: makeMockImapFetcher(seen2),
+    dbClient: mockDb,
+    credentials: { user: 'finance2@keysysincorporated.com', pass: 'abcdabcdabcdabcd' }
+  });
+  assert.equal(res2.success, true);
+  assert.equal(res2.status, 'idle');
+  assert.equal(res2.scannedUnseenWithXlsx, 0);
+  assert.equal(res2.errorCount, 0);
 });
 
 
