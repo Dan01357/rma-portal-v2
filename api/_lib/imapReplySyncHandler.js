@@ -1103,8 +1103,30 @@ const SYNC_LOGS_KEY = 'email_reply_sync_logs';
 const SYNC_STATUS_KEY = 'email_reply_sync_status';
 const SYNC_LOCK_KEY = 'email_reply_sync_lock';
 const MAX_SYNC_LOG_ENTRIES = 100;
-const SYNC_LOCK_TTL_MS = 45000;
+const SYNC_LOCK_TTL_MS = 35000;
+const MAX_IMAP_SCAN_MS = 18000;
+const IMAP_SOCKET_TIMEOUT_MS = 18000;
 const LOG_DEDUPE_WINDOW_MS = 15 * 60 * 1000;
+
+export function parseHeaderAndBodystructure(payloadBuf) {
+  const rawStr = payloadBuf.toString('latin1');
+  const litM = /\{(\d+)\}\r\n/.exec(rawStr);
+  let headerStr = '';
+  let metaStr = rawStr;
+  if (litM) {
+    const litLen = parseInt(litM[1], 10);
+    const startByte = litM.index + litM[0].length;
+    headerStr = payloadBuf.subarray(startByte, startByte + litLen).toString('latin1');
+    metaStr = `${rawStr.slice(0, litM.index)} ${rawStr.slice(startByte + litLen)}`;
+  }
+  const decodedMeta = decodeMimeHeader(metaStr).toLowerCase();
+  const maybeHasXlsx =
+    decodedMeta.includes('.xlsx') ||
+    decodedMeta.includes('spreadsheetml') ||
+    decodedMeta.includes('octet-stream') ||
+    decodedMeta.includes('message/rfc822');
+  return { headerStr, bodystructureRaw: metaStr, maybeHasXlsx };
+}
 
 function formatImapSinceDate(daysAgo = 2) {
   const d = new Date(Date.now() - Math.max(0, daysAgo) * 24 * 60 * 60 * 1000);
@@ -1219,7 +1241,7 @@ async function upsertSetting(dbClient, key, value) {
 export async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet, onProcessMessages }) {
   return await new Promise((resolve, reject) => {
     const socket = tls.connect(getImapTlsConnectOptions(host, port));
-    socket.setTimeout(25000);
+    socket.setTimeout(IMAP_SOCKET_TIMEOUT_MS);
 
     let buf = Buffer.alloc(0);
     let tagCounter = 1;
@@ -1247,8 +1269,8 @@ export async function fetchRecentImapXlsxReplies({ host, port, user, pass, proce
     });
 
     const processBuffer = () => {
-      const text = buf.toString('latin1');
       if (!connectedGreeted) {
+        const text = buf.toString('latin1');
         const lineEnd = text.indexOf('\r\n');
         if (lineEnd !== -1) {
           connectedGreeted = true;
@@ -1260,11 +1282,17 @@ export async function fetchRecentImapXlsxReplies({ host, port, user, pass, proce
       }
 
       if (!activeCmd) return;
-      const re = new RegExp(`(?:^|\\r\\n)${activeCmd.tag} (OK|NO|BAD) ([^\\r\\n]*)\\r\\n`, 'm');
-      const m = re.exec(text);
+      // Scan only the trailing 2 KB window so large multi-MB attachment payloads remain O(1) per TCP chunk
+      const tailOffset = Math.max(0, buf.length - 2048);
+      const tailText = buf.subarray(tailOffset).toString('latin1');
+      const re = tailOffset === 0
+        ? new RegExp(`(?:^|\\r\\n)${activeCmd.tag} (OK|NO|BAD) ([^\\r\\n]*)\\r\\n`, 'm')
+        : new RegExp(`\\r\\n${activeCmd.tag} (OK|NO|BAD) ([^\\r\\n]*)\\r\\n`, 'm');
+      const m = re.exec(tailText);
       if (m) {
-        const fullEndIdx = m.index + m[0].length;
-        const payloadBuf = buf.subarray(0, m.index);
+        const matchAbsIdx = tailOffset + m.index;
+        const fullEndIdx = matchAbsIdx + m[0].length;
+        const payloadBuf = buf.subarray(0, matchAbsIdx);
         buf = buf.subarray(fullEndIdx);
         const status = m[1];
         const infoLine = m[2];
@@ -1279,6 +1307,7 @@ export async function fetchRecentImapXlsxReplies({ host, port, user, pass, proce
     };
 
     const run = async () => {
+      const scanDeadlineMs = Date.now() + MAX_IMAP_SCAN_MS;
       await new Promise((resGreet) => {
         activeCmd = { resolve: resGreet, reject };
       });
@@ -1292,18 +1321,36 @@ export async function fetchRecentImapXlsxReplies({ host, port, user, pass, proce
 
       const messages = [];
       const scannedNonXlsxKeys = [];
-      const recentUids = uids.slice(-50).reverse();
+      const recentUids = uids.slice(-40).reverse();
+      let scannedCount = 0;
+      let partialScan = false;
 
       for (const uid of recentUids) {
-        // Lightweight header probe first so already-processed messages skip downloading attachments
-        const hdrRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])`);
-        const hdrStr = extractImapLiteralPayload(hdrRes.payload);
-        const hdrs = parseMimeHeaders(hdrStr);
+        if (Date.now() >= scanDeadlineMs) {
+          partialScan = true;
+          break;
+        }
+        scannedCount += 1;
+
+        // Lightweight header + BODYSTRUCTURE probe first so already-processed or non-XLSX emails skip BODY.PEEK[]
+        const probeRes = await sendCommand(
+          `UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)] BODYSTRUCTURE)`
+        );
+        const { headerStr, maybeHasXlsx } = parseHeaderAndBodystructure(probeRes.payload);
+        const hdrs = parseMimeHeaders(headerStr);
         const msgIdHeader = String(hdrs['message-id'] || '').trim();
         const hdrFrom = cleanEmailAddr(hdrs.from || '');
         const dedupeKey = msgIdHeader || `uid-${uid}-${hdrFrom}`;
         if (processedSet?.has(dedupeKey)) {
           continue;
+        }
+        if (!maybeHasXlsx) {
+          if (msgIdHeader) scannedNonXlsxKeys.push(msgIdHeader);
+          continue;
+        }
+        if (Date.now() >= scanDeadlineMs) {
+          partialScan = true;
+          break;
         }
 
         const fetchRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[])`);
@@ -1335,7 +1382,9 @@ export async function fetchRecentImapXlsxReplies({ host, port, user, pass, proce
       await sendCommand('LOGOUT').catch(() => {});
       cleanup();
       return {
-        scannedRecentMessages: recentUids.length,
+        scannedRecentMessages: scannedCount,
+        totalRecentUids: recentUids.length,
+        partialScan,
         messagesWithXlsx: messages.length
       };
     };

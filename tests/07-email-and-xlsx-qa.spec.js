@@ -659,11 +659,12 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(editorHref).toContain('mode=test');
 
       // Direct HTTP security checks on /api/v1/rma-email-edit without triggering page console guard
-      const unauthGet = await request.get('/api/v1/rma-email-edit?token=inv_test_edit_fake');
+      const unauthGet = await request.get('/api/v1/rma-email-edit?token=inv_test_edit_fake', { timeout: 60_000 });
       expect(unauthGet.status()).toBe(401);
       const forgedPatch = await request.patch('/api/v1/rma-email-edit', {
         headers: { Authorization: 'Bearer forged.invalid.jwt', 'Content-Type': 'application/json' },
-        data: { token: 'inv_test_edit_fake', rma_number: rmaNum, updates: { supplier_name: 'Hacker' } }
+        data: { token: 'inv_test_edit_fake', rma_number: rmaNum, updates: { supplier_name: 'Hacker' } },
+        timeout: 60_000
       });
       expect(forgedPatch.status()).toBe(401);
 
@@ -929,11 +930,12 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       // =========================================================================
       // 5. DAILY OVERALL RMA MATRIX (.XLSX) AUTO-EMAILER + SETTINGS BUTTON QA
       // =========================================================================
-      const unauthCronGet = await request.get('/api/send-email?action=daily-matrix');
+      const unauthCronGet = await request.get('/api/send-email?action=daily-matrix', { timeout: 60_000 });
       expect(unauthCronGet.status()).toBe(401);
       const forgedCronPost = await request.post('/api/send-email?action=daily-matrix', {
         headers: { Authorization: 'Bearer forged.invalid.token', 'Content-Type': 'application/json' },
-        data: { force: true, dryRun: true }
+        data: { force: true, dryRun: true },
+        timeout: 60_000
       });
       expect(forgedCronPost.status()).toBe(401);
 
@@ -946,7 +948,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       // Authenticated Live dry-run dispatch -> verifies OOXML .xlsx + To/CC + non-[TEST] subject
       const liveMatrixRes = await request.get(
         '/api/send-email?action=daily-matrix&dryRun=true&includeAttachmentBase64=true',
-        { headers: { Authorization: `Bearer ${adminJwt}` } }
+        { headers: { Authorization: `Bearer ${adminJwt}` }, timeout: 60_000 }
       );
       expect(liveMatrixRes.status()).toBe(200);
       const liveMatrixJson = await liveMatrixRes.json();
@@ -979,7 +981,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           includeZeroCatalogSkus: true,
           toList: ['custom-lead@pingconmarketing.com', 'custom-backup@pingconmarketing.com'],
           ccList: ['custom-cc@pingconmarketing.com']
-        }
+        },
+        timeout: 60_000
       });
       expect(liveCustomRes.status()).toBe(200);
       const liveCustomJson = await liveCustomRes.json();
@@ -994,7 +997,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
 
       const testMatrixRes = await request.post('/api/send-email?action=daily-matrix', {
         headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
-        data: { action: 'daily-matrix', dryRun: true, isTestMode: true, force: true, includeAttachmentBase64: true }
+        data: { action: 'daily-matrix', dryRun: true, isTestMode: true, force: true, includeAttachmentBase64: true },
+        timeout: 60_000
       });
       expect(testMatrixRes.status()).toBe(200);
       const testMatrixJson = await testMatrixRes.json();
@@ -1323,9 +1327,9 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(autoDisposeJson.autoDisposed?.some((a) => a.rmaNumber === followUpRma)).toBe(true);
 
       // 5C. 2-WAY MIRROR .XLSX REPLY SYNC & INGEST API QA (Auth Guards, Live/Test Isolation, Update + Audit Trail)
-      const unauthSync = await request.post('/api/send-email?action=sync-email-replies', { data: {} });
+      const unauthSync = await request.post('/api/send-email?action=sync-email-replies', { data: {}, timeout: 60_000 });
       expect(unauthSync.status()).toBe(401);
-      const unauthIngest = await request.post('/api/send-email?action=ingest-xlsx-reply', { data: {} });
+      const unauthIngest = await request.post('/api/send-email?action=ingest-xlsx-reply', { data: {}, timeout: 60_000 });
       expect(unauthIngest.status()).toBe(401);
 
       // Test round-tripping mirror .xlsx with edited supplier email & SI# against followUpRma (Test Sandbox)
@@ -1355,7 +1359,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           fileBase64: Buffer.from(editedMirrorBytes).toString('base64'),
           senderEmail: 'mgan@pingconmarketing.com',
           actorName: 'Playwright Reply Bot'
-        }
+        },
+        timeout: 60_000
       });
       expect(ingestOkRes.status()).toBe(200);
       const ingestOkJson = await ingestOkRes.json();

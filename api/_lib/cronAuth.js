@@ -39,8 +39,13 @@ export async function authorizeCronOrAdmin(req) {
     };
   }
 
+  const authLookupStart = Date.now();
   let { data: userData, error: userErr } = await supabase.auth.getUser(bearerToken);
-  if ((userErr || !userData?.user?.email) && (!userErr?.status || userErr.status >= 500)) {
+  if (
+    (userErr || !userData?.user?.email) &&
+    (!userErr?.status || userErr.status >= 500) &&
+    Date.now() - authLookupStart < 4000
+  ) {
     await new Promise((r) => setTimeout(r, 300));
     const retry = await supabase.auth.getUser(bearerToken);
     userData = retry.data;

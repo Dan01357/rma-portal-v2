@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   getImapTlsConnectOptions,
   categorizeImapError,
+  parseHeaderAndBodystructure,
   extractRmaUpdatesFromXlsxBuffer,
   extractAuthorizedEmailsFromSettings,
   extractInviteEmailsForReport,
@@ -264,4 +265,17 @@ test('sender authorization enforces Test-only personal Gmail isolation and honor
   assert.equal(isSenderAuthorizedForReport('daniloalvaro031717@gmail.com', liveReport, adminSet, { ...authSets, inviteEmailsSet: liveInvites }), false);
   assert.equal(isSenderAuthorizedForReport('vendor-contact@supplier.com', liveReport, adminSet, { ...authSets, inviteEmailsSet: liveInvites }), true);
 });
+
+test('parseHeaderAndBodystructure separates headers and skips non-XLSX BODYSTRUCTURE', () => {
+  const headerBytes = 'Message-ID: <abc@gmail.com>\r\nSubject: Note about .xlsx\r\nFrom: user@gmail.com\r\n\r\n';
+  const plainFrame = `* 1 FETCH (UID 10 BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)] {${headerBytes.length}}\r\n${headerBytes} BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 120 4 NIL NIL NIL))`;
+  const plainRes = parseHeaderAndBodystructure(Buffer.from(plainFrame, 'latin1'));
+  assert.equal(plainRes.maybeHasXlsx, false);
+  assert.match(plainRes.headerStr, /Message-ID: <abc@gmail\.com>/);
+
+  const xlsxFrame = `* 2 FETCH (UID 11 BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)] {${headerBytes.length}}\r\n${headerBytes} BODYSTRUCTURE (("TEXT" "HTML" NIL NIL NIL "7BIT" 200 5 NIL NIL NIL)("APPLICATION" "VND.OPENXMLFORMATS-OFFICEDOCUMENT.SPREADSHEETML.SHEET" ("NAME" "reply.xlsx") NIL NIL "BASE64" 8000 NIL ("ATTACHMENT" ("FILENAME" "reply.xlsx")) NIL) "MIXED"))`;
+  const xlsxRes = parseHeaderAndBodystructure(Buffer.from(xlsxFrame, 'latin1'));
+  assert.equal(xlsxRes.maybeHasXlsx, true);
+});
+
 

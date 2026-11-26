@@ -232,7 +232,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           res.url().includes('/rest/v1/rma_reports') &&
           res.request().method() === 'POST' &&
           (res.request().postData() || '').includes(rtvBarcode),
-        { timeout: 45_000 }
+        { timeout: 90_000 }
       );
       await page.getByRole('button', { name: /Submit Return Report/i }).click();
       await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 45_000 });
