@@ -33,7 +33,8 @@ import {
   getWarehouseLocations,
   DEFAULT_KNOWN_GPS_LOCATIONS,
   formatGpsAddressParts,
-  getGpsMapUrl
+  getGpsMapUrl,
+  formatDateTimeYmdHm
 } from '../utils/rmaHelpers';
 import { formatTime12hFromHhmm } from '../utils/followUpWorkflow';
 import { notificationService, EMAIL_PROFILE_TYPES } from '../services/notificationService';
@@ -64,6 +65,15 @@ export default function SettingsTab({
     diagnostic: '',
     passLength: null,
     hadSpaces: false
+  });
+
+  const [replySyncDiagnostics, setReplySyncDiagnostics] = useState({
+    loading: false,
+    runningSync: false,
+    statusSummary: null,
+    logs: [],
+    processedMessageIdCount: 0,
+    error: ''
   });
 
   const [dailyMatrixStatus, setDailyMatrixStatus] = useState({
@@ -105,6 +115,7 @@ export default function SettingsTab({
   const [sandboxEmailFeedback, setSandboxEmailFeedback] = useState(null);
 
   const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+  const followUpDirtyRef = React.useRef(false);
   const [isSavingFollowUpConfig, setIsSavingFollowUpConfig] = useState(false);
   const [followUpConfigFeedback, setFollowUpConfigFeedback] = useState(null);
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
@@ -179,7 +190,7 @@ export default function SettingsTab({
       if (Array.isArray(globalSettings?.baseCcList)) setCcRecipients(globalSettings.baseCcList);
       if (testSettings) setTestGlobalRecipients(testSettings);
       if (dailyMatrixConfig) setMatrixConfig(dailyMatrixConfig);
-      if (dailyFollowUpConfig) setFollowUpConfig(dailyFollowUpConfig);
+      if (dailyFollowUpConfig && !followUpDirtyRef.current) setFollowUpConfig(dailyFollowUpConfig);
       if (dbSandbox) {
         setTestSandboxEmail(dbSandbox);
         setSandboxEmailInput(dbSandbox);
@@ -242,7 +253,7 @@ export default function SettingsTab({
       if (syncAll || detail.dailyMatrixConfig) {
         setMatrixConfig(notificationService.getDailyMatrixConfig());
       }
-      if (syncAll || detail.dailyFollowUpConfig) {
+      if ((syncAll || detail.dailyFollowUpConfig) && !followUpDirtyRef.current) {
         setFollowUpConfig(notificationService.getDailyFollowUpConfig());
       }
       if (syncAll || detail.testSandboxEmail) {
@@ -254,8 +265,14 @@ export default function SettingsTab({
 
     window.addEventListener('rma-settings-changed', handleSyncRecipients);
     window.addEventListener('storage', handleSyncRecipients);
+    const handleReplySyncUpdated = () => {
+      loadReplySyncLogs(false);
+    };
+    window.addEventListener('rma-reply-sync-updated', handleReplySyncUpdated);
+    loadReplySyncLogs(true);
     return () => {
       window.removeEventListener('rma-settings-changed', handleSyncRecipients);
+      window.removeEventListener('rma-reply-sync-updated', handleReplySyncUpdated);
       window.removeEventListener('storage', handleSyncRecipients);
     };
   }, []);
@@ -453,6 +470,35 @@ export default function SettingsTab({
     }
   };
 
+  const loadReplySyncLogs = async (showSpinner = true) => {
+    if (showSpinner) {
+      setReplySyncDiagnostics((prev) => ({ ...prev, loading: true, error: '' }));
+    }
+    const res = await notificationService.getEmailReplySyncLogs();
+    setReplySyncDiagnostics((prev) => ({
+      ...prev,
+      loading: false,
+      statusSummary: res?.statusSummary || null,
+      logs: Array.isArray(res?.logs) ? res.logs : [],
+      processedMessageIdCount: Number(res?.processedMessageIdCount || 0),
+      error: res?.success ? '' : (res?.error || 'Unable to load IMAP reply sync logs.')
+    }));
+  };
+
+  const handleRunDiagnosticReplySync = async () => {
+    setReplySyncDiagnostics((prev) => ({ ...prev, runningSync: true, error: '' }));
+    const res = await notificationService.syncEmailRepliesNow({
+      source: 'admin_settings_diagnostic',
+      includeIdleLogs: true
+    });
+    await loadReplySyncLogs(false);
+    setReplySyncDiagnostics((prev) => ({
+      ...prev,
+      runningSync: false,
+      error: res?.success === false && res?.error ? res.error : ''
+    }));
+  };
+
   const handleTestSmtp = async () => {
     setSmtpStatus({ loading: true, checked: false, success: false, message: 'Authenticating with Google SMTP...', diagnostic: '', passLength: null, hadSpaces: false });
     const res = await notificationService.testSmtpConnection();
@@ -527,6 +573,7 @@ export default function SettingsTab({
     setFollowUpConfigFeedback(null);
     try {
       const saved = await notificationService.saveDailyFollowUpConfig(followUpConfig);
+      followUpDirtyRef.current = false;
       setFollowUpConfig(saved);
       setFollowUpConfigFeedback({ type: 'success', message: `10-Day Pickup Follow-Up schedule (${formatTime12hFromHhmm(saved.autoSendTimePht)} PHT) saved to cloud!` });
       setTimeout(() => setFollowUpConfigFeedback(null), 4000);
@@ -1581,7 +1628,10 @@ export default function SettingsTab({
                 type="checkbox"
                 aria-label="Auto Daily Follow-Up Enabled"
                 checked={followUpConfig.autoEnabled !== false}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoEnabled: e.target.checked }))}
+                onChange={(e) => {
+                  followUpDirtyRef.current = true;
+                  setFollowUpConfig((p) => ({ ...p, autoEnabled: e.target.checked }));
+                }}
                 className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
               />
               <span>Auto-Send Daily Follow-Ups (10-Day SLA)</span>
@@ -1591,7 +1641,10 @@ export default function SettingsTab({
                 type="checkbox"
                 aria-label="Customer Hub Default Follow-Up Enabled"
                 checked={Boolean(followUpConfig.customerFollowUpDefaultEnabled)}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, customerFollowUpDefaultEnabled: e.target.checked }))}
+                onChange={(e) => {
+                  followUpDirtyRef.current = true;
+                  setFollowUpConfig((p) => ({ ...p, customerFollowUpDefaultEnabled: e.target.checked }));
+                }}
                 className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
               />
               <span>Default Follow-Up ON for Customer Hub RMAs</span>
@@ -1602,7 +1655,10 @@ export default function SettingsTab({
                 type="time"
                 aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
                 value={followUpConfig.autoSendTimePht || '13:00'}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '13:00' }))}
+                onChange={(e) => {
+                  followUpDirtyRef.current = true;
+                  setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '13:00' }));
+                }}
                 className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
               />
             </label>
@@ -1684,6 +1740,167 @@ export default function SettingsTab({
             )}
           </div>
         )}
+
+        {/* 2-Way Email Reply Sync (IMAP) Health & Persistent Logs */}
+        <div
+          data-testid="reply-sync-diagnostics-panel"
+          className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3 text-xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-black uppercase tracking-wider text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${replySyncDiagnostics.runningSync ? 'animate-spin' : ''}`} />
+                <span>2-Way Email Reply Sync (IMAP) Health &amp; Logs</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Monitors automatic background Gmail IMAP syncs, unauthorized sender skips, and TLS/auth failures (failed &amp; unauthorized replies are never burned).
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => loadReplySyncLogs(true)}
+                disabled={replySyncDiagnostics.loading}
+                className="px-2.5 py-1 rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${replySyncDiagnostics.loading ? 'animate-spin' : ''}`} />
+                <span>Refresh Logs</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRunDiagnosticReplySync}
+                disabled={replySyncDiagnostics.runningSync}
+                className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${replySyncDiagnostics.runningSync ? 'animate-spin' : ''}`} />
+                <span>{replySyncDiagnostics.runningSync ? 'Syncing IMAP...' : 'Test IMAP Sync Now'}</span>
+              </button>
+            </div>
+          </div>
+
+          {replySyncDiagnostics.error && (
+            <div className="p-2.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 text-[11px] font-semibold">
+              {replySyncDiagnostics.error}
+            </div>
+          )}
+
+          {replySyncDiagnostics.statusSummary && (
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-[11px]">
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-bold uppercase text-slate-400">Last Sync Run</div>
+                <div className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5">
+                  {replySyncDiagnostics.statusSummary.lastRunAt
+                    ? formatDateTimeYmdHm(replySyncDiagnostics.statusSummary.lastRunAt)
+                    : 'Never'}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5 truncate">
+                  Source: {replySyncDiagnostics.statusSummary.lastTriggerSource || '—'}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-bold uppercase text-slate-400">Latest Status</div>
+                <div className="mt-0.5">
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                    replySyncDiagnostics.statusSummary.lastStatus === 'error'
+                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                      : replySyncDiagnostics.statusSummary.lastStatus === 'unauthorized' || replySyncDiagnostics.statusSummary.lastStatus === 'partial'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                  }`}>
+                    {replySyncDiagnostics.statusSummary.lastStatus || 'idle'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Processed IDs: {replySyncDiagnostics.processedMessageIdCount}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-bold uppercase text-slate-400">Last Success</div>
+                <div className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5">
+                  {replySyncDiagnostics.statusSummary.lastSuccessAt
+                    ? formatDateTimeYmdHm(replySyncDiagnostics.statusSummary.lastSuccessAt)
+                    : 'None yet'}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Duration: {replySyncDiagnostics.statusSummary.durationMs || 0} ms
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-bold uppercase text-slate-400">Last Scan Stats</div>
+                <div className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5">
+                  {replySyncDiagnostics.statusSummary.lastStats?.scannedRecentMessages ?? 0} msgs / {replySyncDiagnostics.statusSummary.lastStats?.updatedCount ?? 0} updated
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Unauth: {replySyncDiagnostics.statusSummary.lastStats?.unauthorizedCount ?? 0} • Err: {replySyncDiagnostics.statusSummary.lastStats?.errorCount ?? 0}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {replySyncDiagnostics.statusSummary?.lastErrorMessage && (
+            <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-900 dark:text-rose-200 text-[11px] space-y-1">
+              <div className="font-bold">
+                Latest IMAP Error ({replySyncDiagnostics.statusSummary.lastErrorCode || 'ERROR'}): {replySyncDiagnostics.statusSummary.lastErrorMessage}
+              </div>
+              {replySyncDiagnostics.statusSummary.lastDiagnosticHint && (
+                <div>💡 {replySyncDiagnostics.statusSummary.lastDiagnosticHint}</div>
+              )}
+            </div>
+          )}
+
+          <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            {replySyncDiagnostics.logs.length === 0 ? (
+              <div className="p-3 text-[11px] text-slate-500 italic text-center">
+                No notable sync events recorded yet (updated replies, unauthorized skips, and errors are logged here automatically).
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-800/70 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                    <th className="px-2.5 py-1.5">Time (PHT)</th>
+                    <th className="px-2.5 py-1.5">Trigger</th>
+                    <th className="px-2.5 py-1.5">Status</th>
+                    <th className="px-2.5 py-1.5">Details / Errors</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {replySyncDiagnostics.logs.slice(0, 25).map((entry) => {
+                    const detailSummary = Array.isArray(entry.details) && entry.details.length > 0
+                      ? entry.details.map((d) => `${d.rmaNumber || d.filename || 'item'} (${d.from || 'unknown'}: ${d.status}${d.changedFields?.length ? ` [${d.changedFields.join(', ')}]` : ''}${d.reason ? ` - ${d.reason}` : ''}${d.error ? ` - ${d.error}` : ''})`).join('; ')
+                      : (entry.error || `${entry.scannedRecentMessages || 0} recent messages scanned`);
+                    return (
+                      <tr key={entry.id || entry.timestamp} className="align-top">
+                        <td className="px-2.5 py-1.5 font-mono whitespace-nowrap text-slate-700 dark:text-slate-300">
+                          {formatDateTimeYmdHm(entry.lastSeenAt || entry.timestamp)}
+                          {Number(entry.attemptCount) > 1 ? ` (×${entry.attemptCount})` : ''}
+                        </td>
+                        <td className="px-2.5 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                          {entry.triggerSource || '—'}
+                        </td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          <span className={`px-1.5 py-0.5 rounded font-black text-[10px] uppercase ${
+                            entry.status === 'error'
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              : entry.status === 'unauthorized' || entry.status === 'partial'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                : entry.status === 'updated'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}>
+                            {entry.status}
+                          </span>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-slate-700 dark:text-slate-200 break-words">
+                          {detailSummary}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* 3. Public Reporting Portal Access QR & Dock Posters */}

@@ -182,7 +182,10 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   let replySyncSummary = null;
   if (alsoSyncReplies && !dryRun) {
     try {
-      replySyncSummary = await syncEmailRepliesInternal();
+      replySyncSummary = await syncEmailRepliesInternal({
+        triggerSource: auth.callerType === 'cron' ? 'cron_followup_sweep' : 'admin_followup',
+        caller: auth.actor
+      });
     } catch (syncErr) {
       replySyncSummary = { success: false, error: syncErr?.message || 'Reply sync failed' };
     }

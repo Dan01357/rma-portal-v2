@@ -1,6 +1,10 @@
 import { handleDailyMatrixEmail } from './_lib/dailyMatrixEmailHandler.js';
 import { handleDailyFollowUp } from './_lib/dailyFollowUpHandler.js';
-import { handleSyncEmailReplies, handleIngestXlsxReply } from './_lib/imapReplySyncHandler.js';
+import {
+  handleSyncEmailReplies,
+  handleIngestXlsxReply,
+  handleGetReplySyncLogs
+} from './_lib/imapReplySyncHandler.js';
 import { supabase } from './_lib/supabase.js';
 import {
   createSmtpTransport,
@@ -43,6 +47,9 @@ export default async function handler(req, res) {
     }
     if (requestedAction === 'sync-email-replies') {
       return await handleSyncEmailReplies(req, res, payload);
+    }
+    if (requestedAction === 'reply-sync-logs') {
+      return await handleGetReplySyncLogs(req, res);
     }
     if (requestedAction === 'ingest-xlsx-reply') {
       return await handleIngestXlsxReply(req, res, payload);

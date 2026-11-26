@@ -321,7 +321,45 @@ function cleanEmailAddr(raw) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : '';
 }
 
-function extractAuthorizedEmailsFromSettings(settingsRows = []) {
+export function extractInviteEmailsForReport(settingsRows = [], targetRma = '', existingIsTest = false) {
+  const inviteEmailsSet = new Set();
+  const normTarget = String(targetRma || '').trim().toUpperCase();
+  if (!normTarget) return inviteEmailsSet;
+
+  const inviteRow = (settingsRows || []).find((s) => s?.key === 'customer_rma_invites_store');
+  if (!inviteRow?.value) return inviteEmailsSet;
+
+  let list = [];
+  try {
+    const parsed = typeof inviteRow.value === 'string' ? JSON.parse(inviteRow.value) : inviteRow.value;
+    if (Array.isArray(parsed)) list = parsed;
+  } catch {}
+
+  for (const inv of list) {
+    if (!inv || typeof inv !== 'object') continue;
+    if (String(inv.status || 'active').toLowerCase() === 'revoked') continue;
+    if (String(inv.rma_number || '').trim().toUpperCase() !== normTarget) continue;
+    const invIsTest = Boolean(
+      inv.is_test ||
+      /^RMA-TEST-/i.test(inv.rma_number || '') ||
+      String(inv.token || '').startsWith('inv_test_')
+    );
+    if (invIsTest !== Boolean(existingIsTest)) continue;
+
+    const candidates = [
+      ...(Array.isArray(inv.allowed_emails) ? inv.allowed_emails : []),
+      ...(Array.isArray(inv.authorized_emails) ? inv.authorized_emails : []),
+      inv.authorized_email
+    ];
+    for (const raw of candidates) {
+      const clean = cleanEmailAddr(raw);
+      if (clean) inviteEmailsSet.add(clean);
+    }
+  }
+  return inviteEmailsSet;
+}
+
+export function extractAuthorizedEmailsFromSettings(settingsRows = []) {
   const liveEmailsSet = new Set([
     DEFAULT_EMAIL_RECIPIENTS.toEmail.toLowerCase(),
     ...DEFAULT_EMAIL_RECIPIENTS.baseCcList.map((e) => e.toLowerCase())
@@ -346,14 +384,19 @@ function extractAuthorizedEmailsFromSettings(settingsRows = []) {
       if (row.key === 'email_recipients' && parsed && typeof parsed === 'object') {
         addEmailsToSet(liveEmailsSet, parsed.toList);
         addEmailsToSet(liveEmailsSet, parsed.toEmail);
+        addEmailsToSet(liveEmailsSet, parsed.to);
         addEmailsToSet(liveEmailsSet, parsed.baseCcList);
+        addEmailsToSet(liveEmailsSet, parsed.ccList);
+        addEmailsToSet(liveEmailsSet, parsed.cc);
       }
       if (row.key === 'email_recipients_by_type' && parsed && typeof parsed === 'object') {
         Object.values(parsed).forEach((prof) => {
           if (!prof || typeof prof !== 'object') return;
           addEmailsToSet(liveEmailsSet, prof.toList);
           addEmailsToSet(liveEmailsSet, prof.toEmail);
+          addEmailsToSet(liveEmailsSet, prof.to);
           addEmailsToSet(liveEmailsSet, prof.ccList);
+          addEmailsToSet(liveEmailsSet, prof.cc);
         });
       }
       if (row.key === 'test_sandbox_email' && parsed) {
@@ -362,15 +405,19 @@ function extractAuthorizedEmailsFromSettings(settingsRows = []) {
       if (row.key === 'test_email_recipients' && parsed && typeof parsed === 'object') {
         addEmailsToSet(testEmailsSet, parsed.toList);
         addEmailsToSet(testEmailsSet, parsed.toEmail);
+        addEmailsToSet(testEmailsSet, parsed.to);
         addEmailsToSet(testEmailsSet, parsed.baseCcList);
         addEmailsToSet(testEmailsSet, parsed.ccList);
+        addEmailsToSet(testEmailsSet, parsed.cc);
       }
       if (row.key === 'test_email_recipients_by_type' && parsed && typeof parsed === 'object') {
         Object.values(parsed).forEach((prof) => {
           if (!prof || typeof prof !== 'object') return;
           addEmailsToSet(testEmailsSet, prof.toList);
           addEmailsToSet(testEmailsSet, prof.toEmail);
+          addEmailsToSet(testEmailsSet, prof.to);
           addEmailsToSet(testEmailsSet, prof.ccList);
+          addEmailsToSet(testEmailsSet, prof.cc);
         });
       }
     } catch {}
@@ -378,11 +425,12 @@ function extractAuthorizedEmailsFromSettings(settingsRows = []) {
   return { liveEmailsSet, testEmailsSet };
 }
 
-function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, { liveEmailsSet, testEmailsSet } = {}) {
+export function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, { liveEmailsSet, testEmailsSet, inviteEmailsSet } = {}) {
   const clean = cleanEmailAddr(senderEmail);
   if (!clean) return false;
   if (adminEmailsSet?.has(clean)) return true;
   if (liveEmailsSet?.has(clean)) return true;
+  if (inviteEmailsSet?.has(clean)) return true;
   const reportIsTest = Boolean(
     report?.ai_document_metadata?.is_test ||
     report?.ai_document_metadata?.test_mode ||
@@ -458,7 +506,8 @@ export async function applyRmaXlsxUpdates({
         'test_email_recipients',
         'test_email_recipients_by_type',
         'test_sandbox_email',
-        'supplier_directory_store'
+        'supplier_directory_store',
+        'customer_rma_invites_store'
       ])
   ]);
 
@@ -483,8 +532,13 @@ export async function applyRmaXlsxUpdates({
       .filter(Boolean)
   );
   const authorizedSets = extractAuthorizedEmailsFromSettings(settingsRows || []);
+  const inviteEmailsSet = extractInviteEmailsForReport(settingsRows || [], targetRma, existingIsTest);
 
-  if (!bypassSenderCheck && senderEmail && !isSenderAuthorizedForReport(senderEmail, existing, adminSet, authorizedSets)) {
+  if (
+    !bypassSenderCheck &&
+    senderEmail &&
+    !isSenderAuthorizedForReport(senderEmail, existing, adminSet, { ...authorizedSets, inviteEmailsSet })
+  ) {
     return {
       skipped: true,
       reason: 'UNAUTHORIZED_SENDER',
@@ -682,6 +736,37 @@ export async function applyRmaXlsxUpdates({
         if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
       });
     }
+  } else if (Array.isArray(existing.items) && existing.items.length === 1) {
+    // Keep single-item JSONB mirror consistent when top-level Field|Value rows were edited
+    const origSingle = existing.items[0] || {};
+    const singleItemPatch = {};
+    if (updates.supplier_name) {
+      singleItemPatch.supplier_name = updates.supplier_name;
+      singleItemPatch.supplierName = updates.supplier_name;
+      singleItemPatch.supplier = updates.supplier_name;
+    }
+    if (updates.code) {
+      singleItemPatch.code = updates.code;
+      singleItemPatch.sku = updates.code;
+    }
+    if (updates.name) {
+      singleItemPatch.name = updates.name;
+      singleItemPatch.productName = updates.name;
+    }
+    if (updates.quantity !== undefined) singleItemPatch.quantity = updates.quantity;
+    if (updates.unit_name) {
+      singleItemPatch.unit_name = updates.unit_name;
+      singleItemPatch.unit = updates.unit_name;
+    }
+    if (updates.price !== undefined) singleItemPatch.price = updates.price;
+    if (updates.price_with_vat !== undefined) singleItemPatch.price_with_vat = updates.price_with_vat;
+    if (updates.expiry_date) singleItemPatch.expiry_date = updates.expiry_date;
+    if (updates.reason) singleItemPatch.reason = updates.reason;
+    if (updates.explanation) singleItemPatch.explanation = updates.explanation;
+    if (Object.keys(singleItemPatch).length > 0) {
+      updates.items = [{ ...origSingle, ...singleItemPatch }];
+      if (updates.quantity !== undefined) updates.total_quantity = updates.quantity;
+    }
   }
 
   if (changedFields.length === 0) {
@@ -727,6 +812,38 @@ export async function applyRmaXlsxUpdates({
   ];
 
   const savedParent = await safeUpdateTableRow('rma_reports', existing.id, updates);
+
+  // Sync single-item updates to single child row / rma_items row if present
+  if (editedManifestEntries.length === 0) {
+    if (Array.isArray(childReportRows) && childReportRows.length === 1 && childReportRows[0]?.id) {
+      const childPatch = {};
+      for (const k of ['supplier_name', 'code', 'name', 'quantity', 'unit_name', 'price', 'price_with_vat', 'expiry_date', 'reason', 'explanation']) {
+        if (updates[k] !== undefined) childPatch[k] = updates[k];
+      }
+      if (Object.keys(childPatch).length > 0) {
+        if ('updated_at' in childReportRows[0]) childPatch.updated_at = nowIso;
+        await safeUpdateTableRow('rma_reports', childReportRows[0].id, childPatch).catch(() => {});
+      }
+    }
+    if (Array.isArray(rmaItemRows) && rmaItemRows.length === 1 && rmaItemRows[0]?.id) {
+      const riPatch = {};
+      if (updates.supplier_name) riPatch.supplier_name = updates.supplier_name;
+      if (updates.code) riPatch.sku = updates.code;
+      if (updates.name) {
+        if ('product_name' in rmaItemRows[0]) riPatch.product_name = updates.name;
+        else riPatch.name = updates.name;
+      }
+      if (updates.quantity !== undefined) riPatch.quantity = updates.quantity;
+      if (updates.unit_name) riPatch.unit_name = updates.unit_name;
+      if (updates.price !== undefined) riPatch.price = updates.price;
+      if (updates.expiry_date) riPatch.expiry_date = updates.expiry_date;
+      if (updates.reason) riPatch.reason = updates.reason;
+      if (updates.explanation) riPatch.explanation = updates.explanation;
+      if (Object.keys(riPatch).length > 0) {
+        await safeUpdateTableRow('rma_items', rmaItemRows[0].id, riPatch).catch(() => {});
+      }
+    }
+  }
 
   // Sync per-item changes onto ONLY the matching child rows in `rma_reports` (parent_rma_id) and `rma_items` (rma_report_id)
   if (editedManifestEntries.length > 0) {
@@ -981,6 +1098,13 @@ function extractImapLiteralPayload(payloadBuf) {
 }
 
 const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const PROCESSED_IDS_KEY = 'processed_reply_message_ids';
+const SYNC_LOGS_KEY = 'email_reply_sync_logs';
+const SYNC_STATUS_KEY = 'email_reply_sync_status';
+const SYNC_LOCK_KEY = 'email_reply_sync_lock';
+const MAX_SYNC_LOG_ENTRIES = 100;
+const SYNC_LOCK_TTL_MS = 45000;
+const LOG_DEDUPE_WINDOW_MS = 15 * 60 * 1000;
 
 function formatImapSinceDate(daysAgo = 2) {
   const d = new Date(Date.now() - Math.max(0, daysAgo) * 24 * 60 * 60 * 1000);
@@ -990,9 +1114,111 @@ function formatImapSinceDate(daysAgo = 2) {
   return `${dd}-${mon}-${yyyy}`;
 }
 
-async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet, onProcessMessages }) {
+/**
+ * Builds TLS options with explicit SNI `servername` so Google IMAP (`imap.gmail.com:993`)
+ * serves the valid leaf certificate instead of its `invalid2.invalid` fallback cert.
+ */
+export function getImapTlsConnectOptions(host, port) {
+  return {
+    host,
+    port,
+    servername: host,
+    rejectUnauthorized: true
+  };
+}
+
+export function categorizeImapError(err) {
+  const codeRaw = String(err?.code || '').trim();
+  const msg = String(err?.message || err || 'Unknown IMAP error');
+  const lower = msg.toLowerCase();
+
+  if (
+    codeRaw === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
+    codeRaw.startsWith('CERT_') ||
+    codeRaw === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+    lower.includes('self-signed certificate') ||
+    lower.includes('certificate')
+  ) {
+    return {
+      code: codeRaw || 'TLS_CERT_ERROR',
+      message: msg,
+      diagnosticHint: 'TLS handshake certificate check failed. Verify IMAP host and TLS SNI servername.'
+    };
+  }
+  if (lower.includes('imap access is disabled') || lower.includes('webalert') || lower.includes('not enabled for imap')) {
+    return {
+      code: 'IMAP_DISABLED',
+      message: msg,
+      diagnosticHint: 'IMAP access appears disabled on this Google Workspace mailbox. Enable IMAP in Gmail Settings or Workspace Admin Console.'
+    };
+  }
+  if (lower.includes('authenticationfailed') || lower.includes('invalid credentials') || lower.includes('application-specific password')) {
+    return {
+      code: 'IMAP_AUTH_FAILED',
+      message: msg,
+      diagnosticHint: 'Gmail rejected the IMAP login credentials. Verify GMAIL_USER and the 16-character GMAIL_APP_PASSWORD in Vercel.'
+    };
+  }
+  if (lower.includes('too many simultaneous connections')) {
+    return {
+      code: 'IMAP_TOO_MANY_CONNECTIONS',
+      message: msg,
+      diagnosticHint: 'Gmail temporary simultaneous connection limit reached. Next sync tick will retry automatically.'
+    };
+  }
+  if (lower.includes('timed out') || codeRaw === 'ETIMEDOUT' || codeRaw === 'ECONNRESET') {
+    return {
+      code: codeRaw || 'IMAP_TIMEOUT',
+      message: msg,
+      diagnosticHint: 'IMAP connection timed out or reset before completion. Next sync tick will retry automatically.'
+    };
+  }
+  return {
+    code: codeRaw || 'IMAP_SYNC_ERROR',
+    message: msg,
+    diagnosticHint: null
+  };
+}
+
+function parseSettingJson(raw, fallback) {
+  if (raw === null || raw === undefined) return fallback;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+  return raw;
+}
+
+async function readSettingsMap(dbClient, keys) {
+  const map = new Map();
+  try {
+    const { data } = await dbClient
+      .from('rma_settings')
+      .select('key, value')
+      .in('key', keys);
+    if (Array.isArray(data)) {
+      for (const row of data) {
+        if (row?.key) map.set(row.key, row.value);
+      }
+    }
+  } catch {}
+  return map;
+}
+
+async function upsertSetting(dbClient, key, value) {
+  try {
+    await dbClient
+      .from('rma_settings')
+      .upsert({ key, value }, { onConflict: 'key' });
+  } catch {}
+}
+
+export async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet, onProcessMessages }) {
   return await new Promise((resolve, reject) => {
-    const socket = tls.connect({ host, port, rejectUnauthorized: true });
+    const socket = tls.connect(getImapTlsConnectOptions(host, port));
     socket.setTimeout(25000);
 
     let buf = Buffer.alloc(0);
@@ -1066,7 +1292,7 @@ async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet
 
       const messages = [];
       const scannedNonXlsxKeys = [];
-      const recentUids = uids.slice(-35).reverse();
+      const recentUids = uids.slice(-50).reverse();
 
       for (const uid of recentUids) {
         // Lightweight header probe first so already-processed messages skip downloading attachments
@@ -1169,15 +1395,146 @@ export async function handleIngestXlsxReply(req, res, payload = {}) {
   }
 }
 
+function buildSyncLogDedupeSignature(status, errorInfo, results) {
+  if (status === 'error' && errorInfo) {
+    return `err:${errorInfo.code || ''}:${String(errorInfo.message || '').slice(0, 120)}`;
+  }
+  if (status === 'unauthorized') {
+    const first = (results || []).find((r) => r.reason === 'UNAUTHORIZED_SENDER');
+    if (first) return `unauth:${first.messageId || ''}:${first.from || first.senderEmail || ''}:${first.rmaNumber || ''}`;
+  }
+  return null;
+}
+
+async function persistSyncOutcome({
+  dbClient,
+  settingsMap,
+  nowIso,
+  durationMs,
+  triggerSource,
+  caller,
+  runStatus,
+  errorInfo = null,
+  scanStats = null,
+  results = [],
+  processedCount = 0,
+  includeIdleLogs = false
+}) {
+  const prevStatus = parseSettingJson(settingsMap.get(SYNC_STATUS_KEY), {});
+  const updatedCount = results.filter((r) => r.success && !r.noChanges).length;
+  const noChangesCount = results.filter((r) => r.success && r.noChanges).length;
+  const unauthorizedCount = results.filter((r) => r.reason === 'UNAUTHORIZED_SENDER').length;
+  const errorCount = results.filter((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER').length;
+  const firstItemErr = results.find((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER')?.error || null;
+
+  const nextStatus = {
+    lastRunAt: nowIso,
+    lastStatus: runStatus,
+    lastTriggerSource: triggerSource,
+    lastCaller: caller,
+    durationMs,
+    lastSuccessAt: runStatus !== 'error' ? nowIso : (prevStatus?.lastSuccessAt || null),
+    lastUpdatedAt: updatedCount > 0 ? nowIso : (prevStatus?.lastUpdatedAt || null),
+    lastErrorAt: runStatus === 'error' ? nowIso : (prevStatus?.lastErrorAt || null),
+    lastErrorCode: errorInfo?.code || (errorCount > 0 ? 'ATTACHMENT_PROCESSING_ERROR' : null),
+    lastErrorMessage: errorInfo?.message || firstItemErr || null,
+    lastDiagnosticHint: errorInfo?.diagnosticHint || null,
+    processedCount,
+    lastStats: {
+      scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
+      messagesWithXlsx: scanStats?.messagesWithXlsx || 0,
+      updatedCount,
+      noChangesCount,
+      unauthorizedCount,
+      errorCount
+    }
+  };
+
+  await upsertSetting(dbClient, SYNC_STATUS_KEY, nextStatus);
+
+  const shouldLogEntry = runStatus !== 'idle' || includeIdleLogs;
+  if (!shouldLogEntry) return nextStatus;
+
+  const rawLogs = parseSettingJson(settingsMap.get(SYNC_LOGS_KEY), []);
+  const logs = Array.isArray(rawLogs) ? [...rawLogs] : [];
+  const sig = buildSyncLogDedupeSignature(runStatus, errorInfo, results);
+  const nowMs = new Date(nowIso).getTime();
+
+  if (sig && logs[0] && logs[0].signature === sig) {
+    const prevMs = new Date(logs[0].lastSeenAt || logs[0].timestamp || 0).getTime();
+    if (Number.isFinite(prevMs) && nowMs - prevMs <= LOG_DEDUPE_WINDOW_MS) {
+      logs[0] = {
+        ...logs[0],
+        lastSeenAt: nowIso,
+        triggerSource,
+        caller,
+        durationMs,
+        attemptCount: (Number(logs[0].attemptCount) || 1) + 1
+      };
+      await upsertSetting(dbClient, SYNC_LOGS_KEY, logs.slice(0, MAX_SYNC_LOG_ENTRIES));
+      return nextStatus;
+    }
+  }
+
+  const compactDetails = results.slice(0, 15).map((r) => ({
+    rmaNumber: r.rmaNumber || null,
+    from: r.from || r.senderEmail || null,
+    filename: r.filename || null,
+    messageId: r.messageId || null,
+    status: r.success
+      ? (r.noChanges ? 'no_changes' : 'updated')
+      : (r.reason === 'UNAUTHORIZED_SENDER' ? 'unauthorized' : 'error'),
+    changedFields: Array.isArray(r.changedFields) ? r.changedFields : [],
+    reason: r.reason || null,
+    error: r.error || null
+  }));
+
+  const newEntry = {
+    id: `sync_${nowMs}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: nowIso,
+    lastSeenAt: nowIso,
+    attemptCount: 1,
+    signature: sig,
+    triggerSource,
+    caller,
+    status: runStatus,
+    durationMs,
+    scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
+    messagesWithXlsx: scanStats?.messagesWithXlsx || 0,
+    updatedCount,
+    noChangesCount,
+    unauthorizedCount,
+    errorCount,
+    errorCode: nextStatus.lastErrorCode,
+    error: nextStatus.lastErrorMessage,
+    diagnosticHint: nextStatus.lastDiagnosticHint,
+    details: compactDetails
+  };
+
+  logs.unshift(newEntry);
+  await upsertSetting(dbClient, SYNC_LOGS_KEY, logs.slice(0, MAX_SYNC_LOG_ENTRIES));
+  return nextStatus;
+}
+
 /**
  * Reusable internal Gmail IMAP SINCE `.xlsx` reply poller (searches recent INBOX messages,
  * including read/opened replies, deduplicated via `processed_reply_message_ids`).
+ * Never marks failed or `UNAUTHORIZED_SENDER` replies as processed.
  */
-export async function syncEmailRepliesInternal() {
-  const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
-  const cleanPass = String(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '').replace(/\s+/g, '').trim();
-  const imapHost = String(process.env.IMAP_HOST || 'imap.gmail.com').trim();
-  const imapPort = Number(process.env.IMAP_PORT || 993);
+export async function syncEmailRepliesInternal({
+  triggerSource = 'internal',
+  caller = 'system',
+  includeIdleLogs = false,
+  imapFetcher = fetchRecentImapXlsxReplies,
+  applyXlsxFn = applyRmaXlsxUpdates,
+  dbClient = supabase,
+  credentials = null
+} = {}) {
+  const startedAt = Date.now();
+  const smtpUser = String(credentials?.user ?? (process.env.SMTP_USER || process.env.GMAIL_USER || '')).trim();
+  const cleanPass = String(credentials?.pass ?? (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '')).replace(/\s+/g, '').trim();
+  const imapHost = String(credentials?.host ?? (process.env.IMAP_HOST || 'imap.gmail.com')).trim();
+  const imapPort = Number(credentials?.port ?? (process.env.IMAP_PORT || 993));
 
   if (!smtpUser || !cleanPass) {
     return {
@@ -1188,27 +1545,44 @@ export async function syncEmailRepliesInternal() {
     };
   }
 
-  try {
-    const { data: processedRow } = await supabase
-      .from('rma_settings')
-      .select('value')
-      .eq('key', 'processed_reply_message_ids')
-      .maybeSingle();
+  const settingsMap = await readSettingsMap(dbClient, [
+    PROCESSED_IDS_KEY,
+    SYNC_LOGS_KEY,
+    SYNC_STATUS_KEY,
+    SYNC_LOCK_KEY
+  ]);
 
-    let processedIds = [];
-    if (processedRow?.value) {
-      try {
-        const parsed = typeof processedRow.value === 'string' ? JSON.parse(processedRow.value) : processedRow.value;
-        if (Array.isArray(parsed)) processedIds = parsed;
-      } catch {}
-    }
+  const existingLock = parseSettingJson(settingsMap.get(SYNC_LOCK_KEY), null);
+  const lockNow = Date.now();
+  if (existingLock && Number(existingLock.lockedUntil) > lockNow) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'SYNC_IN_PROGRESS',
+      lockedUntil: existingLock.lockedUntil,
+      message: `Another IMAP reply sync (${existingLock.triggerSource || 'active'}) is already in progress.`
+    };
+  }
+
+  const lockId = `lock_${lockNow}_${Math.random().toString(36).slice(2, 8)}`;
+  await upsertSetting(dbClient, SYNC_LOCK_KEY, {
+    lockId,
+    lockedAt: new Date(lockNow).toISOString(),
+    lockedUntil: lockNow + SYNC_LOCK_TTL_MS,
+    triggerSource,
+    caller
+  });
+
+  try {
+    const rawProcessed = parseSettingJson(settingsMap.get(PROCESSED_IDS_KEY), []);
+    const processedIds = Array.isArray(rawProcessed) ? rawProcessed : [];
     const processedSet = new Set(processedIds);
     const initialSize = processedSet.size;
 
     const results = [];
     const seenUidsToMark = [];
 
-    const scanStats = await fetchRecentImapXlsxReplies({
+    const scanStats = await imapFetcher({
       host: imapHost,
       port: imapPort,
       user: smtpUser,
@@ -1224,21 +1598,37 @@ export async function syncEmailRepliesInternal() {
             seenUidsToMark.push(msg.uid);
             continue;
           }
+
+          let allAttachmentsClean = msg.attachments.length > 0;
           for (const att of msg.attachments) {
             try {
-              const applyRes = await applyRmaXlsxUpdates({
+              const applyRes = await applyXlsxFn({
                 buffer: att.buffer,
                 senderEmail: msg.from,
                 subjectHint: msg.subject || '',
                 sourceLabel: msg.from || 'Email Reply .xlsx'
               });
               results.push({ ...applyRes, filename: att.filename, from: msg.from, messageId: msg.messageId });
+              if (applyRes?.skipped || applyRes?.success === false) {
+                allAttachmentsClean = false;
+              }
             } catch (attErr) {
-              results.push({ success: false, error: attErr.message, filename: att.filename, from: msg.from });
+              allAttachmentsClean = false;
+              results.push({
+                success: false,
+                error: attErr?.message || 'Failed applying .xlsx reply update.',
+                filename: att.filename,
+                from: msg.from,
+                messageId: msg.messageId
+              });
             }
           }
-          processedSet.add(dedupeKey);
-          seenUidsToMark.push(msg.uid);
+
+          // Only mark as processed & \Seen if every attachment succeeded (never burn failed or unauthorized replies)
+          if (allAttachmentsClean) {
+            processedSet.add(dedupeKey);
+            seenUidsToMark.push(msg.uid);
+          }
         }
         return seenUidsToMark;
       }
@@ -1246,24 +1636,93 @@ export async function syncEmailRepliesInternal() {
 
     if (seenUidsToMark.length > 0 || processedSet.size !== initialSize) {
       const nextList = Array.from(processedSet).slice(-400);
-      await supabase
-        .from('rma_settings')
-        .upsert({ key: 'processed_reply_message_ids', value: JSON.stringify(nextList) }, { onConflict: 'key' });
+      await upsertSetting(dbClient, PROCESSED_IDS_KEY, nextList);
     }
 
+    const updatedCount = results.filter((r) => r.success && !r.noChanges).length;
+    const noChangesCount = results.filter((r) => r.success && r.noChanges).length;
+    const unauthorizedCount = results.filter((r) => r.reason === 'UNAUTHORIZED_SENDER').length;
+    const errorCount = results.filter((r) => !r.success && r.reason !== 'UNAUTHORIZED_SENDER').length;
+
+    let runStatus = 'idle';
+    if (errorCount > 0 && updatedCount > 0) runStatus = 'partial';
+    else if (errorCount > 0) runStatus = 'error';
+    else if (unauthorizedCount > 0) runStatus = 'unauthorized';
+    else if (updatedCount > 0) runStatus = 'updated';
+    else if (noChangesCount > 0) runStatus = 'no_changes';
+
+    const nowIso = new Date().toISOString();
+    const durationMs = Date.now() - startedAt;
+    const syncStatus = await persistSyncOutcome({
+      dbClient,
+      settingsMap,
+      nowIso,
+      durationMs,
+      triggerSource,
+      caller,
+      runStatus,
+      scanStats,
+      results,
+      processedCount: processedSet.size,
+      includeIdleLogs
+    });
+
     return {
-      success: true,
+      success: errorCount === 0,
+      status: runStatus,
+      triggerSource,
+      durationMs,
       scannedUnseenWithXlsx: scanStats?.messagesWithXlsx || 0,
       scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
-      updatedCount: results.filter((r) => r.success && !r.noChanges).length,
+      updatedCount,
+      noChangesCount,
+      unauthorizedCount,
+      errorCount,
+      syncStatus,
       results
     };
   } catch (err) {
     console.error('[IMAP Reply Sync Error]:', err);
+    const errorInfo = categorizeImapError(err);
+    const nowIso = new Date().toISOString();
+    const durationMs = Date.now() - startedAt;
+    const syncStatus = await persistSyncOutcome({
+      dbClient,
+      settingsMap,
+      nowIso,
+      durationMs,
+      triggerSource,
+      caller,
+      runStatus: 'error',
+      errorInfo,
+      includeIdleLogs: true
+    });
     return {
       success: false,
-      error: err?.message || 'IMAP reply sync encountered a network/auth error.'
+      status: 'error',
+      triggerSource,
+      durationMs,
+      errorCode: errorInfo.code,
+      error: errorInfo.message,
+      diagnosticHint: errorInfo.diagnosticHint,
+      syncStatus
     };
+  } finally {
+    try {
+      const { data: curLockRow } = await dbClient
+        .from('rma_settings')
+        .select('value')
+        .eq('key', SYNC_LOCK_KEY)
+        .maybeSingle();
+      const curLock = parseSettingJson(curLockRow?.value, null);
+      if (!curLock || curLock.lockId === lockId) {
+        await upsertSetting(dbClient, SYNC_LOCK_KEY, {
+          lockId: null,
+          lockedUntil: 0,
+          releasedAt: new Date().toISOString()
+        });
+      }
+    } catch {}
   }
 }
 
@@ -1280,6 +1739,64 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
     });
   }
 
-  const syncResult = await syncEmailRepliesInternal();
-  return res.status(200).json(syncResult);
+  const triggerSource = String(
+    req.query?.source || payload?.source || (auth.callerType === 'cron' ? 'external_cron' : 'admin_manual_or_poll')
+  ).trim();
+  const includeIdleLogs = Boolean(
+    req.query?.includeIdleLogs === '1' ||
+    req.query?.includeIdleLogs === 'true' ||
+    payload?.includeIdleLogs === true
+  );
+  const strictStatus = Boolean(
+    auth.callerType === 'cron' ||
+    req.query?.strict === '1' ||
+    req.query?.strict === 'true'
+  );
+
+  const syncResult = await syncEmailRepliesInternal({
+    triggerSource,
+    caller: auth.actor || auth.callerType || 'unknown',
+    includeIdleLogs
+  });
+
+  const httpStatus =
+    strictStatus && syncResult.configured !== false && syncResult.success === false && !syncResult.skipped
+      ? 502
+      : 200;
+
+  return res.status(httpStatus).json(syncResult);
+}
+
+/**
+ * Admin / Cron diagnostics endpoint (`GET /api/send-email?action=reply-sync-logs`)
+ * returning persisted IMAP sync health status and recent run/error logs.
+ */
+export async function handleGetReplySyncLogs(req, res) {
+  const auth = await authorizeCronOrAdmin(req);
+  if (!auth?.authorized) {
+    return res.status(401).json({
+      success: false,
+      error: 'UNAUTHORIZED',
+      message: 'Unauthorized caller. Provide CRON_SECRET or Admin Bearer JWT.'
+    });
+  }
+
+  const settingsMap = await readSettingsMap(supabase, [
+    SYNC_STATUS_KEY,
+    SYNC_LOGS_KEY,
+    PROCESSED_IDS_KEY
+  ]);
+
+  const statusSummary = parseSettingJson(settingsMap.get(SYNC_STATUS_KEY), null);
+  const rawLogs = parseSettingJson(settingsMap.get(SYNC_LOGS_KEY), []);
+  const logs = Array.isArray(rawLogs) ? rawLogs : [];
+  const rawProcessed = parseSettingJson(settingsMap.get(PROCESSED_IDS_KEY), []);
+  const processedMessageIdCount = Array.isArray(rawProcessed) ? rawProcessed.length : 0;
+
+  return res.status(200).json({
+    success: true,
+    statusSummary,
+    logs,
+    processedMessageIdCount
+  });
 }

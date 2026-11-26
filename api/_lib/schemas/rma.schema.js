@@ -634,12 +634,14 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     security: [{ BearerAuth: [] }],
     request: {
       query: z.object({
-        action: z.enum(['daily-followup', 'daily-matrix', 'sync-email-replies']).openapi({ example: 'daily-followup' }),
+        action: z.enum(['daily-followup', 'daily-matrix', 'sync-email-replies', 'reply-sync-logs']).openapi({ example: 'daily-followup' }),
         respectSchedule: z.enum(['true', 'false', '1']).optional().openapi({ example: 'true' }),
         force: z.enum(['true', 'false', '1']).optional(),
         dryRun: z.enum(['true', 'false', '1']).optional(),
         testMode: z.enum(['true', 'false']).optional(),
-        rmaNumber: z.string().optional()
+        rmaNumber: z.string().optional(),
+        source: z.string().optional(),
+        strict: z.enum(['0', '1', 'true', 'false']).optional()
       })
     },
     responses: {

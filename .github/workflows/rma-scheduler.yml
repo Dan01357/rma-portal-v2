@@ -54,8 +54,8 @@ jobs:
       - name: Sync Incoming .xlsx Email Replies (2-Way Reply Poller)
         if: steps.check.outputs.ready == 'true'
         run: |
-          curl --silent --show-error -X POST \
+          curl --fail --silent --show-error -X POST \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            -d '{"action":"sync-email-replies"}' \
-            "${{ secrets.RMA_PORTAL_URL }}/api/send-email?action=sync-email-replies" || true
+            -d '{"action":"sync-email-replies","source":"github_actions_cron"}' \
+            "${{ secrets.RMA_PORTAL_URL }}/api/send-email?action=sync-email-replies&source=github_actions_cron"

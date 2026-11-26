@@ -77,7 +77,9 @@ function assertXmlWellFormed(xml, label) {
     const isClosing = full.startsWith('</');
     if (isClosing) {
       const top = stack.pop();
-      expect(top, `${label} unexpected closing </${tag}>`).toBe(tag);
+      if (top !== tag) {
+        expect(top, `${label} unexpected closing </${tag}>`).toBe(tag);
+      }
     } else if (!selfClosing) {
       stack.push(tag);
     }
@@ -1145,9 +1147,14 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       await matrixModal.getByRole('button', { name: 'Close', exact: true }).click();
 
       // Verify Customer Hub inbound Excel export has clean workflow headers & zero raw DB snake_case status strings
+      // Fall back to Sandbox Customer RMAs if Live Customer Hub currently has 0 active rows in Supabase
+      if (await page.getByText('0 Returns Active').isVisible().catch(() => false)) {
+        await page.getByRole('button', { name: /Test Mode Sandbox \([1-9]\d*\)/i }).first().click();
+        await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).first().click();
+      }
       const [inboundDl] = await Promise.all([
         page.waitForEvent('download', { timeout: 20_000 }),
-        page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
+        page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).first().click()
       ]);
       const inboundPath = await inboundDl.path();
       const inboundBuf = fs.readFileSync(inboundPath);

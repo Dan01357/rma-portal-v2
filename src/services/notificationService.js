@@ -2162,9 +2162,9 @@ export const notificationService = {
   },
 
   /**
-   * Poll Gmail IMAP UNSEEN replies with edited `.xlsx` attachments and apply RMA updates
+   * Poll Gmail IMAP replies with edited `.xlsx` attachments and apply RMA updates
    */
-  async syncEmailRepliesNow() {
+  async syncEmailRepliesNow({ source = 'admin_auto_poll', includeIdleLogs = false, strict = false } = {}) {
     try {
       let accessToken = '';
       try {
@@ -2175,15 +2175,20 @@ export const notificationService = {
       const headers = { 'Content-Type': 'application/json' };
       if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
-      const res = await fetch('/api/send-email?action=sync-email-replies', {
+      const qs = new URLSearchParams({ action: 'sync-email-replies', source });
+      if (includeIdleLogs) qs.set('includeIdleLogs', '1');
+      if (strict) qs.set('strict', '1');
+
+      const res = await fetch(`/api/send-email?${qs.toString()}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ action: 'sync-email-replies' })
+        body: JSON.stringify({ action: 'sync-email-replies', source, includeIdleLogs })
       });
 
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         return {
+          ...(data && typeof data === 'object' ? data : {}),
           success: false,
           status: res.status,
           error: data?.message || data?.error || `HTTP ${res.status}`
@@ -2192,6 +2197,40 @@ export const notificationService = {
       return data || { success: false, error: 'Empty response from server.' };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Fetch persisted 2-way email reply sync health status & recent execution/error logs
+   */
+  async getEmailReplySyncLogs() {
+    try {
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = {};
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+      const res = await fetch('/api/send-email?action=reply-sync-logs', {
+        method: 'GET',
+        headers
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`,
+          statusSummary: null,
+          logs: []
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.', statusSummary: null, logs: [] };
+    } catch (err) {
+      return { success: false, error: err.message, statusSummary: null, logs: [] };
     }
   },
 

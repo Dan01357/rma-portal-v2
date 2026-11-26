@@ -448,7 +448,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await expect(custRow.getByRole('button', { name: /Case Close/i })).toBeVisible();
 
       // Verify Admin QR studio on multi-item batch RMA also has Consolidated / Per-Item toggle
-      await custRow.locator('button[title*="QR" i], button:has-text("QR")').first().click();
+      await custRow.locator('button[title*="QR" i]').first().click();
       const adminQrModal = page.locator('div.fixed', { hasText: /Print RMA QR Code|Consolidated QR Print Studio/i }).first();
       await expect(adminQrModal).toBeVisible({ timeout: 10_000 });
       await expect(adminQrModal.getByRole('button', { name: /Consolidated \(1 QR per RMA\)/i })).toBeVisible();
@@ -818,6 +818,26 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       });
       expect(syncCheck.status).toBe(200);
       expect(syncCheck.json).toBeTruthy();
+
+      // Assert ?action=reply-sync-logs rejects unauthenticated requests (401) without tripping browser console guard,
+      // and returns structured logs for Admin
+      const unauthLogsRes = await request.get('/api/send-email?action=reply-sync-logs');
+      expect(unauthLogsRes.status()).toBe(401);
+
+      const logsAuthCheck = await page.evaluate(async () => {
+        const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+        const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : '';
+        const authRes = await fetch('/api/send-email?action=reply-sync-logs', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        return {
+          authStatus: authRes.status,
+          json: await authRes.json().catch(() => null)
+        };
+      });
+      expect(logsAuthCheck.authStatus).toBe(200);
+      expect(logsAuthCheck.json?.success).toBe(true);
+      expect(Array.isArray(logsAuthCheck.json?.logs)).toBe(true);
 
       guard.assertClean('Suite 10 Test B Per-Item .xlsx Batch Reply Ingestion & Test Mode Isolation');
     } finally {

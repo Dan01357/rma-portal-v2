@@ -967,11 +967,19 @@ export default function App() {
         if (!session?.access_token || expMs <= Date.now() + 30000) {
           return;
         }
-        const res = await notificationService.syncEmailRepliesNow();
-        if (!cancelled && res?.success && Number(res?.updatedCount) > 0) {
-          refreshAllData();
+        const res = await notificationService.syncEmailRepliesNow({ source: 'admin_auto_poll' });
+        if (!cancelled && res) {
+          try {
+            window.dispatchEvent(new CustomEvent('rma-reply-sync-updated', { detail: res }));
+          } catch {}
+          if (res.success && Number(res.updatedCount) > 0) {
+            refreshAllData();
+          } else if (res.success === false && res.configured !== false && res.error) {
+            console.warn('[Auto Reply Sync Notice]:', res.error);
+          }
         }
-      } catch {
+      } catch (syncErr) {
+        console.warn('[Auto Reply Sync Notice]:', syncErr?.message || syncErr);
       } finally {
         inFlight = false;
       }
