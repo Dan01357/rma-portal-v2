@@ -101,6 +101,16 @@ export default function GatekeeperPinModal({
     onUnlockRef.current = onUnlock;
   }, [onUnlock]);
 
+  // Lock background page scroll while Gatekeeper overlay is active
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
+
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -592,7 +602,7 @@ export default function GatekeeperPinModal({
   const isSupplier = validationResult?.invite?.stream_type === 'supplier_outbound';
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
+    <div className="fixed inset-0 h-dvh w-screen z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden p-6 sm:p-8 space-y-6 text-center">
 
         {/* 1. Loading State */}

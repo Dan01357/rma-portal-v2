@@ -95,7 +95,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await unitSelect.selectOption('pc');
       await itemPhotoInput.setInputFiles({ name: 'pw8a-item1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
       await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest \(1 Item\)/i)).toBeVisible({ timeout: 10_000 });
 
       // Queue Item 2 (active form on submit): 3 case
@@ -909,14 +909,14 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await itemSupplierInput.fill('Supplier A');
       await itemPhotoInput.setInputFiles({ name: 'mix1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
       await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest \(1 Item\)/i)).toBeVisible({ timeout: 10_000 });
 
-      // Edit Item 1 Qty inline inside Queued Return Manifest (2 -> 5) and verify auto-sum updates
+      // Edit Item 1 Qty inline inside Queued Return Manifest (2 -> 5) and verify UOM-grouped auto-sum updates
       const queuedQty1 = page.locator('[data-manifest-item-index="0"] input[type="number"]');
       await expect(queuedQty1).toHaveValue('2');
       await queuedQty1.fill('5');
-      await expect(page.getByText(/Total batch quantity updates automatically \(5 units across 1 item\)/i)).toBeVisible();
+      await expect(page.getByText(/Total batch quantity updates automatically \(5 pcs across 1 item\)/i)).toBeVisible();
 
       // Add Item 2 with a DIFFERENT supplier ("Suysing") & Qty 3 directly via active form
       await barcodeInput.fill(`PW-MIXED-2-${uniq}`);
@@ -1206,28 +1206,31 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await expect(mixedRow).toContainText('8 pcs');
       await expect(mixedRow).toContainText(/Multiple Suppliers \(Supplier A, Suysing\)/i);
 
-      // Verify Cleaned-up Portal Batch Edit UI (QuickRMAActionModal): no single-item top/bottom clutter, collapsed Advanced accordion, editable Qty + per-item Supplier & Emails, sticky Save Changes
+      // Verify Cleaned-up Portal Batch Edit UI (QuickRMAActionModal): merged Edit Details & Documents, collapsed Advanced accordion, editable Qty + Name + Branch + per-item Supplier (no duplicate Supplier Email in Customer Hub), UOM-grouped totals, sticky Save Changes
       await mixedRow.getByRole('button', { name: /Details|Inspect|Split Qty/i }).first().click();
       const quickModal = page.locator('div.fixed', { hasText: 'RMA Details & Quick Actions' }).first();
       await expect(quickModal).toBeVisible({ timeout: 10_000 });
-      await quickModal.getByRole('button', { name: /Edit Batch Qty & Suppliers/i }).click();
+      await expect(quickModal.getByRole('button', { name: /Edit Batch Qty & Suppliers/i })).toHaveCount(0);
+      await quickModal.getByRole('button', { name: /Edit Details & Documents/i }).click();
       await expect(quickModal.getByText('Edit RMA Details')).toBeVisible();
       await expect(quickModal.locator('input[aria-label="Ticket total quantity"]')).toHaveCount(0);
       await expect(quickModal.getByText(/Supplier & Product Expiry Information/i)).toHaveCount(0);
       await expect(quickModal.getByRole('button', { name: /Advanced \/ Danger Zone/i })).toHaveAttribute('aria-expanded', 'false');
-      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('8');
+      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('8 pcs');
+      await expect(quickModal.locator('input[aria-label="Store or customer branch"]')).toBeVisible();
+      await expect(quickModal.locator('input[aria-label="Batch item 1 supplier email To"]')).toHaveCount(0);
 
       const item1QtyEdit = quickModal.locator('input[aria-label="Batch item 1 quantity"]');
       await expect(item1QtyEdit).toHaveValue('5');
       await item1QtyEdit.fill('6');
-      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('9');
+      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('9 pcs');
+      await expect(quickModal.locator('input[aria-label="Batch item 1 name"]')).toBeVisible();
       await expect(quickModal.locator('input[aria-label="Batch item 1 unit"]')).toHaveValue('pc');
       await expect(quickModal.locator('input[aria-label="Batch item 1 SKU"]')).toBeVisible();
       await expect(quickModal.locator('input[aria-label="Batch item 1 unit price"]')).toBeVisible();
-      await quickModal.locator('input[aria-label="Batch item 1 supplier email To"]').fill('claims-supa@pingcon-test.local');
       await expect(quickModal.locator('input[aria-label="Batch item 2 supplier"]')).toHaveValue('Suysing');
       await quickModal.getByRole('button', { name: /Save Changes/i }).click();
-      await expect(quickModal.getByText('Total: 9 Units')).toBeVisible({ timeout: 15_000 });
+      await expect(quickModal.getByText('Total: 9 pcs')).toBeVisible({ timeout: 15_000 });
       await quickModal.getByRole('button', { name: /Done \/ Close/i }).click();
       await expect(quickModal).toBeHidden();
 
@@ -1289,6 +1292,20 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await expect(rtvQrModal.locator('#rma-qr-batch-sheet-root [data-rma-qr-card]')).toHaveCount(2);
       await rtvQrModal.getByRole('button', { name: 'Done', exact: true }).click();
       await expect(rtvQrModal).toBeHidden();
+
+      // Verify Supplier RTV Multi-Item Batch keeps per-item Supplier Name + Email (To/CC) editable cleanly in Edit Details & Documents
+      await rtvRowAlpha.getByRole('button', { name: /Details|Inspect|Split Qty/i }).first().click();
+      const rtvQuickModal = page.locator('div.fixed', { hasText: 'RMA Details & Quick Actions' }).first();
+      await expect(rtvQuickModal).toBeVisible({ timeout: 10_000 });
+      await rtvQuickModal.getByRole('button', { name: /Edit Details & Documents/i }).click();
+      await expect(rtvQuickModal.locator('input[aria-label="Store or customer branch"]')).toHaveCount(0);
+      await expect(rtvQuickModal.locator('input[aria-label="Batch item 1 supplier email To"]')).toBeVisible();
+      await rtvQuickModal.locator('input[aria-label="Batch item 1 supplier email To"]').fill('claims-supa@pingcon-test.local');
+      await rtvQuickModal.getByRole('button', { name: /Save Changes/i }).click();
+      await expect(rtvQuickModal.getByRole('button', { name: /Edit Details & Documents/i })).toBeVisible({ timeout: 15_000 });
+      await expect(rtvQuickModal.getByText('Total: 8 pcs').first()).toBeVisible({ timeout: 15_000 });
+      await rtvQuickModal.getByRole('button', { name: /Done \/ Close/i }).click();
+      await expect(rtvQuickModal).toBeHidden();
 
       // 4. Mirror .xlsx Reply Flow on Mixed-Supplier Batch Qty Edit -> Auto-updates parent quantity & total_quantity
       const parentFetch = await page.evaluate(

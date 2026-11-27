@@ -58,6 +58,7 @@ import {
   getItemNeedsReorder,
   resolveReorderStatus,
   formatDateYmd,
+  formatDateTimeYmdHm,
   doesCreditMemoLinkReport,
   getGpsAddressDisplay,
   getGpsMapUrl,
@@ -182,6 +183,7 @@ export default function QuickRMAActionModal({
   const [adminSiNumber, setAdminSiNumber] = useState('');
   const [adminDrNumber, setAdminDrNumber] = useState('');
   const [adminPoNumber, setAdminPoNumber] = useState('');
+  const [adminStoreBranch, setAdminStoreBranch] = useState('');
   const [adminSupplierName, setAdminSupplierName] = useState('');
   const [adminSupplierEmailTo, setAdminSupplierEmailTo] = useState('');
   const [adminSupplierEmailCc, setAdminSupplierEmailCc] = useState('');
@@ -203,8 +205,10 @@ export default function QuickRMAActionModal({
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const [isAdvancedEditOpen, setIsAdvancedEditOpen] = useState(false);
+  const [isOverviewDangerOpen, setIsOverviewDangerOpen] = useState(false);
   const isEditingAiDetailsRef = useRef(false);
   isEditingAiDetailsRef.current = isEditingAiDetails;
+  const editDetailsSectionRef = useRef(null);
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
 
@@ -818,11 +822,18 @@ export default function QuickRMAActionModal({
     });
   };
 
-  // Reset edit mode & Advanced accordion only when opening modal or switching to a different RMA ticket
+  // Reset edit mode & Advanced accordions only when opening modal or switching to a different RMA ticket
   useEffect(() => {
     setIsEditingAiDetails(false);
     setIsAdvancedEditOpen(false);
+    setIsOverviewDangerOpen(false);
   }, [isOpen, report?.id, report?.rma_number]);
+
+  useEffect(() => {
+    if (isEditingAiDetails && editDetailsSectionRef.current) {
+      editDetailsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [isEditingAiDetails]);
 
   // Synchronize AI-extracted or existing paperwork document details whenever report changes (unless actively editing)
   useEffect(() => {
@@ -850,6 +861,7 @@ export default function QuickRMAActionModal({
       setAdminSiNumber(report.si_number || meta.si_number || '');
       setAdminDrNumber(report.dr_number || report.invoice_dr_number || meta.dr_number || meta.invoice_dr_number || '');
       setAdminPoNumber(report.po_number || meta.po_number || '');
+      setAdminStoreBranch(report.store_branch || '');
       setAdminSupplierName(resolvedInitSupplier);
       const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
       const itemEmailsMap = (followUpMeta.item_emails && typeof followUpMeta.item_emails === 'object') ? followUpMeta.item_emails : {};
@@ -878,11 +890,13 @@ export default function QuickRMAActionModal({
           };
         }));
       }).catch(() => {});
-      setAdminExpiryDate(report.expiry_date ? String(report.expiry_date).slice(0, 10) : '');
+      const rawExpiryVal = report.expiry_date || report.expiration_date;
+      setAdminExpiryDate(rawExpiryVal ? String(rawExpiryVal).slice(0, 10) : '');
 
-      // Advanced override hooks
+      // Advanced override hooks (Date Logged anchored to Asia/Manila PHT)
       setAdminRmaNumber(report.rma_number || '');
-      setAdminCreatedAt(report.created_at ? new Date(report.created_at).toISOString().slice(0, 16) : '');
+      const phtCreated = report.created_at ? formatDateTimeYmdHm(report.created_at) : '';
+      setAdminCreatedAt(phtCreated ? phtCreated.replace(' ', 'T') : '');
       const isTestFlag = Boolean(report.is_test || meta.is_test || (report.notes && report.notes.includes('[TEST_MODE]')));
       setAdminIsTest(isTestFlag);
       setAdminProductName(report.name || '');
@@ -926,7 +940,7 @@ export default function QuickRMAActionModal({
           unit_name: it.unit_name || it.unit || 'pc',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
-          expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
+          expiry_date: (it.expiry_date || it.expiration_date) ? String(it.expiry_date || it.expiration_date).slice(0, 10) : ''
         };
       });
       setEditableManifestItems(mappedManifest);
@@ -955,8 +969,10 @@ export default function QuickRMAActionModal({
     report?.dr_number,
     report?.po_number,
     report?.invoice_dr_number,
+    report?.store_branch,
     report?.supplier_name,
     report?.expiry_date,
+    report?.expiration_date,
     manifestItems,
     savedProductsList
   ]);
@@ -1101,16 +1117,29 @@ export default function QuickRMAActionModal({
     try {
       const isSuperAdminRole = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
       const isAdminOrSuperRole = isSuperAdminRole || currentUser?.role === 'admin' || verifiedAdmin?.role === 'admin';
+      const isSupplierEditStream = report?.rma_type === 'supplier_outbound';
       const cleanSi = adminSiNumber.trim();
       const cleanDr = adminDrNumber.trim();
       const cleanPo = adminPoNumber.trim();
       const primaryDoc = cleanDr || cleanSi || cleanPo || null;
+      const cleanStoreBranch = isSupplierEditStream ? null : (adminStoreBranch.trim() || null);
       const cleanSupplier = adminSupplierName.trim();
       const cleanSupplierEmailTo = adminSupplierEmailTo.trim();
       const cleanSupplierEmailCc = adminSupplierEmailCc.trim();
       const cleanExpiry = adminExpiryDate ? adminExpiryDate.slice(0, 10) : null;
       const cleanRmaNum = isSuperAdminRole && adminRmaNumber.trim() ? adminRmaNumber.trim() : report.rma_number;
-      const cleanCreated = isSuperAdminRole && adminCreatedAt ? new Date(adminCreatedAt).toISOString() : report.created_at;
+      const parseCreatedPht = (rawVal) => {
+        const s = String(rawVal || '').trim();
+        if (!s) return report.created_at;
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s)) {
+          const withSec = s.length === 16 ? `${s}:00` : s;
+          const d = new Date(`${withSec}+08:00`);
+          if (!Number.isNaN(d.getTime())) return d.toISOString();
+        }
+        const fallbackD = new Date(s);
+        return Number.isNaN(fallbackD.getTime()) ? report.created_at : fallbackD.toISOString();
+      };
+      const cleanCreated = isSuperAdminRole && adminCreatedAt ? parseCreatedPht(adminCreatedAt) : report.created_at;
       const parsedNetPrice = parseFloat(adminPrice);
       const safeNetPrice = Number.isFinite(parsedNetPrice) && parsedNetPrice >= 0 ? parsedNetPrice : Number(report.price || 0);
       const parsedVatPrice = parseFloat(adminPriceWithVat);
@@ -1128,6 +1157,7 @@ export default function QuickRMAActionModal({
       const updates = {
         rma_number: cleanRmaNum,
         created_at: cleanCreated,
+        store_branch: cleanStoreBranch,
         si_number: cleanSi || null,
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
@@ -1154,7 +1184,7 @@ export default function QuickRMAActionModal({
           updates.supplier_name = cleanSupplier;
         }
 
-        if (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+        if (isSupplierEditStream && (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc)) {
           baseMeta.follow_up = {
             ...prevFu,
             supplier_email_to: cleanSupplierEmailTo,
@@ -1168,6 +1198,12 @@ export default function QuickRMAActionModal({
               supplier_email_cc: cleanSupplierEmailCc
             };
           }
+          updates.ai_document_metadata = baseMeta;
+        } else if (!isSupplierEditStream && cleanSupplier && Object.keys(prevPu).length > 0 && !isMixedSuppliersSummary(cleanSupplier)) {
+          baseMeta.supplier_pickup = {
+            ...prevPu,
+            supplier_name: cleanSupplier
+          };
           updates.ai_document_metadata = baseMeta;
         }
 
@@ -1223,21 +1259,21 @@ export default function QuickRMAActionModal({
             ? (cleanExpiry || (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null))
             : (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null);
           const itemEmailTo = isSingleOverlay
-            ? String(cleanSupplierEmailTo || it.supplier_email_to || '').trim()
+            ? (isSupplierEditStream ? String(cleanSupplierEmailTo || it.supplier_email_to || '').trim() : String(it.supplier_email_to || '').trim())
             : String(it.supplier_email_to || '').trim();
           const itemEmailCc = isSingleOverlay
-            ? String(cleanSupplierEmailCc || it.supplier_email_cc || '').trim()
+            ? (isSupplierEditStream ? String(cleanSupplierEmailCc || it.supplier_email_cc || '').trim() : String(it.supplier_email_cc || '').trim())
             : String(it.supplier_email_cc || '').trim();
 
           const itemKey = String(it.id || it.barcode || idx);
-          if (itemEmailTo || itemEmailCc || itemEmailsMap[itemKey]) {
+          if (isSupplierEditStream && (itemEmailTo || itemEmailCc || itemEmailsMap[itemKey])) {
             itemEmailsMap[itemKey] = {
               supplier_name: itemSup,
               supplier_email_to: itemEmailTo,
               supplier_email_cc: itemEmailCc
             };
           }
-          if (isRealSupplierName(itemSup) && (itemEmailTo || itemEmailCc)) {
+          if (isSupplierEditStream && isRealSupplierName(itemSup) && (itemEmailTo || itemEmailCc)) {
             dirUpserts.push({
               supplier_name: itemSup,
               supplier_email_to: itemEmailTo,
@@ -1245,8 +1281,13 @@ export default function QuickRMAActionModal({
             });
           }
 
+          const itemBarcode = (isSingleOverlay && isSuperAdminRole && adminBarcode.trim())
+            ? adminBarcode.trim()
+            : (isSuperAdminRole && String(it.barcode || '').trim() ? String(it.barcode).trim() : it.barcode);
+
           return {
             ...it,
+            barcode: itemBarcode,
             name: (isSingleOverlay && adminProductName.trim())
               ? adminProductName.trim()
               : (String(it.name || it.productName || '').trim() || 'Item'),
@@ -1293,18 +1334,20 @@ export default function QuickRMAActionModal({
           const sortedExpiries = updatedItems.map((i) => i.expiry_date).filter(Boolean).sort();
           updates.expiry_date = sortedExpiries[0] || null;
 
-          const distinctTos = Array.from(new Set(updatedItems.map((i) => i.supplier_email_to).filter(Boolean)));
-          const distinctCcs = Array.from(new Set(updatedItems.map((i) => i.supplier_email_cc).filter(Boolean)));
-          baseMeta.follow_up = {
-            ...prevFu,
-            item_emails: itemEmailsMap,
-            ...(distinctTos.length > 0 ? { supplier_email_to: distinctTos.join(', ') } : {}),
-            ...(distinctCcs.length > 0 ? { supplier_email_cc: distinctCcs.join(', ') } : {})
-          };
-          updates.ai_document_metadata = {
-            ...(updates.ai_document_metadata || baseMeta),
-            follow_up: baseMeta.follow_up
-          };
+          if (isSupplierEditStream) {
+            const distinctTos = Array.from(new Set(updatedItems.map((i) => i.supplier_email_to).filter(Boolean)));
+            const distinctCcs = Array.from(new Set(updatedItems.map((i) => i.supplier_email_cc).filter(Boolean)));
+            baseMeta.follow_up = {
+              ...prevFu,
+              item_emails: itemEmailsMap,
+              ...(distinctTos.length > 0 ? { supplier_email_to: distinctTos.join(', ') } : {}),
+              ...(distinctCcs.length > 0 ? { supplier_email_cc: distinctCcs.join(', ') } : {})
+            };
+            updates.ai_document_metadata = {
+              ...(updates.ai_document_metadata || baseMeta),
+              follow_up: baseMeta.follow_up
+            };
+          }
         }
       }
 
@@ -1379,6 +1422,7 @@ export default function QuickRMAActionModal({
               if (cleanRmaNum && cleanRmaNum !== report.rma_number) childPatch.rma_number = cleanRmaNum;
               if (matched) {
                 childPatch.name = matched.name;
+                if (isSuperAdminRole && matched.barcode) childPatch.barcode = matched.barcode;
                 childPatch.code = matched.code || null;
                 childPatch.quantity = matched.quantity;
                 if (matched.unit_name) childPatch.unit_name = matched.unit_name;
@@ -1386,6 +1430,9 @@ export default function QuickRMAActionModal({
                 if (Number.isFinite(matched.price_with_vat)) childPatch.price_with_vat = matched.price_with_vat;
                 if (matched.supplier_name) childPatch.supplier_name = matched.supplier_name;
                 if (matched.expiry_date !== undefined) childPatch.expiry_date = matched.expiry_date || null;
+              }
+              if (updates.store_branch !== undefined) {
+                childPatch.store_branch = updates.store_branch;
               }
               if (Object.keys(childPatch).length > 0 && ch.id) {
                 await supabase.from('rma_reports').update(childPatch).eq('id', ch.id).catch(() => {});
@@ -1424,6 +1471,7 @@ export default function QuickRMAActionModal({
       const updatedReport = {
         ...report,
         ...updates,
+        store_branch: cleanStoreBranch,
         si_number: cleanSi || null,
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
@@ -1431,17 +1479,18 @@ export default function QuickRMAActionModal({
         supplier_name: resolvedSupplierDisplay,
         supplier: resolvedSupplierDisplay,
         expiry_date: isManifestReport ? (updates.expiry_date ?? null) : cleanExpiry,
+        expiration_date: isManifestReport ? (updates.expiry_date ?? null) : cleanExpiry,
         ...(!isManifestReport && adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
       };
 
-      if (!isManifestReport && isRealSupplierName(cleanSupplier) && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
+      if (isSupplierEditStream && !isManifestReport && isRealSupplierName(cleanSupplier) && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
         supplierDirectoryService.upsertFromSubmission({
           supplier_name: cleanSupplier,
           supplier_email_to: cleanSupplierEmailTo,
           supplier_email_cc: cleanSupplierEmailCc
         }).catch(() => {});
-      } else if (dirUpserts.length > 0) {
+      } else if (isSupplierEditStream && dirUpserts.length > 0) {
         dirUpserts.forEach((entry) => {
           supplierDirectoryService.upsertFromSubmission(entry).catch(() => {});
         });
@@ -1515,7 +1564,7 @@ export default function QuickRMAActionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl sm:max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
+      <div className="relative w-full max-w-xl sm:max-w-3xl lg:max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
         {/* Mobile Drag Indicator */}
         <div className="bottom-sheet-handle sm:hidden" />
 
@@ -1527,15 +1576,15 @@ export default function QuickRMAActionModal({
                 <Sparkles className="w-5 h-5 text-amber-300" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm sm:text-lg font-black tracking-tight truncate">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-lg font-black tracking-tight">
                     RMA Details &amp; Quick Actions
                   </h3>
                   <span className="hidden sm:inline-flex text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/20 text-white font-bold shrink-0">
                     {isSupplierStream ? 'Supplier RTV' : 'Customer Hub'}
                   </span>
                 </div>
-                <p className="text-[11px] sm:text-xs text-blue-100 font-medium truncate">
+                <p className="text-[11px] sm:text-xs text-blue-100 font-medium leading-snug">
                   4-Choice Outcome, Split Qty, Documents, Credit Memo &amp; Audit Trail
                 </p>
               </div>
@@ -1706,20 +1755,25 @@ export default function QuickRMAActionModal({
                       <span>{report.barcode || 'N/A'}</span>
                     )}
                   </div>
-                  {(matchedProduct?.code || report.code) && (
+                  {(report.code || report.sku || matchedProduct?.code) && (
                     <div className="font-mono text-[11px] text-blue-600 dark:text-blue-400">
-                      SKU: {matchedProduct?.code || report.code}
+                      SKU: {report.code || report.sku || matchedProduct?.code}
                     </div>
                   )}
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Product Name</span>
-                  <div className="font-bold text-slate-900 dark:text-white truncate" title={report.name || report.product_name}>
-                    {matchedProduct?.name || report.name || report.product_name || `Barcode ${report.barcode}`}
+                  <div className="font-bold text-slate-900 dark:text-white break-words leading-snug" title={report.name || report.product_name}>
+                    {report.name || report.product_name || matchedProduct?.name || `Barcode ${report.barcode}`}
                   </div>
                   <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                    Qty: <strong>{itemQty} {report.unit_name || 'pc'}</strong>
+                    Qty:{' '}
+                    <strong>
+                      {isMultiItemManifest
+                        ? formatManifestBreakdown(manifestItems.length > 0 ? manifestItems : (Array.isArray(report.items) ? report.items : []), false)
+                        : `${itemQty} ${report.unit_name || 'pc'}`}
+                    </strong>
                   </div>
                 </div>
 
@@ -1739,7 +1793,7 @@ export default function QuickRMAActionModal({
                 </div>
               </div>
 
-              {/* Multi-item Manifest List (Summary + Quick Edit Trigger) */}
+              {/* Multi-item Manifest List (Read-only summary; edited via Edit Details & Documents below) */}
               {(() => {
                 const displayItems = manifestItems.length > 0
                   ? manifestItems
@@ -1752,30 +1806,19 @@ export default function QuickRMAActionModal({
                         <Package className="w-3.5 h-3.5 text-blue-600" />
                         <span>Multi-Item Return Manifest ({displayItems.length} Line Items)</span>
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
-                          Total: {sumManifestQuantity(displayItems, report.total_quantity || report.quantity)} Units
-                        </span>
-                        {isAdminOrSuper && (
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingAiDetails(true)}
-                            className="px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-black cursor-pointer"
-                          >
-                            ✏️ Edit Batch Qty &amp; Suppliers
-                          </button>
-                        )}
-                      </div>
+                      <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
+                        Total: {formatManifestBreakdown(displayItems, false)}
+                      </span>
                     </div>
                     <div className="space-y-1.5">
                       {displayItems.map((it, idx) => (
-                        <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
-                            <div className="font-mono text-[10px] text-slate-500 truncate flex items-center gap-1.5 flex-wrap">
+                        <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="font-extrabold text-slate-900 dark:text-white break-words leading-snug">{it.name || it.productName}</div>
+                            <div className="font-mono text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                               <span>BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}</span>
                               {isRealSupplierName(it.supplier_name || it.supplierName || it.supplier) && (
-                                <span className="font-sans px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800">
+                                <span className="font-sans px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800 break-words">
                                   Supplier: {it.supplier_name || it.supplierName || it.supplier}
                                 </span>
                               )}
@@ -1852,16 +1895,18 @@ export default function QuickRMAActionModal({
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
-                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
-                    </button>
-                  </div>
+                  {!isEditingAiDetails && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingAiDetails(true)}
+                        className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit Details &amp; Documents</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
@@ -1930,16 +1975,16 @@ export default function QuickRMAActionModal({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Supplier:</span>
-                        <strong className={`truncate ${adminSupplierName || report.supplier_name ? 'text-slate-800 dark:text-slate-200' : 'text-amber-600 dark:text-amber-400'}`}>
+                      <div className="flex items-start gap-1.5 min-w-0">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold shrink-0">Supplier:</span>
+                        <strong className={`break-words ${adminSupplierName || report.supplier_name ? 'text-slate-800 dark:text-slate-200' : 'text-amber-600 dark:text-amber-400'}`}>
                           {adminSupplierName || report.supplier_name || 'Pending Assignment'}
                         </strong>
                       </div>
-                      {report.rma_type !== 'supplier_outbound' && report.store_branch && report.store_branch !== 'Direct Return' && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
-                          <strong className="text-slate-800 dark:text-slate-200 truncate">{report.store_branch}</strong>
+                      {report.rma_type !== 'supplier_outbound' && (adminStoreBranch || (report.store_branch && report.store_branch !== 'Direct Return')) && (
+                        <div className="flex items-start gap-1.5 min-w-0">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold shrink-0">Store Branch:</span>
+                          <strong className="text-slate-800 dark:text-slate-200 break-words">{adminStoreBranch || report.store_branch}</strong>
                         </div>
                       )}
                       {report.batch_lot_number && (
@@ -1948,10 +1993,10 @@ export default function QuickRMAActionModal({
                           <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{report.batch_lot_number}</strong>
                         </div>
                       )}
-                      {(adminExpiryDate || report.expiry_date) && (
+                      {(adminExpiryDate || report.expiry_date || report.expiration_date) && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
-                          <strong className="text-rose-600 dark:text-rose-400 font-bold">{formatDateYmd(adminExpiryDate || report.expiry_date) || adminExpiryDate || report.expiry_date}</strong>
+                          <strong className="text-rose-600 dark:text-rose-400 font-bold">{formatDateYmd(adminExpiryDate || report.expiry_date || report.expiration_date) || adminExpiryDate || report.expiry_date || report.expiration_date}</strong>
                         </div>
                       )}
                       {(() => {
@@ -1984,14 +2029,14 @@ export default function QuickRMAActionModal({
 
                 {/* Edit RMA Details Panel */}
                 {isEditingAiDetails && (
-                  <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-4 animate-in fade-in shadow-md">
+                  <div ref={editDetailsSectionRef} className="p-3.5 sm:p-4 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-4 animate-in fade-in shadow-md">
                     <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
                       <div className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                         <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                         <span>Edit RMA Details</span>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
-                        {isSuperAdmin ? 'Super Admin' : 'Admin'}
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        {isSupplierStream ? 'Supplier RTV Stream' : 'Customer Hub Stream'}
                       </span>
                     </div>
 
@@ -2004,7 +2049,7 @@ export default function QuickRMAActionModal({
                     {editableManifestItems.length > 1 ? (
                       <>
                         {/* Read-only Batch Summary Bar */}
-                        <div className="grid grid-cols-3 gap-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs">
                           <div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Items</div>
                             <div className="font-black text-slate-900 dark:text-white">{editableManifestItems.length} Line Items</div>
@@ -2012,7 +2057,7 @@ export default function QuickRMAActionModal({
                           <div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Qty</div>
                             <div data-testid="batch-summary-total-qty" className="font-mono font-black text-indigo-700 dark:text-indigo-300">
-                              {sumManifestQuantity(editableManifestItems, 1)}
+                              {formatManifestBreakdown(editableManifestItems, false)}
                             </div>
                           </div>
                           <div>
@@ -2034,9 +2079,6 @@ export default function QuickRMAActionModal({
                             <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
                               Batch Line Items ({editableManifestItems.length} Items)
                             </span>
-                            <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
-                              Total Qty: {sumManifestQuantity(editableManifestItems, 1)}
-                            </span>
                           </div>
                           <div className="space-y-2.5">
                             {editableManifestItems.map((it, idx) => {
@@ -2046,12 +2088,12 @@ export default function QuickRMAActionModal({
                                 : ((Number(it.price_with_vat || 0) || (Number(it.price || 0) * 1.12)) * Number(it.quantity || 1));
                               return (
                                 <div key={idx} className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5 shadow-2xs">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-black text-slate-900 dark:text-slate-100 truncate">
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <span className="text-xs font-black text-slate-900 dark:text-slate-100 break-words leading-snug">
                                       #{idx + 1}: {it.name || it.barcode}
                                     </span>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                      <span className="text-[10px] font-mono text-slate-400">
+                                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                      <span className="text-[10px] font-mono text-slate-500">
                                         BC: {it.barcode}
                                       </span>
                                       {lineSubtotal > 0 && (
@@ -2059,6 +2101,36 @@ export default function QuickRMAActionModal({
                                           {formatPeso(lineSubtotal)}
                                         </span>
                                       )}
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                                    <div className="sm:col-span-8">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} name`}
+                                        value={it.name || ''}
+                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { name: e.target.value, productName: e.target.value })}
+                                        placeholder="Product description..."
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                                      />
+                                    </div>
+                                    <div className="sm:col-span-4">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} barcode`}
+                                        value={it.barcode || ''}
+                                        readOnly={!isSuperAdmin}
+                                        disabled={!isSuperAdmin}
+                                        onChange={(e) => isSuperAdmin && handleUpdateEditableManifestItem(idx, { barcode: e.target.value })}
+                                        className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold ${
+                                          isSuperAdmin
+                                            ? 'bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                                            : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
+                                        }`}
+                                      />
                                     </div>
                                   </div>
 
@@ -2161,30 +2233,33 @@ export default function QuickRMAActionModal({
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
-                                      <input
-                                        type="text"
-                                        aria-label={`Batch item ${idx + 1} supplier email To`}
-                                        value={it.supplier_email_to || ''}
-                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_to: e.target.value })}
-                                        placeholder="claims@supplier.com (auto-fills from Directory)"
-                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
-                                      />
+                                  {/* Per-item Supplier Emails strictly in Supplier RTV mode (Customer Hub uses "Edit Supplier & Email") */}
+                                  {isSupplierStream && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
+                                        <input
+                                          type="text"
+                                          aria-label={`Batch item ${idx + 1} supplier email To`}
+                                          value={it.supplier_email_to || ''}
+                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_to: e.target.value })}
+                                          placeholder="claims@supplier.com (auto-fills)"
+                                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
+                                        <input
+                                          type="text"
+                                          aria-label={`Batch item ${idx + 1} supplier email CC`}
+                                          value={it.supplier_email_cc || ''}
+                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_cc: e.target.value })}
+                                          placeholder="coordinator@supplier.com (optional)"
+                                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
+                                        />
+                                      </div>
                                     </div>
-                                    <div>
-                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
-                                      <input
-                                        type="text"
-                                        aria-label={`Batch item ${idx + 1} supplier email CC`}
-                                        value={it.supplier_email_cc || ''}
-                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_cc: e.target.value })}
-                                        placeholder="coordinator@supplier.com (Optional)"
-                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
-                                      />
-                                    </div>
-                                  </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -2193,22 +2268,22 @@ export default function QuickRMAActionModal({
                       </>
                     ) : (
                       /* Single-Item Product & Catalog Specifications */
-                      <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+                      <div className="space-y-2.5 p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
                         <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           Product &amp; Catalog Specifications
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
-                            <ProductAutoSuggest
-                              mode="name"
-                              value={adminProductName}
-                              onChange={(val) => setAdminProductName(val)}
-                              onSelectProduct={handleAutoPopulateEditDetails}
-                              placeholder="Type product name to search catalog..."
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                            />
-                          </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
+                          <ProductAutoSuggest
+                            mode="name"
+                            value={adminProductName}
+                            onChange={(val) => setAdminProductName(val)}
+                            onSelectProduct={handleAutoPopulateEditDetails}
+                            placeholder="Type product name to search catalog..."
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
                             <input
@@ -2224,8 +2299,6 @@ export default function QuickRMAActionModal({
                               }`}
                             />
                           </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
                             <ProductAutoSuggest
@@ -2254,7 +2327,7 @@ export default function QuickRMAActionModal({
                                     setAdminQuantity(e.target.value);
                                   }
                                 }}
-                                className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
+                                className={`w-20 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
                                   isAdminOrSuper
                                     ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
                                     : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
@@ -2265,7 +2338,7 @@ export default function QuickRMAActionModal({
                                 value={adminUnitName}
                                 onChange={(e) => setAdminUnitName(e.target.value)}
                                 placeholder="pc, case"
-                                className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                                className="w-full min-w-0 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                               />
                             </div>
                           </div>
@@ -2329,6 +2402,21 @@ export default function QuickRMAActionModal({
                       </div>
                     </div>
 
+                    {/* Customer Hub Store / Branch (Customer Inbound only) */}
+                    {!isSupplierStream && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">Store / Customer Branch</label>
+                        <input
+                          type="text"
+                          aria-label="Store or customer branch"
+                          value={adminStoreBranch}
+                          onChange={(e) => setAdminStoreBranch(e.target.value)}
+                          placeholder="e.g. Store branch or outlet (Optional)"
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                        />
+                      </div>
+                    )}
+
                     {/* Single-Item Supplier & Product Expiry Information (hidden for Batch RMAs) */}
                     {editableManifestItems.length <= 1 && (
                       <div className="space-y-1">
@@ -2351,7 +2439,7 @@ export default function QuickRMAActionModal({
                                   setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
                                 }
                               }}
-                              placeholder="e.g. Suy Sing Commercial Corp, Mondelez, URC..."
+                              placeholder="e.g. Suy Sing Commercial Corp"
                               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
                           </div>
@@ -2364,26 +2452,30 @@ export default function QuickRMAActionModal({
                               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
-                            <input
-                              type="text"
-                              value={adminSupplierEmailTo}
-                              onChange={(e) => setAdminSupplierEmailTo(e.target.value)}
-                              placeholder="claims@supplier.com (auto-fills from Directory)"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
-                            <input
-                              type="text"
-                              value={adminSupplierEmailCc}
-                              onChange={(e) => setAdminSupplierEmailCc(e.target.value)}
-                              placeholder="coordinator@supplier.com (Optional)"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
-                            />
-                          </div>
+                          {isSupplierStream && (
+                            <>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
+                                <input
+                                  type="text"
+                                  value={adminSupplierEmailTo}
+                                  onChange={(e) => setAdminSupplierEmailTo(e.target.value)}
+                                  placeholder="claims@supplier.com (auto-fills)"
+                                  className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
+                                <input
+                                  type="text"
+                                  value={adminSupplierEmailCc}
+                                  onChange={(e) => setAdminSupplierEmailCc(e.target.value)}
+                                  placeholder="coordinator@supplier.com (optional)"
+                                  className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                                />
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
@@ -2465,7 +2557,7 @@ export default function QuickRMAActionModal({
                               </div>
                               <div>
                                 <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
-                                  Date Logged
+                                  Date Logged (PHT)
                                 </label>
                                 <input
                                   type="datetime-local"
@@ -2593,15 +2685,18 @@ export default function QuickRMAActionModal({
             </div>
           )}
 
-          {/* 5. Authenticated Admin Actions */}
-          {report && verifiedAdmin && (
+          {/* 5. Authenticated Admin Actions (hidden in focused Edit RMA Details mode) */}
+          {!isEditingAiDetails && report && verifiedAdmin && (
             <div className="space-y-3">
               {/* Verified Admin Strip */}
-              <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+              <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 flex-wrap text-emerald-800 dark:text-emerald-300 min-w-0">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="font-bold">
-                    Authenticated: {verifiedAdmin.name} ({verifiedAdmin.role === 'super_admin' ? '👑 Super Admin' : verifiedAdmin.isGateAuthorized ? '📦 Authorized Staff' : '🛡️ Admin'})
+                  <span className="font-bold break-words">
+                    Authenticated: {String(verifiedAdmin.name || '').replace(/\s*\((?:Super\s*)?Admin\)\s*$/i, '').trim() || verifiedAdmin.name}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/70 border border-emerald-300 dark:border-emerald-700 text-[10px] font-black whitespace-nowrap">
+                    {verifiedAdmin.role === 'super_admin' ? '👑 Super Admin' : verifiedAdmin.isGateAuthorized ? '📦 Authorized Staff' : '🛡️ Admin'}
                   </span>
                 </div>
                 {!verifiedAdmin.isGateAuthorized && (
@@ -2745,39 +2840,8 @@ export default function QuickRMAActionModal({
                   report={report}
                   catalogProducts={savedProductsList}
                   compact={true}
+                  onResetTimeline={null}
                   isResettingTimeline={isFollowUpBusy}
-                  onResetTimeline={async () => {
-                    if (!report) return;
-                    if (
-                      typeof window !== 'undefined' &&
-                      !window.confirm(`Reset the full 4-step workflow timeline, 10-calendar-day countdown, and disposition outcome for ${report.rma_number} back to Pending?`)
-                    ) {
-                      return;
-                    }
-                    setIsFollowUpBusy(true);
-                    setFollowUpFeedback(null);
-                    try {
-                      const updated = await catalogService.resetReportToPending(
-                        report.id,
-                        report.rma_number,
-                        verifiedAdmin?.name || currentUser?.name || 'Admin'
-                      );
-                      setReport(updated);
-                      onReportUpdated?.(updated);
-                      onRefresh?.(updated);
-                      setFollowUpFeedback({
-                        type: 'success',
-                        text: `Timeline, 10-day countdown & disposition outcome reset to Pending for ${report.rma_number}.`
-                      });
-                      } catch (e) {
-                      setFollowUpFeedback({
-                        type: 'error',
-                        text: e?.message || 'Failed resetting timeline to Pending.'
-                      });
-                    } finally {
-                      setIsFollowUpBusy(false);
-                    }
-                  }}
                 />
               </div>
 
@@ -3184,7 +3248,7 @@ export default function QuickRMAActionModal({
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {existingMemo
                             ? `₱${Number(existingMemo.credit_amount || existingMemo.amount || 0).toFixed(2)} credited by ${existingMemo.credit_issued_by || 'Finance'}`
-                            : `Total Claim: ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${itemQty} unit${itemQty > 1 ? 's' : ''})`}
+                            : `Total Claim: ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${isMultiItemManifest ? formatManifestBreakdown(manifestItems.length > 0 ? manifestItems : (Array.isArray(report?.items) ? report.items : []), false) : `${itemQty} ${report?.unit_name || 'pc'}`})`}
                         </p>
                       </div>
                     </div>
@@ -3288,6 +3352,78 @@ export default function QuickRMAActionModal({
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
                 <RMATimelineAudit report={report} creditMemosList={creditMemosList} />
               </div>
+
+              {/* (h) Collapsed Advanced / Danger Zone (Workflow Reset isolated from routine actions) */}
+              {isAdminOrSuper && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setIsOverviewDangerOpen((v) => !v)}
+                    aria-expanded={isOverviewDangerOpen}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between gap-2 text-xs font-black text-slate-700 dark:text-slate-200 cursor-pointer transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>Advanced / Danger Zone</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                      <span>Workflow Reset</span>
+                      {isOverviewDangerOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+                    </span>
+                  </button>
+                  {isOverviewDangerOpen && (
+                    <div className="p-3 bg-white dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-0.5 text-xs min-w-0 flex-1">
+                        <div className="font-bold text-slate-900 dark:text-white">Reset 4-Step Workflow &amp; 10-Day Countdown</div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Clears disposition &amp; pickup logs back to Pending while preserving supplier name and emails.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isFollowUpBusy}
+                        onClick={async () => {
+                          if (!report) return;
+                          if (
+                            typeof window !== 'undefined' &&
+                            !window.confirm(`Reset the full 4-step workflow timeline, 10-calendar-day countdown, and disposition outcome for ${report.rma_number} back to Pending?`)
+                          ) {
+                            return;
+                          }
+                          setIsFollowUpBusy(true);
+                          setFollowUpFeedback(null);
+                          try {
+                            const updated = await catalogService.resetReportToPending(
+                              report.id,
+                              report.rma_number,
+                              verifiedAdmin?.name || currentUser?.name || 'Admin'
+                            );
+                            setReport(updated);
+                            onReportUpdated?.(updated);
+                            onRefresh?.(updated);
+                            setFollowUpFeedback({
+                              type: 'success',
+                              text: `Timeline, 10-day countdown & disposition outcome reset to Pending for ${report.rma_number}.`
+                            });
+                          } catch (e) {
+                            setFollowUpFeedback({
+                              type: 'error',
+                              text: e?.message || 'Failed resetting timeline to Pending.'
+                            });
+                          } finally {
+                            setIsFollowUpBusy(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700 text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                        title="Reset full 4-step workflow timeline, 10-day countdown & disposition outcome back to Pending"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isFollowUpBusy ? 'animate-spin' : ''}`} />
+                        <span>{isFollowUpBusy ? 'Resetting...' : 'Reset Timeline'}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

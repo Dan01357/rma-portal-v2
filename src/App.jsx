@@ -2572,9 +2572,9 @@ export default function App() {
     }
 
     let isCurrent = true;
+    setIsCheckingBarcode(true);
 
     const timer = setTimeout(async () => {
-      setIsCheckingBarcode(true);
       try {
         const found = await catalogService.findProduct(clean);
         // Guard against race conditions: only update if this request is still the active one
@@ -3495,16 +3495,16 @@ export default function App() {
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-extrabold text-xs text-slate-900 dark:text-white truncate">
+                    <span className="font-extrabold text-xs text-slate-900 dark:text-white leading-tight break-words">
                       {gateSession ? (gateSession.profileName || 'Station Active') : 'Customer & Warehouse Returns'}
                     </span>
-                    {gateSession && (
+                    {gateSession?.slug && (
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shrink-0">
                         /{gateSession.slug}
                       </span>
                     )}
                   </div>
-                  {sessionCountdown.text ? (
+                  {sessionCountdown.text && !gateSession ? (
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all ${sessionCountdown.totalSeconds < 300
                         ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
@@ -3974,7 +3974,7 @@ export default function App() {
                             </span>
                           )}
                         </div>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-snug break-words">
                           {gateSession.stream_type === 'supplier_outbound'
                             ? `Authorized Supplier Return to Vendor (RTV)${gateSession.is_test ? ' • Test Sandbox Only' : ''}`
                             : 'Customer Return Authorization'}
@@ -4004,8 +4004,8 @@ export default function App() {
                       <span>1. Return Item Details</span>
                     </label>
                     {manifestItems.length > 0 && (
-                      <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60 border border-blue-200 dark:border-blue-800 px-2.5 py-0.5 rounded-full">
-                        {manifestItems.length} {manifestItems.length === 1 ? 'item' : 'items'} in manifest
+                      <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60 border border-blue-200 dark:border-blue-800 px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                        {manifestItems.length} queued{barcodeInput.trim() ? ' + 1 active' : ''}
                       </span>
                     )}
                   </div>
@@ -4077,18 +4077,18 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Quantity Stepper & Unit Selector on a spacious secondary row */}
-                    <div className="flex items-center justify-between gap-3 pt-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Qty:</span>
+                    {/* Quantity Stepper & Unit Selector on a responsive row */}
+                    <div className="flex flex-wrap items-center justify-between gap-2.5 pt-0.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400 shrink-0">Qty:</span>
                         <div className="flex items-center border-2 border-slate-300 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 p-1 focus-within:border-blue-600 shadow-2xs">
                           <button
                             type="button"
                             onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 1) - 1))}
-                            className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
+                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
                             title="Decrease quantity (-1)"
                           >
-                            <Minus className="w-5 h-5" />
+                            <Minus className="w-4 h-4 sm:w-5 sm:h-5" />
                           </button>
                           <input
                             type="number"
@@ -4110,27 +4110,27 @@ export default function App() {
                               const q = Math.max(1, parseInt(quantity, 10) || 1);
                               setQuantity(q);
                             }}
-                            className="w-14 text-center text-sm font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="w-12 sm:w-14 text-center text-sm font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             title="Directly enter return quantity"
                           />
                           <button
                             type="button"
                             onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 0) + 1))}
-                            className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
+                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
                             title="Increase quantity (+1)"
                           >
-                            <Plus className="w-5 h-5" />
+                            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                           </button>
                         </div>
                       </div>
 
-                      {/* Unit Dropdown Selector: pc, box, carton, case */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Unit:</span>
+                      {/* Unit Dropdown Selector: pc, case */}
+                      <div className="flex items-center gap-2 min-w-0 max-w-full">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400 shrink-0">Unit:</span>
                         <select
                           value={unitName}
                           onChange={(e) => setUnitName(e.target.value)}
-                          className="px-3 py-2 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs h-[44px]"
+                          className="min-w-0 max-w-full px-3 py-2 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs h-[44px]"
                           title="Select unit: pc (piece) or case"
                         >
                           <option value="pc">pc (piece)</option>
@@ -4174,14 +4174,23 @@ export default function App() {
                   </div>
 
                   {/* Per-Item Supplier Name (Supplier RTV mode only) */}
-                  {isSupplierRtvPortal && (
+                  {isSupplierRtvPortal && (() => {
+                    const isInviteSupplierPrefilled = Boolean(
+                      gateSession?.stream_type === 'supplier_outbound' &&
+                      inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch)
+                    );
+                    return (
                     <div className="space-y-1.5 pt-1">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
                         <label htmlFor="intake-item-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                          Supplier Name (Optional)
+                          {isInviteSupplierPrefilled ? 'Supplier Name' : 'Supplier Name (Optional)'}
                         </label>
-                        {itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
-                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full">
+                        {isInviteSupplierPrefilled ? (
+                          <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 px-2 py-0.5 rounded-full whitespace-nowrap">
+                            Auto-Populated via RTV Invite
+                          </span>
+                        ) : itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full whitespace-nowrap">
                             Per-item supplier set
                           </span>
                         ) : (
@@ -4212,7 +4221,8 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Recognized Product Banner */}
                   {isCheckingBarcode ? (
@@ -4285,21 +4295,16 @@ export default function App() {
                         ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
                         : 'bg-slate-50/80 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700'
                       }`}>
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
                         <label className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                          <Calendar className={`w-4 h-4 ${expiryDate ? 'text-emerald-600 dark:text-emerald-400' : isSupplierRtvPortal ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`} />
+                          <Calendar className={`w-4 h-4 shrink-0 ${expiryDate ? 'text-emerald-600 dark:text-emerald-400' : isSupplierRtvPortal ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`} />
                           <span>
-                            Product Expiration Date (YYYY-MM-DD){' '}
+                            Product Expiration Date{' '}
                             {isSupplierRtvPortal && <span className="text-rose-500 font-black">*</span>}
                           </span>
                         </label>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {expiryDate && (
-                            <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                              ISO (YYYY-MM-DD): {formatDateYmd(expiryDate) || expiryDate}
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${expiryDate
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap ${expiryDate
                             ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
                             : isSupplierRtvPortal
                               ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
@@ -4357,15 +4362,15 @@ export default function App() {
 
                   {/* Optional Damaged Product Photo for this line item */}
                   <div className="space-y-2 pt-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-rose-500" />
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-1.5 min-w-0">
+                        <Camera className="w-4 h-4 text-rose-500 shrink-0" />
                         <span>Damaged Product Photo</span>
-                        <span className="text-[9px] font-black text-rose-700 bg-rose-100 dark:bg-rose-950/70 dark:text-rose-300 px-2 py-0.5 rounded-full border border-rose-300 dark:border-rose-800">
+                        <span className="text-[9px] font-black text-rose-700 bg-rose-100 dark:bg-rose-950/70 dark:text-rose-300 px-2 py-0.5 rounded-full border border-rose-300 dark:border-rose-800 whitespace-nowrap shrink-0">
                           Required *
                         </span>
                       </span>
-                      <span className="text-[10px] text-slate-400 font-bold">
+                      <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap">
                         {photoFiles.length}/10 photos
                       </span>
                     </div>
@@ -4440,15 +4445,15 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Add Another Item to Return Button */}
+                  {/* Add Another Item to Return Button (secondary outlined style so primary Submit Return remains unambiguous) */}
                   <div className="pt-2">
                     <button
                       type="button"
                       onClick={handleAddManifestItem}
-                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-indigo-600/25 transition-all active:scale-[0.99] cursor-pointer"
+                      className="w-full py-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-200 border-2 border-indigo-300 dark:border-indigo-700 font-extrabold text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-2xs transition-all active:scale-[0.99] cursor-pointer"
                     >
-                      <Plus className="w-4 h-4" />
-                      <span>+ Add Another Item to Return</span>
+                      <Plus className="w-4 h-4 shrink-0" />
+                      <span>Add Another Item to Return</span>
                     </button>
                   </div>
                 </div>
@@ -4491,7 +4496,7 @@ export default function App() {
                                 </div>
                               )}
                               <div className="min-w-0">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white break-words leading-snug">
                                   {item.name}
                                 </div>
                                 <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
@@ -4503,7 +4508,7 @@ export default function App() {
                                   </span>
                                   {item.expiry_date && (
                                     <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
-                                      Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                                      Expiry Date: {formatDateYmd(item.expiry_date) || item.expiry_date}
                                     </span>
                                   )}
                                   <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
@@ -4558,16 +4563,16 @@ export default function App() {
                             </div>
 
                             {isSupplierRtvPortal && (
-                              <div className="sm:col-span-7 flex items-center gap-1.5 min-w-0">
+                              <div className="sm:col-span-7 flex flex-col xs:flex-row sm:flex-row sm:items-center gap-1 sm:gap-1.5 min-w-0">
                                 <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Supplier:</span>
-                                <div className="flex-1 min-w-0">
+                                <div className="flex-1 min-w-0 w-full">
                                   <SupplierInput
                                     id={`manifest-item-supplier-${idx}`}
                                     name={`manifestItemSupplier_${idx}`}
                                     value={!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : ''}
                                     onChange={(val) => handleUpdateManifestItem(item.id, { supplier_name: val })}
                                     placeholder="Supplier name (optional)"
-                                    className="w-full px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
+                                    className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
                                   />
                                 </div>
                               </div>
@@ -4577,7 +4582,7 @@ export default function App() {
                       ))}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                      💡 All queued items will be bundled under ONE RMA Box Label & tracking number. Total batch quantity updates automatically ({sumManifestQuantity(manifestItems, 0)} units across {manifestItems.length} item{manifestItems.length === 1 ? '' : 's'}).
+                      💡 All queued items will be bundled under ONE RMA Box Label &amp; tracking number. Total batch quantity updates automatically ({formatManifestBreakdown(manifestItems, false)} across {manifestItems.length} item{manifestItems.length === 1 ? '' : 's'}).
                     </p>
                   </div>
                 )}
@@ -4610,21 +4615,21 @@ export default function App() {
                     }`}>
                     <div>
                       {/* Header Row */}
-                      <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="p-2 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-xs shrink-0">
                             <FileText className="w-4 h-4" />
                           </div>
                           <div className="min-w-0">
-                            <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">
+                            <h4 className="text-xs font-black text-slate-900 dark:text-white leading-snug">
                               DR / Invoice / PO Paperwork
                             </h4>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
                               Auto-verified by Gemini Flash AI
                             </p>
                           </div>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${paperworkPhotos.length > 0
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 whitespace-nowrap ${paperworkPhotos.length > 0
                           ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
                           : 'bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
                           }`}>
@@ -4835,14 +4840,16 @@ export default function App() {
                 </div>
 
                 {/* 3. COMPANY / STORE NAME (CUSTOMER INTAKE ONLY — SUPPLIER RTV USES PER-ITEM SUPPLIER ABOVE) */}
-                {!isSupplierRtvPortal && (
+                {!isSupplierRtvPortal && (() => {
+                  const hasCustomerInviteBranch = Boolean(inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch));
+                  return (
                   <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                         <Building className="w-4 h-4 text-blue-600" />
-                        <span>3. Company / Store Name (Optional)</span>
+                        <span>{hasCustomerInviteBranch ? '3. Company / Store Name' : '3. Company / Store Name (Optional)'}</span>
                       </label>
-                      {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
+                      {hasCustomerInviteBranch ? (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800">
                           <CheckCircle className="w-3 h-3" />
                           <span>Auto-Populated via Customer Invite</span>
@@ -4880,11 +4887,14 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                      Optional: Enter your company or store name, or leave blank / type N/A if not applicable.
-                    </p>
+                    {!hasCustomerInviteBranch && (
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Optional: Enter your company or store name, or leave blank / type N/A if not applicable.
+                      </p>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* REPORTER CONTACT INFORMATION */}
                 <div className="space-y-2">
@@ -4932,8 +4942,8 @@ export default function App() {
                       />
                       {gateSession?.authorized_email && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>✓ Verified Google Identity ({gateSession.authorized_email})</span>
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Verified Google Identity ({gateSession.authorized_email})</span>
                         </div>
                       )}
                     </div>
@@ -6221,8 +6231,8 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed bottom-6 right-6 z-[120] animate-in fade-in slide-in-from-bottom-3">
-          <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed top-4 right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
+          <div className={`pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
             : toastMessage.type === 'warning'
               ? 'bg-amber-50 border-amber-300 text-amber-900'

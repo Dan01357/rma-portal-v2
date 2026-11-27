@@ -255,16 +255,27 @@ export const purchaseOrdersApi = {
     // Backend SQL is case-sensitive. Try exact code variations:
     const codeCandidates = Array.from(new Set([clean, clean.toUpperCase(), clean.toLowerCase()]));
 
+    const fetchWithTimeout = async (url) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      try {
+        return await fetch(url, {
+          headers: {
+            'X-API-Key': key,
+            'Accept': 'application/json'
+          },
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     for (const code of codeCandidates) {
       try {
         // 1. FIRST PRIORITY: Direct equality lookup on ean_code (Manufacturer / Retail Barcode!): ?ean_code=...
         const eanUrl = `${BASE_URL}/data/erply_products?ean_code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const resEan = await fetch(eanUrl, {
-          headers: {
-            'X-API-Key': key,
-            'Accept': 'application/json'
-          }
-        });
+        const resEan = await fetchWithTimeout(eanUrl);
 
         if (resEan.status === 401) {
           markUnauthorized();
@@ -280,12 +291,7 @@ export const purchaseOrdersApi = {
 
         // 2. SECOND PRIORITY: Direct equality lookup on code2 (Secondary Barcode / UPC): ?code2=...
         const code2Url = `${BASE_URL}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const res2 = await fetch(code2Url, {
-          headers: {
-            'X-API-Key': key,
-            'Accept': 'application/json'
-          }
-        });
+        const res2 = await fetchWithTimeout(code2Url);
 
         if (res2.status === 401) {
           markUnauthorized();
@@ -301,12 +307,7 @@ export const purchaseOrdersApi = {
 
         // 3. THIRD PRIORITY: Direct equality lookup on code (Internal SKU): ?code=...
         const directUrl = `${BASE_URL}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const res = await fetch(directUrl, {
-          headers: {
-            'X-API-Key': key,
-            'Accept': 'application/json'
-          }
-        });
+        const res = await fetchWithTimeout(directUrl);
 
         if (res.status === 401) {
           markUnauthorized();

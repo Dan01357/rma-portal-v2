@@ -630,6 +630,26 @@ export const catalogService = {
           }
           return matchedProd;
         }
+        // Server lookup already checked Supabase, live API, and verified catalog; only run fast in-memory check before returning null
+        if (json.success && json.found === false) {
+          const mockItem = INITIAL_PRODUCTS.find(p =>
+            p.barcode === clean ||
+            (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+          );
+          if (mockItem) {
+            const isBonitaOrPingcon = (
+              (mockItem.brand && mockItem.brand.toLowerCase().includes('bonita')) ||
+              (mockItem.group && mockItem.group.toLowerCase().includes('pingcon'))
+            );
+            return this._normalizeCatalogProduct(mockItem, 'Wholesale Verified Catalog', clean, {
+              isMock: true,
+              defaultSupplier: 'Savemore',
+              company: isBonitaOrPingcon ? 'Pingcon / Bonita' : 'A2Z2GO / Keysys',
+              forceVerified: true
+            });
+          }
+          return null;
+        }
       }
     } catch (apiErr) {
       console.warn('Server lookup proxy unavailable (falling back to client DB):', apiErr.message);

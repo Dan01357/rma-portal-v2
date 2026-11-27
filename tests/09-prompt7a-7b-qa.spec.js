@@ -636,8 +636,11 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 25_000 });
       await page.getByRole('button', { name: /^Done$/i }).click();
 
-      // Back in QuickRMAActionModal -> click 🔄 Reset Timeline -> confirm Pending & preserved Supplier
+      // Back in QuickRMAActionModal -> expand Advanced / Danger Zone -> click Reset Timeline -> confirm Pending & preserved Supplier
       await expect(quickModal).toBeVisible({ timeout: 10_000 });
+      const dangerToggle = quickModal.getByRole('button', { name: /Advanced \/ Danger Zone/i }).first();
+      await expect(dangerToggle).toBeVisible();
+      await dangerToggle.click();
       page.once('dialog', (dialog) => dialog.accept());
       const resetTimelineBtn = quickModal.getByRole('button', { name: /Reset Timeline/i }).first();
       await expect(resetTimelineBtn).toBeVisible();

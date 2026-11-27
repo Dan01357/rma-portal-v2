@@ -126,7 +126,7 @@ export default function FollowUpTimelineCard({
             <span>Day 0 – Day 10 Calendar Check (Asia/Manila)</span>
             <span>Did the RMA get picked up?</span>
           </div>
-          <div className={`divide-y divide-slate-100 dark:divide-slate-800/80 ${compact ? 'max-h-56 overflow-y-auto' : ''}`}>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {days.map((row) => (
               <div
                 key={row.day}

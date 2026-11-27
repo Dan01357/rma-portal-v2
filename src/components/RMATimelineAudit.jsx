@@ -117,7 +117,7 @@ export default function RMATimelineAudit({
         {events.map((evt, idx) => {
           const IconComp = evt.icon;
           const formattedDate = evt.timestamp 
-            ? `${formatDateTimeYmdHm(evt.timestamp)} (YYYY-MM-DD HH:mm)`
+            ? `${formatDateTimeYmdHm(evt.timestamp)} PHT`
             : 'Recent';
 
           return (

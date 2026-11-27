@@ -34,7 +34,7 @@ async function seedTestModeManifestCustomerRma(page) {
   await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: 'pw-mf-1b.png', mimeType: 'image/png', buffer: PNG_BUFFER });
   await expect(page.getByText('2/10 photos')).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+  await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
   await expect(page.getByText(/Queued Return Manifest \(1 Item\)/i)).toBeVisible();
 
   // Item 2: Unlabeled item without SKU (tests child Assign SKU button in drawer)
@@ -45,7 +45,7 @@ async function seedTestModeManifestCustomerRma(page) {
     mimeType: 'image/png',
     buffer: PNG_BUFFER
   });
-  await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+  await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
   await expect(page.getByText(/Queued Return Manifest \(2 Items\)/i)).toBeVisible();
 
   await page.locator('input[placeholder="Your Full Name *"]').fill('Playwright Manifest Seeder');

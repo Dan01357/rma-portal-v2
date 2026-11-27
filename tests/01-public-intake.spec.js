@@ -310,8 +310,8 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await expInput.fill('Crushed carton');
       await expect(page.getByText('14/250 chars')).toBeVisible();
 
-      // Mandatory photo check: clicking "+ Add Another Item to Return" with 0 photos must NOT queue
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      // Mandatory photo check: clicking "Add Another Item to Return" with 0 photos must NOT queue
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest/i)).toBeHidden();
 
       // Strictly two camera/gallery buttons (no Capture Mode toggle bar & no normal capture="environment" fallback)
@@ -352,17 +352,19 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         await expect(page.getByText('1/10 photos')).toBeVisible();
       }
 
-      // Clicking "+ Add Another Item to Return" WITHOUT expiry in Supplier RTV Test Mode MUST be blocked!
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      // Clicking "Add Another Item to Return" WITHOUT expiry in Supplier RTV Test Mode MUST be blocked!
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(
         page.getByText(/Product expiration date is required for Supplier RTV items/i)
       ).toBeVisible();
 
-      // Fill mandatory expiration date (with ISO YYYY-MM-DD readout) and add item to manifest
+      // Fill mandatory expiration date (no redundant ISO YYYY-MM-DD pill) and add item to manifest
       const futureExp = isoDateDaysOffset(45);
       await expiryInput.fill(futureExp);
-      await expect(page.getByText(new RegExp(`ISO \\(YYYY-MM-DD\\):\\s*${futureExp}`))).toBeVisible();
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      await expect(expiryInput).toHaveValue(futureExp);
+      await expect(page.getByText(/✓ Verified/i).first()).toBeVisible();
+      await expect(page.getByText(/ISO \(YYYY-MM-DD\)/i)).toHaveCount(0);
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest \(1 Item\)/i)).toBeVisible();
 
       // 5. Customer Hub verified catalog barcode lookup -> real supplier_name (never 'Pending Assignment'), qty stepper, Section 3 Clear (X)
@@ -379,7 +381,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         mimeType: 'image/png',
         buffer: PNG_BUFFER
       });
-      await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+      await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest \(2 Items\)/i)).toBeVisible();
 
       // Remove unlabeled item so manifest keeps the verified catalog item cleanly
