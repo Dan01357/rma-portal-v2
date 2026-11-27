@@ -2162,7 +2162,7 @@ export default function App() {
             status: 'resolved',
             ai_document_metadata: {
               ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
-              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              workflow_resolution: cleanStatus === 'scrapped' ? 'scrapped_no_reorder' : 'restocked',
               resolved_at: new Date().toISOString(),
               resolved_by: actorName
             }
@@ -2178,7 +2178,7 @@ export default function App() {
       showToast(
         cleanStatus === 'restocked'
           ? `✓ Marked ${item.rma_number} as 6- Restocked in WMS!`
-          : `✓ Marked ${item.rma_number} as 7- Scrapped / Disposed (Supplier Re-Order Confirmed)!`,
+          : `✓ Marked ${item.rma_number} as 7- Scrapped / Written Off!`,
         'success'
       );
       refreshAllData();
@@ -2357,14 +2357,21 @@ export default function App() {
       } else if (evt.type === 'coworker-queue-updated') {
         const rep = evt.payload?.report;
         const res = evt.payload?.workflow_resolution;
+        const reorderPayload = evt.payload?.reorder;
         let title = `Queue Action: ${evt.payload?.rmaNumber || 'RMA'}`;
         let message = `Status changed to ${evt.payload?.status || 'updated'}`;
-        if (res === 'restocked') {
+        if (reorderPayload?.status === 'reordered') {
+          title = `🔄 Reordered: ${evt.payload?.rmaNumber}`;
+          message = `${reorderPayload.po_number ? `PO #${reorderPayload.po_number} recorded. ` : ''}4-Choice Outcome & 10-Day SLA unchanged.`;
+        } else if (reorderPayload?.status === 'pending') {
+          title = `↩️ Reorder Pending: ${evt.payload?.rmaNumber}`;
+          message = `Reorder status reset to Pending.`;
+        } else if (res === 'restocked') {
           title = `📦 Stocked in WMS: ${evt.payload?.rmaNumber}`;
           message = `${rep?.name || 'Item'} confirmed restocked in inventory.`;
         } else if (res === 'reordered') {
-          title = `🔄 PO Placed: ${evt.payload?.rmaNumber}`;
-          message = `Supplier replacement order confirmed.`;
+          title = `🔄 Reordered: ${evt.payload?.rmaNumber}`;
+          message = `Supplier replacement order recorded.`;
         } else if (res === 'scrapped_no_reorder') {
           title = `🚫 Written Off: ${evt.payload?.rmaNumber}`;
           message = `Item scrap written off.`;
@@ -2376,7 +2383,7 @@ export default function App() {
           type: 'rma',
           title,
           message,
-          subtext: 'Coworker Queue'
+          subtext: reorderPayload ? 'Reorder Status' : 'Coworker Queue'
         });
       } else if (evt.type === 'report-updated') {
         const rep = evt.payload?.report;
@@ -2426,13 +2433,17 @@ export default function App() {
           } else if (payload?.eventType === 'UPDATE' && payload.new) {
             const rep = payload.new;
             const res = rep.ai_document_metadata?.workflow_resolution;
+            const reorderMeta = rep.ai_document_metadata?.reorder;
             let statusTitle = `RMA Updated: ${rep.rma_number}`;
             let statusMsg = `${rep.name || 'Item'} - Status: ${rep.status}`;
-            if (res === 'restocked') {
+            if (reorderMeta?.status === 'reordered' && !res) {
+              statusTitle = `🔄 Reordered: ${rep.rma_number}`;
+              statusMsg = `${reorderMeta.po_number ? `PO #${reorderMeta.po_number} recorded. ` : ''}4-Choice Outcome remains independent.`;
+            } else if (res === 'restocked') {
               statusTitle = `📦 Stocked in WMS: ${rep.rma_number}`;
               statusMsg = `${rep.name || 'Item'} restocked to inventory.`;
             } else if (res === 'reordered') {
-              statusTitle = `🔄 PO Placed: ${rep.rma_number}`;
+              statusTitle = `🔄 Reordered: ${rep.rma_number}`;
               statusMsg = `Replacement order placed with supplier.`;
             } else if (res === 'scrapped_no_reorder') {
               statusTitle = `🚫 Written Off: ${rep.rma_number}`;

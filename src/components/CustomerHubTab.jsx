@@ -65,7 +65,8 @@ import {
   getGpsMapUrl,
   isRealSupplierName,
   isMixedSuppliersSummary,
-  sumManifestQuantity
+  sumManifestQuantity,
+  resolveReorderStatus
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -143,6 +144,31 @@ export default function CustomerHubTab({
       setCustomerRowBusyId(null);
     }
   };
+
+  const handleMarkReordered = async (item, nextStatus = 'reordered') => {
+    if (!item || customerRowBusyId) return;
+    const key = item.id || item.rma_number;
+    setCustomerRowBusyId(key);
+    setCustomerFollowUpBanner(null);
+    try {
+      await catalogService.markAsReordered({
+        item,
+        reorderStatus: nextStatus,
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setCustomerFollowUpBanner({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `${item.rma_number} marked Reordered (4-Choice Outcome & 10-Day SLA unchanged).`
+          : `${item.rma_number} reorder status reset to Pending.`
+      });
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'reorder-updated', rmaNumber: item.rma_number } }));
+    } catch (err) {
+      setCustomerFollowUpBanner({ type: 'error', text: err?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setCustomerRowBusyId(null);
+    }
+  };
   const onSubTabChangeRef = React.useRef(onSubTabChange);
   onSubTabChangeRef.current = onSubTabChange;
 
@@ -170,6 +196,7 @@ export default function CustomerHubTab({
   const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
   const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
   const [reportsDispositionFilter, setReportsDispositionFilter] = useState('all');
+  const [reportsReorderFilter, setReportsReorderFilter] = useState('all');
   const [reportsConditionGradeFilter, setReportsConditionGradeFilter] = useState('all');
   const [reportsDateFrom, setReportsDateFrom] = useState('');
   const [reportsDateTo, setReportsDateTo] = useState('');
@@ -242,6 +269,7 @@ export default function CustomerHubTab({
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
     setReportsDispositionFilter('all');
+    setReportsReorderFilter('all');
     setReportsConditionGradeFilter('all');
     if (onClearCoworkerQueueFilter) onClearCoworkerQueueFilter();
     setReportsDateFrom('');
@@ -394,6 +422,12 @@ export default function CustomerHubTab({
         if (itemDate > reportsDateTo) return false;
       }
 
+      if (reportsReorderFilter !== 'all') {
+        const rInfo = resolveReorderStatus(item);
+        if (reportsReorderFilter === 'reordered' && !rInfo.isReordered) return false;
+        if (reportsReorderFilter === 'pending' && rInfo.isReordered) return false;
+      }
+
       return true;
     });
 
@@ -470,6 +504,7 @@ export default function CustomerHubTab({
     reportsReasonFilter,
     reportsStatusFilter,
     reportsDispositionFilter,
+    reportsReorderFilter,
     reportsConditionGradeFilter,
     coworkerQueueFilter,
     isItemReadyToRestock,
@@ -845,6 +880,22 @@ export default function CustomerHubTab({
           <option value="rejected">8- Rejected / Invalid Claim</option>
         </select>
 
+        {/* Reorder Status Filter Dropdown */}
+        <select
+          aria-label="Reorder Status Filter"
+          value={reportsReorderFilter}
+          onChange={(e) => {
+            setReportsReorderFilter(e.target.value);
+            setReportsCurrentPage(1);
+          }}
+          className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer truncate box-border"
+          title="Filter by Reorder Status (independent of 4-Choice Outcome)"
+        >
+          <option value="all">All Reorder Statuses</option>
+          <option value="pending">Reorder: Pending</option>
+          <option value="reordered">✓ Reordered</option>
+        </select>
+
         {/* Date Range Picker: Neatly split in 2 columns */}
         <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
           <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
@@ -886,7 +937,7 @@ export default function CustomerHubTab({
         </div>
 
         {/* Reset Filters */}
-        {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+        {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsReorderFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
           <button
             type="button"
             onClick={resetReportsFilters}
@@ -903,7 +954,7 @@ export default function CustomerHubTab({
       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
         <span>
           Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {customerScopedTotal} reports
-          {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+          {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsReorderFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
             <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
           )}
         </span>
@@ -1469,9 +1520,23 @@ export default function CustomerHubTab({
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
+                            {(() => {
+                              const reorderInfo = resolveReorderStatus(item);
+                              return (
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                  title={reorderInfo.isReordered
+                                    ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
+                                    : 'Replacement PO not yet ordered'}
+                                >
+                                  <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                                  {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                                </span>
+                              );
+                            })()}
                             {outcome.choiceKey === 'scrap' && (
                               <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(item) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                {getItemNeedsReorder(item) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
                               </div>
                             )}
                           </div>
@@ -1585,16 +1650,16 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* 1-Click Coworker Supplier Re-Order Action */}
-                          {isItemReorderNeeded(item, reportsList) && (
+                          {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                          {!resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(item.status || '').toLowerCase()) && (
                             <button
                               type="button"
-                              disabled={updatingQueueId === (item.id || item.rma_number)}
-                              onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
-                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                              title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                              disabled={customerRowBusyId === (item.id || item.rma_number)}
+                              onClick={() => handleMarkReordered(item, 'reordered')}
+                              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                             >
-                              <span>✓ PO Placed</span>
+                              <span>🔄 Mark Reordered</span>
                             </button>
                           )}
 
@@ -1993,15 +2058,15 @@ export default function CustomerHubTab({
                                                   <span>✓ Restocked in WMS</span>
                                                 </button>
                                               )}
-                                              {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
+                                              {!resolveReorderStatus(child).isReordered && !resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(child.status || '').toLowerCase()) && (
                                                 <button
                                                   type="button"
-                                                  disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
-                                                  onClick={() => onConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
-                                                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                                  title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                                  disabled={customerRowBusyId === (item.id || item.rma_number)}
+                                                  onClick={() => handleMarkReordered(item, 'reordered')}
+                                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                  title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                                                 >
-                                                  <span>✓ PO Placed</span>
+                                                  <span>🔄 Mark Reordered</span>
                                                 </button>
                                               )}
                                               {(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine') && (
@@ -2213,6 +2278,17 @@ export default function CustomerHubTab({
                           {outcome.label}
                         </span>
                       )}
+                      {(() => {
+                        const reorderInfo = resolveReorderStatus(item);
+                        return (
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border inline-flex items-center gap-0.5 shadow-2xs ${reorderInfo.badgeColor}`}
+                          >
+                            {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                            {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
+                          </span>
+                        );
+                      })()}
                       {isSplitChildTicket(item) ? (
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                           <span>✂️ Part 2</span>
@@ -2330,16 +2406,16 @@ export default function CustomerHubTab({
                       </button>
                     )}
 
-                    {/* 1-Click Coworker Supplier Re-Order Action */}
-                    {isItemReorderNeeded(item, reportsList) && (
+                    {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                    {!resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(item.status || '').toLowerCase()) && (
                       <button
                         type="button"
-                        disabled={updatingQueueId === (item.id || item.rma_number)}
-                        onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
-                        className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                        title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                        disabled={customerRowBusyId === (item.id || item.rma_number)}
+                        onClick={() => handleMarkReordered(item, 'reordered')}
+                        className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                       >
-                        <span>✓ PO Placed</span>
+                        <span>🔄 Mark Reordered</span>
                       </button>
                     )}
 

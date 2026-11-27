@@ -23,7 +23,8 @@ import {
   isManifestSubItem,
   isTestRecord,
   isTrashedRecord,
-  parseCreditMemoMeta
+  parseCreditMemoMeta,
+  resolveReorderStatus
 } from './rmaHelpers.js';
 import { buildStoredZip, colToLetter, escapeXml } from './exportXlsx.js';
 
@@ -340,7 +341,6 @@ export function buildRmaMatrixDataset({
         statusLower === 'restocked';
       const isScrapped =
         outcome.choiceKey === 'scrap' ||
-        workflowRes === 'reordered' ||
         workflowRes === 'scrapped_no_reorder' ||
         statusLower === 'scrapped' ||
         statusLower === 'disposed';
@@ -348,10 +348,8 @@ export function buildRmaMatrixDataset({
         outcome.choiceKey === 'replacement' ||
         dispLower === 'supplier_exchange' ||
         dispLower === 'customer_exchange';
-      const isReordered =
-        workflowRes === 'reordered' ||
-        getItemNeedsReorder(lineWithParentMeta) ||
-        String(report.notes || '').includes('[REORDER: YES]');
+      const reorderInfo = resolveReorderStatus(lineWithParentMeta);
+      const isReordered = reorderInfo.isReordered;
       const isPickedUp = outcome.isPickedUp;
 
       const goodStockPcs = isRestocked ? totalPieces : 0;
@@ -384,6 +382,8 @@ export function buildRmaMatrixDataset({
         storeBranch: report.rma_type === 'supplier_outbound' ? '' : (report.store_branch || ''),
         reason: line.reason || report.reason || '',
         workflowOutcome: outcome.hasDecision ? outcome.label : 'Pending Decision',
+        reorderStatus: isReordered ? 'Reordered' : 'Pending',
+        reorderPoNumber: reorderInfo.poNumber || '',
         reordered: isReordered ? 'Yes' : 'No',
         restocked: isRestocked ? 'Yes' : 'No',
         scrapped: isScrapped ? 'Yes' : 'No',
@@ -429,6 +429,8 @@ export function buildRmaMatrixDataset({
         storeBranch: '',
         reason: '',
         workflowOutcome: '',
+        reorderStatus: '',
+        reorderPoNumber: '',
         reordered: '',
         restocked: '',
         scrapped: '',
@@ -652,6 +654,8 @@ export function buildRmaMatrixXlsxBytes({
     { kind: 'detail', field: 'storeBranch', header: 'Store / Branch', width: 24, align: 'left' },
     { kind: 'detail', field: 'reason', header: 'Defect / Return Reason', width: 28, align: 'left' },
     { kind: 'detail', field: 'workflowOutcome', header: 'Workflow Outcome', width: 32, align: 'left' },
+    { kind: 'detail', field: 'reorderStatus', header: 'Reorder Status', width: 15, align: 'center' },
+    { kind: 'detail', field: 'reorderPoNumber', header: 'Reorder PO #', width: 18, align: 'left' },
     { kind: 'detail', field: 'reordered', header: 'Re-Ordered?', width: 13, align: 'center' },
     { kind: 'detail', field: 'restocked', header: 'Restocked?', width: 13, align: 'center' },
     { kind: 'detail', field: 'scrapped', header: 'Scrapped?', width: 13, align: 'center' },

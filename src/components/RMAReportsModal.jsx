@@ -28,7 +28,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToXlsx } from '../utils/exportCsv';
-import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl, resolveReorderStatus } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -704,14 +704,26 @@ export default function RMAReportsModal({
                           })()}
                         </td>
 
-                        {/* 10. 4-Choice Outcome (Human-Readable + Date/Time) */}
+                        {/* 10. 4-Choice Outcome (Human-Readable + Date/Time) & Reorder Status */}
                         <td className="py-3 px-3.5 text-center whitespace-nowrap">
                           {(() => {
                             const outcome = formatFourChoiceOutcome(item);
+                            const reorderInfo = resolveReorderStatus(item);
                             return (
-                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
-                                {outcome.label}
-                              </span>
+                              <div className="inline-flex flex-col items-center gap-1">
+                                <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                                  {outcome.label}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-block whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                  title={reorderInfo.isReordered
+                                    ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}`
+                                    : 'Replacement PO not yet ordered'}
+                                >
+                                  {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                                  {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
+                                </span>
+                              </div>
                             );
                           })()}
                         </td>
@@ -999,6 +1011,14 @@ export default function RMAReportsModal({
                         }`}>
                           {isPendingUnknown ? 'Unknown' : 'Logged'}
                         </span>
+                        {(() => {
+                          const reorderInfo = resolveReorderStatus(item);
+                          return (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${reorderInfo.badgeColor}`}>
+                              {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                            </span>
+                          );
+                        })()}
                         <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 shrink-0">
                           {item.reason || 'Damaged'}
                         </span>

@@ -57,6 +57,21 @@ export const PickupPhotoSlotsSchema = z.object({
   pickup_items: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of physical merchandise (50 photos max across all 5 categories)' })
 }).optional();
 
+export const ReorderStatusEnum = z.enum([
+  'pending',
+  'reordered'
+]).openapi({
+  description: 'Independent Replacement Purchase Order status (never alters 4-Choice Outcome or 10-day SLA)'
+});
+
+export const ReorderMetadataSchema = z.object({
+  status: ReorderStatusEnum.optional().openapi({ example: 'reordered' }),
+  reordered_at: z.string().datetime().nullable().optional(),
+  reordered_by: z.string().optional().openapi({ example: 'Procurement / ERP' }),
+  po_number: z.string().optional().openapi({ example: 'PO-2026-9901' }),
+  notes: z.string().optional().openapi({ example: 'Replacement stock PO placed with supplier' })
+}).passthrough().openapi('ReorderMetadata');
+
 export const SupplierPickupMetadataSchema = z.object({
   disposition: FourChoiceOutcomeEnum.optional(),
   processed_by: z.string().min(1).optional().openapi({ example: 'Juan Dela Cruz', description: 'Mandatory manually entered Pingcon staff full name (zero auto-fill on new records)' }),
@@ -124,13 +139,18 @@ export const RMAReportSchema = z.object({
   total_items: z.number().int().default(1).openapi({ example: 1, description: 'Total distinct items in manifest' }),
   total_quantity: z.number().int().default(1).openapi({ example: 1, description: 'Summed quantity across all items in manifest' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
+  reorder_status: ReorderStatusEnum.optional().openapi({ example: 'pending', description: 'Independent replacement PO status (pending or reordered)' }),
+  reordered_at: z.string().datetime().nullable().optional(),
+  reordered_by: z.string().nullable().optional(),
+  reorder_po_number: z.string().nullable().optional(),
   ai_document_metadata: z.object({
     is_test: z.boolean().optional(),
     test_mode: z.boolean().optional(),
     workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional(),
+    reorder: ReorderMetadataSchema.optional(),
     supplier_pickup: SupplierPickupMetadataSchema.optional(),
     follow_up: FollowUpMetadataSchema.optional()
-  }).passthrough().optional().openapi({ description: 'Structured metadata including 5-slot multi-photo driver pickup (up to 10/slot, 50 total), 4-Step / 10-Day SLA follow-up tracking, and Test Mode isolation flags' }),
+  }).passthrough().optional().openapi({ description: 'Structured metadata including independent reorder tracking, 5-slot multi-photo driver pickup, 4-Step / 10-Day SLA follow-up tracking, and Test Mode isolation flags' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
 
@@ -179,7 +199,9 @@ export const UpdateRMAReportSchema = z.object({
   code: z.string().optional().openapi({ example: 'P2678P' }),
   supplier_name: z.string().optional().openapi({ example: 'Liwayway Marketing' }),
   unit_name: z.string().optional().openapi({ example: 'pc' }),
-  status: RMAStatusEnum.optional().openapi({ example: 'pending', description: 'Lifecycle status update or full reset via resetReportToPending ("pending" clears 4-Choice disposition, pickup/scrap/restock/closed metadata, and restarts the 10-day SLA countdown cleanly). Also accepts "restocked", "reordered", or "scrapped".' }),
+  status: z.union([RMAStatusEnum, z.literal('reordered')]).optional().openapi({ example: 'pending', description: 'Lifecycle status update ("pending" resets 4-Choice/SLA cleanly; "restocked" or "scrapped" resolves outcome; "reordered" updates reorder_status safely without marking Scrapped or closing SLA).' }),
+  reorder_status: ReorderStatusEnum.optional().openapi({ example: 'reordered', description: 'Set independent Replacement PO status ("pending" or "reordered") without altering 4-Choice Outcome or 10-day SLA' }),
+  reorder_notes: z.string().optional().openapi({ example: 'Replacement stock ordered under PO-2026-9901' }),
   warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
   notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
@@ -225,18 +247,18 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \
   -d '{"status": "restocked", "warehouse_location": "Good Stock Area"}'
 \`\`\`
 
-### 🔴 Queue 2: Re-Order Needed / Scrapped (?queue=reorder)
-To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
+### 🔴 Queue 2: Supplier Re-Order Queue (?queue=reorder & ?reorder_status=pending)
+To fetch items awaiting replacement PO without marking them Scrapped:
 \`\`\`bash
 curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=reorder" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-After re-ordering from suppliers, confirm via PATCH:
+After placing replacement PO, confirm independently via PATCH (keeps 4-Choice Outcome & 10-Day SLA untouched):
 \`\`\`bash
 curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \\
   -H "x-api-key: sk_live_rma_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"status": "scrapped", "warehouse_location": "Disposal / Scrap Area"}'
+  -d '{"reorder_status": "reordered", "po_number": "PO-2026-9901"}'
 \`\`\`
 
 ### 🟣 Queue 3: Vendor Recovery / RTV (?queue=rtv_debit)
@@ -272,6 +294,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         queue: z.enum(['restock', 'reorder', 'scrap', 'rtv_debit', 'quarantine']).optional().openapi({ description: 'Filter by 4-pillar operational queue: "restock" (ready to restock in WMS), "reorder" or "scrap" (re-order replacement from supplier), "rtv_debit" (vendor recovery / outbound RTV claims), "quarantine" (items on hold)', example: 'restock' }),
+        reorder_status: ReorderStatusEnum.optional().openapi({ description: 'Filter by independent Reorder Status ("pending" or "reordered")', example: 'pending' }),
         test_mode: z.enum(['true', 'false']).optional().openapi({ description: 'Filter by test mode: "true" returns sandbox test records only, "false" or omitted returns live production records only', example: 'false' }),
         lifecycle: z.enum(['active', 'archived', 'trashed']).optional().openapi({ description: 'Filter by lifecycle state: "active" (default), "archived" (Enterprise Archive Vault), "trashed" (30-day soft trash bin)', example: 'active' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),

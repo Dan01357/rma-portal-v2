@@ -138,6 +138,36 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       createdApiRma = postRmaJson.data?.rma_number;
       expect(createdApiRma).toMatch(/^RMA-TEST-/);
 
+      // Reorder Status separation: backward-compatible status: "reordered" must NOT mark Scrapped or stop 10-Day SLA
+      const reorderPatchRes = await request.patch(`/api/v1/rma/${encodeURIComponent(createdApiRma)}?test_mode=true`, {
+        headers: authHeaders,
+        data: { status: 'reordered', po_number: 'PO-TEST-881', reorder_notes: 'Playwright independent reorder check' }
+      });
+      expect(reorderPatchRes.status()).toBe(200);
+      const reorderPatchJson = await reorderPatchRes.json();
+      expect(reorderPatchJson.data?.reorder_status).toBe('reordered');
+      expect(reorderPatchJson.data?.reorder_po_number).toBe('PO-TEST-881');
+      expect(reorderPatchJson.data?.status).not.toBe('scrapped');
+      expect(reorderPatchJson.data?.status).not.toBe('resolved');
+      expect(reorderPatchJson.data?.ai_document_metadata?.follow_up?.case_closed_at || null).toBeNull();
+
+      // GET /api/v1/rma?reorder_status=reordered includes it
+      const filterReorderRes = await request.get(`/api/v1/rma?test_mode=true&reorder_status=reordered&search=${encodeURIComponent(createdApiRma)}`, {
+        headers: authHeaders
+      });
+      expect(filterReorderRes.status()).toBe(200);
+      const filterReorderJson = await filterReorderRes.json();
+      expect((filterReorderJson.data || []).some((row) => row.rma_number === createdApiRma)).toBe(true);
+
+      // Reset reorder_status back to pending via explicit reorder_status field
+      const resetReorderRes = await request.patch(`/api/v1/rma/${encodeURIComponent(createdApiRma)}?test_mode=true`, {
+        headers: authHeaders,
+        data: { reorder_status: 'pending' }
+      });
+      expect(resetReorderRes.status()).toBe(200);
+      const resetReorderJson = await resetReorderRes.json();
+      expect(resetReorderJson.data?.reorder_status).toBe('pending');
+
       // PATCH /api/v1/rma/:id
       const patchRmaRes = await request.patch(`/api/v1/rma/${encodeURIComponent(createdApiRma)}?test_mode=true`, {
         headers: authHeaders,

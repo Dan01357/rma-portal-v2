@@ -2,6 +2,29 @@ import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 import { handleRmaEmailEdit } from '../../_lib/rmaEmailEditHandler.js';
 
+const resolveApiReorderStatus = (item) => {
+  const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
+    ? item.ai_document_metadata
+    : {};
+  const reorderMeta = (meta.reorder && typeof meta.reorder === 'object') ? meta.reorder : {};
+  const workflowRes = String(meta.workflow_resolution || item?.workflow_resolution || '').toLowerCase().trim();
+  const explicitStatus = String(reorderMeta.status || item?.reorder_status || '').toLowerCase().trim();
+  const hasPendingReset = explicitStatus === 'pending' || explicitStatus === 'pending_reorder';
+  const isReordered = !hasPendingReset && (
+    explicitStatus === 'reordered' ||
+    Boolean(reorderMeta.reordered_at || item?.reordered_at) ||
+    workflowRes === 'reordered'
+  );
+  return {
+    status: isReordered ? 'reordered' : 'pending',
+    isReordered,
+    reorderedAt: isReordered ? (reorderMeta.reordered_at || item?.reordered_at || (workflowRes === 'reordered' ? meta.resolved_at : null) || null) : null,
+    reorderedBy: isReordered ? (reorderMeta.reordered_by || item?.reordered_by || (workflowRes === 'reordered' ? meta.resolved_by : null) || null) : null,
+    poNumber: String(reorderMeta.po_number || item?.reorder_po_number || (isReordered ? (item?.po_number || '') : '')).trim() || null,
+    notes: String(reorderMeta.notes || item?.reorder_notes || '').trim() || null
+  };
+};
+
 const getItemNeedsReorder = (item) => {
   if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
     return Boolean(item.needs_reorder);
@@ -289,6 +312,16 @@ export default async function handler(req, res) {
         const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
 
         // Unified 5-Queue Filtering (restock, reorder, scrap_no_reorder, quarantine, rejected)
+        const itemWorkflowRes = String(item.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+        const isOutcomeFinalized = itemWorkflowRes === 'restocked' || itemWorkflowRes === 'scrapped_no_reorder';
+        const reorderInfo = resolveApiReorderStatus(item);
+
+        if (req.query?.reorder_status) {
+          const wantReorder = String(req.query.reorder_status).trim().toLowerCase();
+          if (wantReorder === 'reordered' && !reorderInfo.isReordered) return false;
+          if ((wantReorder === 'pending' || wantReorder === 'pending_reorder') && reorderInfo.isReordered) return false;
+        }
+
         if (queue) {
           const cleanQueue = String(queue).trim().toLowerCase();
           const needsReorderFlag = getItemNeedsReorder(item);
@@ -296,19 +329,19 @@ export default async function handler(req, res) {
           if (cleanQueue === 'restock') {
             const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
             if (!isRestockDisp) return false;
-            if (FINALIZED_RESTOCK.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
             const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag === false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (reorderInfo.isReordered || FINALIZED_SCRAP.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'scrap_no_reorder') {
             const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag !== false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
             if (!isRtv) return false;
@@ -385,9 +418,15 @@ export default async function handler(req, res) {
       const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
       const enrichedData = paginatedData.map(item => {
         const needsReorder = getItemNeedsReorder(item);
+        const reorderInfo = resolveApiReorderStatus(item);
         const itemObj = {
           ...item,
-          needs_reorder: needsReorder
+          needs_reorder: needsReorder,
+          reorder_status: reorderInfo.status,
+          reordered_at: reorderInfo.reorderedAt,
+          reordered_by: reorderInfo.reorderedBy,
+          reorder_po_number: reorderInfo.poNumber,
+          reorder_notes: reorderInfo.notes
         };
         const cleanQueue = queue ? String(queue).trim().toLowerCase() : '';
         if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {

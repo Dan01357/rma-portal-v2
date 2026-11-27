@@ -102,22 +102,21 @@ If you are syncing returned goods back into your warehouse inventory:
    *(Passing \`"status": "restocked"\` is also supported and automatically resolved safely without Supabase constraint errors).*
    This marks the ticket as **6- Restocked** so it won't be double-counted.
 
-#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder):
-If you need to know which items were lost/scrapped so your procurement system can re-order replacement stock from suppliers:
-1. **Query Re-Order Needed Items**:
-   Send \`GET /api/v1/rma?queue=reorder\`
-   Retrieves all items that were flagged for replenishment with \`needs_reorder: true\`.
-2. **Place Replacement PO & Acknowledge**:
-   Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
+#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder & Independent Reorder Status):
+If you need to track or update supplier replacement Purchase Orders independently of an RMA's 4-Choice Outcome and 10-day pickup SLA:
+1. **Query Pending Re-Order Items**:
+   Send \`GET /api/v1/rma?queue=reorder\` (or filter with \`?reorder_status=pending\`).
+   Retrieves items awaiting replacement PO with \`reorder_status: "pending"\` and \`needs_reorder: true\`.
+2. **Mark Replacement PO Placed (Without Scrapping or Closing the RMA)**:
+   Send \`PATCH /api/v1/rma/{id}\` with:
    \`\`\`json
    {
-     "status": "resolved",
-     "workflow_resolution": "reordered",
-     "disposition": "5- Scrap / Dispose",
-     "notes": "Replacement supplier PO #PO-2026-9901 issued."
+     "reorder_status": "reordered",
+     "po_number": "PO-2026-9901",
+     "reorder_notes": "Replacement supplier PO #PO-2026-9901 placed."
    }
    \`\`\`
-   This marks the ticket as **7- Re-Ordered (PO Placed)**.
+   *(Passing \`"status": "reordered"\` is also accepted for backwards compatibility and strictly sets \`reorder_status: "reordered"\` without marking the RMA as **Scrapped** or closing its 10-day SLA).*
 
 #### 3. 🚫 No Re-Order / Write-Off Queue (?queue=scrap_no_reorder):
 If you need to audit items marked for disposal without placing a replacement supplier purchase order:

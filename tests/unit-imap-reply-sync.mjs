@@ -503,4 +503,83 @@ test('batch helper summaries and .xlsx per-item quantity + mixed supplier extrac
   assert.equal(parsed.manifestUpdates[1].quantity, 3);
 });
 
+test('reorder status is strictly independent from 4-Choice Outcome (never marks Scrapped or stops 10-day SLA)', async () => {
+  const {
+    resolveReorderStatus,
+    formatFourChoiceOutcome,
+    formatLifecycleStage,
+    isItemReorderNeeded
+  } = await import('../src/utils/rmaHelpers.js');
+  const { computeFourStepWorkflow } = await import('../src/utils/followUpWorkflow.js');
+
+  const pendingRtv = {
+    id: 1752,
+    rma_number: 'RMA-TEST-2026-0207-HY7K',
+    status: 'under_inspection',
+    disposition: '3- Return to Vendor (RTV)',
+    supplier_name: 'Unilever',
+    created_at: new Date().toISOString(),
+    ai_document_metadata: {
+      is_test: true,
+      test_mode: true,
+      follow_up: { enabled: true, started_at: new Date().toISOString() },
+      reorder: {
+        status: 'reordered',
+        reordered_at: '2026-11-27T01:00:00.000Z',
+        reordered_by: 'Purchasing API',
+        po_number: 'PO-9901',
+        notes: 'Replacement ordered'
+      }
+    }
+  };
+
+  const reorderInfo = resolveReorderStatus(pendingRtv);
+  assert.equal(reorderInfo.status, 'reordered');
+  assert.equal(reorderInfo.isReordered, true);
+  assert.equal(reorderInfo.poNumber, 'PO-9901');
+  assert.equal(reorderInfo.reorderedBy, 'Purchasing API');
+
+  const outcome = formatFourChoiceOutcome(pendingRtv);
+  assert.notEqual(outcome.choiceKey, 'scrap');
+  assert.equal(outcome.label.toLowerCase().includes('scrapped'), false);
+
+  const stage = formatLifecycleStage(pendingRtv);
+  assert.equal(stage.label.toLowerCase().includes('scrapped'), false);
+  assert.equal(stage.label.toLowerCase().includes('re-ordered'), false);
+
+  const wf = computeFourStepWorkflow(pendingRtv, []);
+  assert.equal(wf.isClosed, false);
+  assert.equal(wf.followUpEnabled, true);
+  assert.equal(wf.isCountdownActive, true);
+  assert.equal(isItemReorderNeeded(pendingRtv), false);
+
+  // Even legacy rows that still carry workflow_resolution: 'reordered' must NOT resolve as Scrapped or close SLA
+  const legacyReordered = {
+    ...pendingRtv,
+    ai_document_metadata: {
+      is_test: true,
+      test_mode: true,
+      workflow_resolution: 'reordered',
+      resolved_at: '2026-11-20T01:00:00.000Z',
+      follow_up: { enabled: true, started_at: new Date().toISOString() }
+    }
+  };
+  assert.equal(resolveReorderStatus(legacyReordered).isReordered, true);
+  assert.notEqual(formatFourChoiceOutcome(legacyReordered).choiceKey, 'scrap');
+  assert.equal(computeFourStepWorkflow(legacyReordered, []).isClosed, false);
+
+  // Default Pending Reorder check
+  const defaultItem = {
+    id: 1753,
+    rma_number: 'RMA-TEST-PENDING',
+    status: 'under_inspection',
+    disposition: '1 - Pending Vendor Pickup',
+    ai_document_metadata: { simple_rtv_disposition: 'supplier_credit', simple_rtv_label: 'Debit Claim (Deduction from Next PO)' }
+  };
+  assert.equal(resolveReorderStatus(defaultItem).status, 'pending');
+  assert.equal(resolveReorderStatus(defaultItem).isReordered, false);
+  assert.equal(resolveReorderStatus(defaultItem).label, 'Pending');
+});
+
+
 

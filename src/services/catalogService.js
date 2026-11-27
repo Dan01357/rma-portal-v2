@@ -1915,28 +1915,177 @@ export const catalogService = {
   },
 
   /**
-   * 1-Click Coworker Queue Action (Mark as Stocked in WMS -> 'restocked' | Mark Re-ordered from Supplier -> 'scrapped')
+   * Independent Supplier Replacement Reorder Toggle / PO Logger.
+   * Stores Reorder Status strictly inside ai_document_metadata.reorder
+   * without touching 4-Choice Outcome, warehouse location, status, or the 10-day pickup SLA.
+   */
+  async markAsReordered({
+    item,
+    reorderStatus = 'reordered',
+    poNumber = '',
+    notes = '',
+    actorName = 'Admin'
+  }) {
+    if (!item) throw new Error('RMA item is required.');
+    const cleanActor = String(actorName || 'Admin').trim();
+    const cleanPo = String(poNumber || '').trim();
+    const cleanNotes = String(notes || '').trim();
+    const nextReorderStatus = (String(reorderStatus || '').toLowerCase().trim() === 'pending' || String(reorderStatus || '').toLowerCase().trim() === 'pending_reorder')
+      ? 'pending'
+      : 'reordered';
+    const isMarkingReordered = nextReorderStatus === 'reordered';
+    const nowIso = new Date().toISOString();
+
+    const targetId = item.parent_rma_id || item.id;
+    const targetRma = item.rma_number;
+
+    let fetchQuery = supabase.from('rma_reports').select('*');
+    if (targetId && /^\d+$/.test(String(targetId))) {
+      fetchQuery = fetchQuery.eq('id', Number(targetId));
+    } else if (targetRma) {
+      fetchQuery = fetchQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: rows, error: fetchErr } = await fetchQuery;
+    if (fetchErr) throw fetchErr;
+    const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : item;
+
+    const prevMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object')
+      ? { ...primaryRow.ai_document_metadata }
+      : {};
+    const prevReorder = (prevMeta.reorder && typeof prevMeta.reorder === 'object')
+      ? prevMeta.reorder
+      : {};
+
+    const nextReorderMeta = isMarkingReordered
+      ? {
+          status: 'reordered',
+          reordered_at: nowIso,
+          reordered_by: cleanActor,
+          po_number: cleanPo || prevReorder.po_number || '',
+          ...(cleanNotes ? { notes: cleanNotes } : (prevReorder.notes ? { notes: prevReorder.notes } : {}))
+        }
+      : {
+          status: 'pending',
+          reset_at: nowIso,
+          reset_by: cleanActor,
+          ...(cleanPo ? { po_number: cleanPo } : {}),
+          ...(cleanNotes ? { notes: cleanNotes } : {})
+        };
+
+    const updatedMeta = {
+      ...prevMeta,
+      reorder: nextReorderMeta
+    };
+    if (String(updatedMeta.workflow_resolution || '').toLowerCase() === 'reordered') {
+      delete updatedMeta.workflow_resolution;
+      delete updatedMeta.resolved_at;
+      delete updatedMeta.resolved_by;
+    }
+
+    const auditNote = isMarkingReordered
+      ? `Marked as Reordered by ${cleanActor}${nextReorderMeta.po_number ? ` (PO: ${nextReorderMeta.po_number})` : ''}${cleanNotes ? ` — ${cleanNotes}` : ''}`
+      : `Reorder Status reset to Pending by ${cleanActor}`;
+
+    const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
+    currentAudit.push({
+      timestamp: nowIso,
+      action: isMarkingReordered ? 'MARK_REORDERED' : 'RESET_REORDER_PENDING',
+      stage: isMarkingReordered ? 'SUPPLIER_REORDER' : 'SUPPLIER_REORDER_RESET',
+      actor: cleanActor,
+      reorder_status: nextReorderStatus,
+      ...(nextReorderMeta.po_number ? { po_number: nextReorderMeta.po_number } : {}),
+      note: auditNote
+    });
+
+    const updates = {
+      ai_document_metadata: updatedMeta,
+      audit_trail: currentAudit
+    };
+    if (cleanPo) {
+      updates.po_number = cleanPo;
+    }
+
+    // Also update items[] array if batch manifest (keeps unpacked items & parent in sync)
+    let parsedItems = [];
+    if (Array.isArray(primaryRow?.items) && primaryRow.items.length > 0) {
+      parsedItems = [...primaryRow.items];
+    } else if (typeof primaryRow?.items === 'string' && primaryRow.items.trim()) {
+      try {
+        const p = JSON.parse(primaryRow.items);
+        if (Array.isArray(p)) parsedItems = p;
+      } catch {}
+    }
+    if (parsedItems.length > 0) {
+      const targetBc = item.is_unpacked_manifest_item && item.barcode ? String(item.barcode).trim() : null;
+      updates.items = parsedItems.map((child) => {
+        const cBc = String(child.barcode || '').trim();
+        if (targetBc && cBc !== targetBc) return child;
+        return {
+          ...child,
+          reorder_status: nextReorderStatus,
+          reordered_at: isMarkingReordered ? nowIso : null,
+          reordered_by: isMarkingReordered ? cleanActor : null,
+          reorder_po_number: nextReorderMeta.po_number || child.reorder_po_number || null,
+          ...(cleanNotes ? { reorder_notes: cleanNotes } : {})
+        };
+      });
+    }
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (primaryRow?.id && /^\d+$/.test(String(primaryRow.id))) {
+      updateQuery = updateQuery.eq('id', Number(primaryRow.id));
+    } else if (targetRma) {
+      updateQuery = updateQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: updatedData, error: updateErr } = await updateQuery.select('*');
+    if (updateErr) throw updateErr;
+    const updatedReport = Array.isArray(updatedData) && updatedData.length > 0
+      ? updatedData[0]
+      : { ...primaryRow, ...updates };
+
+    // Sync separate child rows in rma_reports if parent has unpacked children
+    if (primaryRow?.id && primaryRow?.is_parent && item?.is_unpacked_manifest_item && item?.id && String(item.id) !== String(primaryRow.id)) {
+      await supabase
+        .from('rma_reports')
+        .update({
+          ...(cleanPo ? { po_number: cleanPo } : {}),
+          ai_document_metadata: {
+            ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
+            reorder: nextReorderMeta
+          }
+        })
+        .eq('id', Number(item.id))
+        .catch(() => {});
+    }
+
+    this.notifyChange('coworker-queue-updated', {
+      reportId: updatedReport.id,
+      rmaNumber: updatedReport.rma_number,
+      reorder_status: nextReorderStatus,
+      po_number: nextReorderMeta.po_number || '',
+      report: updatedReport
+    });
+
+    return updatedReport;
+  },
+
+  /**
+   * 1-Click Coworker Queue Action (Mark as Stocked in WMS -> 'restocked' | Confirm Scrap Disposal -> 'scrapped')
    */
   async confirmCoworkerQueueAction({ item, targetStatus, warehouseLocation = null, actorName = 'Warehouse Staff' }) {
     if (!item || !targetStatus) throw new Error('Item and targetStatus are required.');
     const cleanStatus = String(targetStatus).toLowerCase().trim() === 'scrapped' ? 'scrapped' : 'restocked';
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
 
-    let stage = 'SUPPLIER_REORDER';
-    let workflowResolution = 'reordered';
-    let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
+    let stage = 'SCRAP_DISPOSAL';
+    let workflowResolution = 'scrapped_no_reorder';
+    let auditNote = `Scrap disposal written off by ${cleanActor}`;
     if (cleanStatus === 'restocked') {
       stage = 'ERP_RESTOCK';
       workflowResolution = 'restocked';
       auditNote = `ERP Restock confirmed by ${cleanActor}`;
-    } else {
-      const notes = String(item?.notes || '');
-      const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
-      if (isExplicitNoReorder) {
-        stage = 'SCRAP_DISPOSAL';
-        workflowResolution = 'scrapped_no_reorder';
-        auditNote = `Scrap written off by ${cleanActor}`;
-      }
     }
 
     const auditEntry = {
@@ -2091,6 +2240,7 @@ export const catalogService = {
     delete currentMeta.workflow_resolution;
     delete currentMeta.resolved_at;
     delete currentMeta.resolved_by;
+    delete currentMeta.reorder;
     delete currentMeta.simple_rtv_disposition;
     delete currentMeta.simple_rtv_label;
     delete currentMeta.simple_rtv_updated_at;
@@ -2157,6 +2307,11 @@ export const catalogService = {
       updates.items = primaryRow.items.map(child => {
         const cleanChild = { ...child, status: 'pending', disposition: 'Pending' };
         delete cleanChild.workflow_resolution;
+        delete cleanChild.reorder_status;
+        delete cleanChild.reordered_at;
+        delete cleanChild.reordered_by;
+        delete cleanChild.reorder_po_number;
+        delete cleanChild.reorder_notes;
         delete cleanChild.simple_rtv_disposition;
         delete cleanChild.simple_rtv_label;
         delete cleanChild.needs_reorder;

@@ -59,7 +59,8 @@ import {
   getGpsMapUrl,
   summarizeBatchSuppliers,
   isRealSupplierName,
-  isMixedSuppliersSummary
+  isMixedSuppliersSummary,
+  resolveReorderStatus
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -90,12 +91,38 @@ export default function SupplierClaimsTab({
   const effectiveBulkArchiveReports = onRequestBulkArchiveReports || onBulkArchiveReports;
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
+  const [reorderFilter, setReorderFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState('created_at');
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
   const [followUpModalReport, setFollowUpModalReport] = useState(null);
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
+
+  const handleMarkReordered = async (report, nextStatus = 'reordered') => {
+    if (!report || updatingQueueId) return;
+    const rowKey = report.id || report.rma_number;
+    setUpdatingQueueId(rowKey);
+    setFollowUpBanner(null);
+    try {
+      await catalogService.markAsReordered({
+        item: report,
+        reorderStatus: nextStatus,
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setFollowUpBanner({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `${report.rma_number} marked Reordered (4-Choice Outcome & 10-Day SLA unchanged).`
+          : `${report.rma_number} reorder status reset to Pending.`
+      });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setFollowUpBanner({ type: 'error', text: err?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
 
   const handleRowCloseCase = async (report) => {
     const rowKey = report.id || report.rma_number;
@@ -142,7 +169,7 @@ export default function SupplierClaimsTab({
             status: 'resolved',
             ai_document_metadata: {
               ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
-              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              workflow_resolution: cleanStatus === 'scrapped' ? 'scrapped_no_reorder' : 'restocked',
               resolved_at: new Date().toISOString(),
               resolved_by: actorName
             }
@@ -506,7 +533,12 @@ export default function SupplierClaimsTab({
         r.po_number?.toLowerCase().includes(q) ||
         r.invoice_dr_number?.toLowerCase().includes(q);
 
-      return matchesSupplier && matchesDisposition && matchesSearch;
+      const reorderInfo = resolveReorderStatus(r);
+      const matchesReorder =
+        reorderFilter === 'all' ||
+        (reorderFilter === 'reordered' ? reorderInfo.isReordered : !reorderInfo.isReordered);
+
+      return matchesSupplier && matchesDisposition && matchesReorder && matchesSearch;
     });
 
     list.sort((a, b) => {
@@ -556,7 +588,7 @@ export default function SupplierClaimsTab({
     });
 
     return list;
-  }, [allRtvItems, selectedSupplier, dispositionFilter, searchTerm, coworkerQueueFilter, sortField, sortDirection, savedProductsList]);
+  }, [allRtvItems, selectedSupplier, dispositionFilter, reorderFilter, searchTerm, coworkerQueueFilter, sortField, sortDirection, savedProductsList]);
 
 
   // Paginated Slice
@@ -741,7 +773,7 @@ export default function SupplierClaimsTab({
     }
   };
 
-  const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || Boolean(searchTerm);
+  const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || reorderFilter !== 'all' || Boolean(searchTerm);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200 w-full min-w-0 box-border">
@@ -838,12 +870,34 @@ export default function SupplierClaimsTab({
               </select>
             </div>
 
+            {/* Reorder Status Filter Dropdown */}
+            <div className="flex items-center gap-1.5 w-full md:w-auto min-w-0">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                Reorder:
+              </label>
+              <select
+                aria-label="Reorder Status Filter"
+                value={reorderFilter}
+                onChange={(e) => {
+                  setReorderFilter(e.target.value);
+                  setSelectedRmaIds(new Set());
+                }}
+                className="w-full md:w-auto px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs truncate box-border"
+                title="Filter by Reorder Status (independent of 4-Choice Outcome)"
+              >
+                <option value="all">All Reorder Statuses</option>
+                <option value="pending">Reorder: Pending</option>
+                <option value="reordered">✓ Reordered</option>
+              </select>
+            </div>
+
             {hasActiveFilters && (
               <button
                 type="button"
                 onClick={() => {
                   setSelectedSupplier('All');
                   setDispositionFilter('All');
+                  setReorderFilter('all');
                   setSearchTerm('');
                   setSelectedRmaIds(new Set());
                 }}
@@ -1022,6 +1076,7 @@ export default function SupplierClaimsTab({
                 onClick={() => {
                   setSelectedSupplier('All');
                   setDispositionFilter('All');
+                  setReorderFilter('all');
                   setSearchTerm('');
                   setSelectedRmaIds(new Set());
                 }}
@@ -1423,12 +1478,28 @@ export default function SupplierClaimsTab({
                           </div>
                         </td>
 
-                        {/* Single Clean Triage Status Badge + Reporter Explanation */}
+                        {/* Single Clean Triage Status Badge + Reorder Status Pill + Reporter Explanation */}
                         <td className="p-3 max-w-[240px]">
                           <div className="space-y-1">
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
+                            {(() => {
+                              const reorderInfo = resolveReorderStatus(r);
+                              return (
+                                <div>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    title={reorderInfo.isReordered
+                                      ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
+                                      : 'Replacement PO not yet ordered'}
+                                  >
+                                    <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                                    {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                             {wf.isCountdownActive && !wf.isClosed && (
                               <div className="text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">
                                 {wf.step2.text}
@@ -1436,7 +1507,7 @@ export default function SupplierClaimsTab({
                             )}
                             {outcome.choiceKey === 'scrap' && (
                               <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                {getItemNeedsReorder(r) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
                               </div>
                             )}
                             {r.reason && (
@@ -1601,16 +1672,16 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1-Click Re-Order Needed Action */}
-                            {isItemReorderNeeded(r) && (
+                            {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                            {!resolveReorderStatus(r).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(r.status || '').toLowerCase()) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
-                                onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
+                                onClick={() => handleMarkReordered(r, 'reordered')}
                                 className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                               >
-                                <span>✓ Confirm Re-Ordered (PO Placed)</span>
+                                <span>🔄 Mark Reordered</span>
                               </button>
                             )}
 

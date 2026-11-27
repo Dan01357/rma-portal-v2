@@ -254,7 +254,6 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   const isRestocked = workflowRes === 'restocked' || statusLower === 'restocked';
   const isScrapped =
     isAutoDisposed ||
-    workflowRes === 'reordered' ||
     workflowRes === 'scrapped_no_reorder' ||
     statusLower === 'scrapped' ||
     statusLower === 'disposed';

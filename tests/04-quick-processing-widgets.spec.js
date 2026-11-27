@@ -167,6 +167,19 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await page.getByRole('button', { name: /^Done$/i }).click();
       await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible({ timeout: 10_000 });
 
+      // 5b. Independent Reorder Status card: mark Reordered w/ PO # while keeping 4-Choice Outcome (Restocked) intact
+      const reorderCard = page.getByTestId('quick-rma-reorder-card');
+      await expect(reorderCard).toBeVisible();
+      await expect(page.getByTestId('quick-rma-reorder-badge')).toContainText('Reorder: Pending');
+      await reorderCard.getByPlaceholder(/PO-2026/i).fill('PO-PW-2026-1');
+      await reorderCard.getByPlaceholder(/replacement PO notes/i).fill('Playwright independent reorder');
+      await reorderCard.getByRole('button', { name: /^Mark Reordered$/i }).click();
+      await expect(page.getByTestId('quick-rma-reorder-badge')).toContainText('✓ Reordered', { timeout: 30_000 });
+      await expect(page.getByTestId('quick-rma-reorder-badge')).toContainText('PO-PW-2026-1');
+      await expect(page.getByText(/^Restocked \(/i).first()).toBeVisible();
+      await reorderCard.getByRole('button', { name: /Reset Reorder to Pending/i }).click();
+      await expect(page.getByTestId('quick-rma-reorder-badge')).toContainText('Reorder: Pending', { timeout: 30_000 });
+
       // 6. Stream Switcher: Customer Hub -> Supplier RTV (hides Credit Memo card) -> back to Customer Hub
       await expect(page.getByText(/Customer Credit Memo/i).first()).toBeVisible();
       const supplierStreamBtn = page.getByRole('button', { name: /📤 Supplier RTV/i });

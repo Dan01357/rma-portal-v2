@@ -371,6 +371,14 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         await page.waitForTimeout(400);
       }
 
+      // Verify independent Reorder Status badge & 1-click "Mark Reordered" button without marking Scrapped
+      await expect(sbSuppRow).toContainText('Reorder: Pending');
+      const markReorderBtn = sbSuppRow.getByRole('button', { name: /Mark Reordered/i });
+      await expect(markReorderBtn).toBeVisible();
+      await markReorderBtn.click();
+      await expect(sbSuppRow).toContainText('✓ Reordered', { timeout: 15_000 });
+      await expect(sbSuppRow).not.toContainText(/Scrapped/i);
+
       // Archive Sandbox Supplier RTV
       await sbSuppRow.locator(`button[title*="Archive RMA #${seededSupplierRma}"]`).click();
       await expect(sbSuppRow).toBeHidden({ timeout: 15_000 });

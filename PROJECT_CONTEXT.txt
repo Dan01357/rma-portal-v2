@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-27T02:19:24.522Z
+Generated At: 2026-11-27T03:25:10.364Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -73,37 +73,6 @@ rma-portal-v2/
 │   │   ├── MANUAL_QA_TESTING_CHECKLIST.md
 │   │   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
 ├── playwright-report/
-│   │   ├── data/
-│   │   │   │   ├── 0dda51b2a9df680f1003220db1a5c6bb226b6e21.md
-│   │   │   │   ├── 1ed978f7447f7f26fead88d94e5e7320fa5852fc.md
-│   │   │   │   ├── 1efaa5f32f5e5cf1a16eb9d757b1f94176f45df9.zip
-│   │   │   │   ├── 35ba6479e0223267973607af970a183b8fa06444.zip
-│   │   │   │   ├── 65b69f658ef15ee0ab3cfd5485bae27dc9756633.md
-│   │   │   │   ├── a995937f1d96e709948b9b6bdfdb7d761ae16236.png
-│   │   │   │   ├── f42a5347a4c9290918e8005b0e62592893086e0d.zip
-│   │   │   │   ├── fbf331cf768e1bcce27617830f03bee071dd85ec.png
-│   │   │   │   └── fed7d49710cac517ee87406c99fa5e0f99c13e00.png
-│   │   ├── trace/
-│   │   │   │   ├── assets/
-│   │   │   │   │   │   ├── codeMirrorModule-DNqxPF-E.js
-│   │   │   │   │   │   ├── defaultSettingsView-BQT9Z6FV.js
-│   │   │   │   │   │   ├── rolldown-runtime-QTnfLwEv.js
-│   │   │   │   │   │   └── urlMatch-Cgl6axSs.js
-│   │   │   │   ├── codeMirrorModule.-QdMvsKi.css
-│   │   │   │   ├── codicon.DCmgc-ay.ttf
-│   │   │   │   ├── defaultSettingsView.C8BeHuxd.css
-│   │   │   │   ├── index.B_TqY17P.css
-│   │   │   │   ├── index.BY2vkw8A.js
-│   │   │   │   ├── index.html
-│   │   │   │   ├── manifest.webmanifest
-│   │   │   │   ├── playwright-logo.svg
-│   │   │   │   ├── snapshot.-ChLTbql.js
-│   │   │   │   ├── snapshot.html
-│   │   │   │   ├── sw.bundle.js
-│   │   │   │   ├── uiMode.CyMfwkXJ.css
-│   │   │   │   ├── uiMode.DuLwZHRf.js
-│   │   │   │   ├── uiMode.html
-│   │   │   │   └── xtermModule.kHJ-D0s7.css
 │   │   └── index.html
 ├── public/
 │   │   └── PROJECT_CONTEXT.txt
@@ -210,18 +179,6 @@ rma-portal-v2/
 │   │   ├── main.jsx
 │   │   └── supabaseClient.js
 ├── test-results/
-│   │   ├── 05-credit-memos-settings-S-d5aa4-s-Poster-API-Keys-docs-link/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 10-prompt8a-qa-Suite-10-Pr-e2f76-rving-Item-2-and-TEST-MODE-/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 10-prompt8a-qa-Suite-10-Pr-ee965--Admin-multi-row-selections/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
 │   │   └── .last-run.json
 ├── tests/
 │   │   ├── .auth/
@@ -7488,6 +7445,29 @@ import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 import { handleRmaEmailEdit } from '../../_lib/rmaEmailEditHandler.js';
 
+const resolveApiReorderStatus = (item) => {
+  const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
+    ? item.ai_document_metadata
+    : {};
+  const reorderMeta = (meta.reorder && typeof meta.reorder === 'object') ? meta.reorder : {};
+  const workflowRes = String(meta.workflow_resolution || item?.workflow_resolution || '').toLowerCase().trim();
+  const explicitStatus = String(reorderMeta.status || item?.reorder_status || '').toLowerCase().trim();
+  const hasPendingReset = explicitStatus === 'pending' || explicitStatus === 'pending_reorder';
+  const isReordered = !hasPendingReset && (
+    explicitStatus === 'reordered' ||
+    Boolean(reorderMeta.reordered_at || item?.reordered_at) ||
+    workflowRes === 'reordered'
+  );
+  return {
+    status: isReordered ? 'reordered' : 'pending',
+    isReordered,
+    reorderedAt: isReordered ? (reorderMeta.reordered_at || item?.reordered_at || (workflowRes === 'reordered' ? meta.resolved_at : null) || null) : null,
+    reorderedBy: isReordered ? (reorderMeta.reordered_by || item?.reordered_by || (workflowRes === 'reordered' ? meta.resolved_by : null) || null) : null,
+    poNumber: String(reorderMeta.po_number || item?.reorder_po_number || (isReordered ? (item?.po_number || '') : '')).trim() || null,
+    notes: String(reorderMeta.notes || item?.reorder_notes || '').trim() || null
+  };
+};
+
 const getItemNeedsReorder = (item) => {
   if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
     return Boolean(item.needs_reorder);
@@ -7775,6 +7755,16 @@ export default async function handler(req, res) {
         const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
 
         // Unified 5-Queue Filtering (restock, reorder, scrap_no_reorder, quarantine, rejected)
+        const itemWorkflowRes = String(item.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+        const isOutcomeFinalized = itemWorkflowRes === 'restocked' || itemWorkflowRes === 'scrapped_no_reorder';
+        const reorderInfo = resolveApiReorderStatus(item);
+
+        if (req.query?.reorder_status) {
+          const wantReorder = String(req.query.reorder_status).trim().toLowerCase();
+          if (wantReorder === 'reordered' && !reorderInfo.isReordered) return false;
+          if ((wantReorder === 'pending' || wantReorder === 'pending_reorder') && reorderInfo.isReordered) return false;
+        }
+
         if (queue) {
           const cleanQueue = String(queue).trim().toLowerCase();
           const needsReorderFlag = getItemNeedsReorder(item);
@@ -7782,19 +7772,19 @@ export default async function handler(req, res) {
           if (cleanQueue === 'restock') {
             const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
             if (!isRestockDisp) return false;
-            if (FINALIZED_RESTOCK.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
             const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag === false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (reorderInfo.isReordered || FINALIZED_SCRAP.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'scrap_no_reorder') {
             const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag !== false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || isOutcomeFinalized) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
             if (!isRtv) return false;
@@ -7871,9 +7861,15 @@ export default async function handler(req, res) {
       const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
       const enrichedData = paginatedData.map(item => {
         const needsReorder = getItemNeedsReorder(item);
+        const reorderInfo = resolveApiReorderStatus(item);
         const itemObj = {
           ...item,
-          needs_reorder: needsReorder
+          needs_reorder: needsReorder,
+          reorder_status: reorderInfo.status,
+          reordered_at: reorderInfo.reorderedAt,
+          reordered_by: reorderInfo.reorderedBy,
+          reorder_po_number: reorderInfo.poNumber,
+          reorder_notes: reorderInfo.notes
         };
         const cleanQueue = queue ? String(queue).trim().toLowerCase() : '';
         if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
@@ -8178,7 +8174,7 @@ export default async function handler(req, res) {
         'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'reporter_name', 'reporter_contact', 'reported_by',
         'ae_name', 'ae_email', 'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
         'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number',
-        'is_test'
+        'is_test', 'reorder_status', 'reorder_notes'
       ];
 
       const updateData = {};
@@ -8191,7 +8187,7 @@ export default async function handler(req, res) {
       // Check lifecycle action (archive, trash, restore)
       const lifecycleAction = body?.lifecycle || body?.action || null;
 
-      if (Object.keys(updateData).length === 0 && !lifecycleAction) {
+      if (Object.keys(updateData).length === 0 && !lifecycleAction && body?.workflow_resolution === undefined && body?.needs_reorder === undefined) {
         return sendJson(res, 400, {
           success: false,
           error: 'BAD_REQUEST',
@@ -8199,20 +8195,38 @@ export default async function handler(req, res) {
         });
       }
 
-      // Normalize status and disposition for coworker restock, scrap/re-order, RTV & hold sync
+      // Separate independent Reorder Status update from 4-Choice Outcome / Scrap lifecycle updates
+      const rawStatusLower = updateData.status ? String(updateData.status).toLowerCase().trim() : '';
+      const rawWorkflowResLower = body?.workflow_resolution !== undefined ? String(body.workflow_resolution).toLowerCase().trim() : '';
+      const rawReorderLower = body?.reorder_status !== undefined ? String(body.reorder_status).toLowerCase().trim() : '';
+
+      let requestedReorderUpdate = null; // 'reordered' | 'pending' | null
+      if (rawReorderLower === 'reordered') {
+        requestedReorderUpdate = 'reordered';
+      } else if (rawReorderLower === 'pending' || rawReorderLower === 'pending_reorder') {
+        requestedReorderUpdate = 'pending';
+      } else if (rawStatusLower === 'reordered' || rawWorkflowResLower === 'reordered') {
+        requestedReorderUpdate = 'reordered';
+      }
+
+      if (rawStatusLower === 'reordered') {
+        delete updateData.status;
+      }
+
+      // Normalize status and disposition for restock, scrap, RTV & hold sync
       let requestedWorkflowResolution = null;
+      let explicitResetWorkflow = false;
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
         if (s === 'restocked' || s === '6- restocked') {
           updateData.status = 'resolved';
           requestedWorkflowResolution = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed' || s === 'reordered') {
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
           updateData.status = 'resolved';
-          const explicitNoReorder = body?.needs_reorder === false;
-          requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
+          requestedWorkflowResolution = 'scrapped_no_reorder';
         } else if (s === 'pending' || s === 'under_inspection' || s === 'received_at_dock' || s === 'reopen' || s === 'reset') {
           updateData.status = (s === 'received_at_dock' || s === 'pending') ? 'pending' : 'under_inspection';
-          requestedWorkflowResolution = null; // Clear resolution to reopen
+          explicitResetWorkflow = true;
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -8224,13 +8238,16 @@ export default async function handler(req, res) {
         } else if (s === 'resolved' || s === 'closed') {
           updateData.status = 'resolved';
           const d = String(updateData.disposition || '').toLowerCase();
-          const explicitNoReorder = body?.needs_reorder === false;
-          if (d.includes('scrap') || d.includes('dispose')) {
-            requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
-          } else {
+          if (rawWorkflowResLower === 'restocked') {
+            requestedWorkflowResolution = 'restocked';
+          } else if (rawWorkflowResLower === 'scrapped_no_reorder' || d.includes('scrap') || d.includes('dispose')) {
+            requestedWorkflowResolution = 'scrapped_no_reorder';
+          } else if (d.includes('restock')) {
             requestedWorkflowResolution = 'restocked';
           }
         }
+      } else if (rawWorkflowResLower === 'restocked' || rawWorkflowResLower === 'scrapped_no_reorder') {
+        requestedWorkflowResolution = rawWorkflowResLower;
       }
 
       if (updateData.reason && !updateData.condition_grade) {
@@ -8275,13 +8292,17 @@ export default async function handler(req, res) {
 
       const actorName = String(body?.actor || body?.user || body?.updated_by || client.name || 'Coworker').trim();
       const targetBarcode = body?.barcode ? String(body.barcode).trim() : null;
+      const cleanReorderPo = body?.po_number ? String(body.po_number).trim() : '';
+      const cleanReorderNotes = body?.reorder_notes ? String(body.reorder_notes).trim() : '';
 
-      // Standardized Audit Trail Note for 4 Operational Actions
-      let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
-      if (requestedWorkflowResolution === 'restocked') {
+      // Standardized Audit Trail Note
+      let auditNote = `RMA updated by ${actorName}`;
+      if (requestedReorderUpdate === 'reordered' && !requestedWorkflowResolution && !updateData.status) {
+        auditNote = `Supplier Re-order confirmed by ${actorName}${cleanReorderPo ? ` (PO: ${cleanReorderPo})` : ''}`;
+      } else if (requestedReorderUpdate === 'pending' && !requestedWorkflowResolution && !updateData.status) {
+        auditNote = `Reorder status reset to Pending by ${actorName}`;
+      } else if (requestedWorkflowResolution === 'restocked') {
         auditNote = `ERP Restock confirmed by ${actorName}`;
-      } else if (requestedWorkflowResolution === 'reordered') {
-        auditNote = `Supplier Re-order confirmed by ${actorName}`;
       } else if (requestedWorkflowResolution === 'scrapped_no_reorder') {
         auditNote = `Scrap written off by ${actorName}`;
       } else if (updateData.status === 'vendor_claimed') {
@@ -8294,8 +8315,6 @@ export default async function handler(req, res) {
 
       const lifecycleStageLabel = requestedWorkflowResolution === 'restocked'
         ? '6- Restocked'
-        : requestedWorkflowResolution === 'reordered'
-        ? '7- Re-Ordered (PO Placed)'
         : requestedWorkflowResolution === 'scrapped_no_reorder'
         ? '7- Scrapped / Written Off'
         : updateData.status === 'vendor_claimed'
@@ -8306,9 +8325,19 @@ export default async function handler(req, res) {
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: requestedWorkflowResolution === 'restocked' ? 'ERP_RESTOCK' : (requestedWorkflowResolution === 'reordered' ? 'SUPPLIER_REORDER' : (requestedWorkflowResolution === 'scrapped_no_reorder' ? 'SCRAP_DISPOSAL' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH')))),
+        stage: requestedReorderUpdate && !requestedWorkflowResolution && !updateData.status
+          ? (requestedReorderUpdate === 'reordered' ? 'SUPPLIER_REORDER' : 'SUPPLIER_REORDER_RESET')
+          : requestedWorkflowResolution === 'restocked'
+          ? 'ERP_RESTOCK'
+          : requestedWorkflowResolution === 'scrapped_no_reorder'
+          ? 'SCRAP_DISPOSAL'
+          : updateData.status === 'vendor_claimed'
+          ? 'VENDOR_RTV'
+          : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH'),
         actor: actorName,
-        status: updateData.status,
+        ...(updateData.status ? { status: updateData.status } : {}),
+        ...(requestedReorderUpdate ? { reorder_status: requestedReorderUpdate } : {}),
+        ...(cleanReorderPo ? { po_number: cleanReorderPo } : {}),
         lifecycle_stage: lifecycleStageLabel,
         warehouse_location: updateData.warehouse_location || undefined,
         hold_reason: body?.hold_reason || undefined,
@@ -8316,6 +8345,7 @@ export default async function handler(req, res) {
       };
 
       const updatedRows = [];
+      const nowIso = new Date().toISOString();
 
       const explicitNeedsReorder = body?.needs_reorder !== undefined ? Boolean(body.needs_reorder) : undefined;
       const explicitHoldReason = body?.hold_reason ? String(body.hold_reason).trim() : undefined;
@@ -8327,6 +8357,7 @@ export default async function handler(req, res) {
 
         // Merge operational metadata safely into JSONB ai_document_metadata
         const currentMeta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object') ? row.ai_document_metadata : {};
+        const prevReorder = (currentMeta.reorder && typeof currentMeta.reorder === 'object') ? currentMeta.reorder : {};
         const updatedMeta = {
           ...currentMeta,
           ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
@@ -8334,14 +8365,36 @@ export default async function handler(req, res) {
           ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {}),
           ...(requestedWorkflowResolution ? {
             workflow_resolution: requestedWorkflowResolution,
-            resolved_at: new Date().toISOString(),
+            resolved_at: nowIso,
             resolved_by: actorName
           } : {})
         };
-        if (!requestedWorkflowResolution) {
+        if (explicitResetWorkflow) {
           delete updatedMeta.workflow_resolution;
           delete updatedMeta.resolved_at;
           delete updatedMeta.resolved_by;
+        }
+        if (requestedReorderUpdate) {
+          updatedMeta.reorder = requestedReorderUpdate === 'reordered'
+            ? {
+                status: 'reordered',
+                reordered_at: nowIso,
+                reordered_by: actorName,
+                po_number: cleanReorderPo || prevReorder.po_number || row.po_number || '',
+                ...(cleanReorderNotes ? { notes: cleanReorderNotes } : (prevReorder.notes ? { notes: prevReorder.notes } : {}))
+              }
+            : {
+                status: 'pending',
+                reset_at: nowIso,
+                reset_by: actorName,
+                ...(cleanReorderPo ? { po_number: cleanReorderPo } : {}),
+                ...(cleanReorderNotes ? { notes: cleanReorderNotes } : {})
+              };
+          if (String(updatedMeta.workflow_resolution || '').toLowerCase() === 'reordered') {
+            delete updatedMeta.workflow_resolution;
+            delete updatedMeta.resolved_at;
+            delete updatedMeta.resolved_by;
+          }
         }
 
         if (lifecycleAction === 'archive' || lifecycleAction === 'archived') {
@@ -8402,6 +8455,8 @@ export default async function handler(req, res) {
 
         // Ensure non-existent columns are never sent to Supabase
         delete rowPayload.needs_reorder;
+        delete rowPayload.reorder_status;
+        delete rowPayload.reorder_notes;
         delete rowPayload.hold_reason;
         delete rowPayload.rejection_reason;
         delete rowPayload.actor;
@@ -8426,6 +8481,8 @@ export default async function handler(req, res) {
           } catch (e) {}
         }
 
+        const isStatusOrDispositionChange = Boolean(updateData.status || updateData.disposition || updateData.warehouse_location || requestedWorkflowResolution || explicitResetWorkflow);
+
         if (parsedRowItems.length > 0) {
           parsedRowItems = parsedRowItems.map(it => {
             const itBarcode = String(it.barcode || '').trim();
@@ -8442,39 +8499,47 @@ export default async function handler(req, res) {
             if (matchesSpecificBarcode || matchesQueueDisposition) {
               return {
                 ...it,
-                status: updateData.status !== undefined ? updateData.status : it.status,
-                workflow_resolution: requestedWorkflowResolution || it.workflow_resolution,
-                warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
-                disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
+                ...(updateData.status !== undefined ? { status: updateData.status } : {}),
+                ...(requestedWorkflowResolution ? { workflow_resolution: requestedWorkflowResolution } : {}),
+                ...(updateData.warehouse_location !== undefined ? { warehouse_location: updateData.warehouse_location } : {}),
+                ...(updateData.disposition !== undefined ? { disposition: updateData.disposition } : {}),
+                ...(requestedReorderUpdate ? {
+                  reorder_status: requestedReorderUpdate,
+                  reordered_at: requestedReorderUpdate === 'reordered' ? nowIso : null,
+                  reordered_by: requestedReorderUpdate === 'reordered' ? actorName : null,
+                  reorder_po_number: updatedMeta.reorder?.po_number || it.reorder_po_number || null
+                } : {})
               };
             }
             return it;
           });
 
-          // Recompute parent manifest lifecycle status dynamically
-          let restockCnt = 0;
-          let scrapCnt = 0;
-          let pendingCnt = 0;
-          parsedRowItems.forEach(it => {
-            const d = String(it.disposition || '').toLowerCase();
-            const st = String(it.status || '').toLowerCase();
-            const res = it.workflow_resolution;
-            if (st === 'resolved' && res === 'restocked') restockCnt += 1;
-            else if (st === 'resolved' && (res === 'reordered' || res === 'scrapped_no_reorder')) scrapCnt += 1;
-            else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
-            else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
-            else if (!d || d.includes('pending')) pendingCnt += 1;
-          });
-          if (restockCnt === parsedRowItems.length) {
-            rowPayload.status = 'resolved';
-            updatedMeta.workflow_resolution = 'restocked';
-          } else if (scrapCnt === parsedRowItems.length) {
-            rowPayload.status = 'resolved';
-            updatedMeta.workflow_resolution = explicitNeedsReorder === false ? 'scrapped_no_reorder' : 'reordered';
-          } else if (pendingCnt === parsedRowItems.length) {
-            rowPayload.status = 'under_inspection';
-          } else {
-            rowPayload.status = 'partially_completed';
+          if (isStatusOrDispositionChange) {
+            // Recompute parent manifest lifecycle status only when status/disposition/resolution actually changed
+            let restockCnt = 0;
+            let scrapCnt = 0;
+            let pendingCnt = 0;
+            parsedRowItems.forEach(it => {
+              const d = String(it.disposition || '').toLowerCase();
+              const st = String(it.status || '').toLowerCase();
+              const res = it.workflow_resolution;
+              if (st === 'resolved' && res === 'restocked') restockCnt += 1;
+              else if (st === 'resolved' && res === 'scrapped_no_reorder') scrapCnt += 1;
+              else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+              else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
+              else if (!d || d.includes('pending')) pendingCnt += 1;
+            });
+            if (restockCnt === parsedRowItems.length) {
+              rowPayload.status = 'resolved';
+              updatedMeta.workflow_resolution = 'restocked';
+            } else if (scrapCnt === parsedRowItems.length) {
+              rowPayload.status = 'resolved';
+              updatedMeta.workflow_resolution = 'scrapped_no_reorder';
+            } else if (pendingCnt === parsedRowItems.length) {
+              rowPayload.status = 'under_inspection';
+            } else {
+              rowPayload.status = 'partially_completed';
+            }
           }
           rowPayload.items = parsedRowItems;
         }
@@ -8490,9 +8555,10 @@ export default async function handler(req, res) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
           const res = updatedRow.ai_document_metadata?.workflow_resolution || requestedWorkflowResolution;
+          const reorderMetaOut = updatedRow.ai_document_metadata?.reorder || {};
+          const computedReorderStatus = reorderMetaOut.status || (res === 'reordered' ? 'reordered' : 'pending');
           let calculatedStage = updatedRow.status;
           if (res === 'restocked') calculatedStage = '6- Restocked';
-          else if (res === 'reordered') calculatedStage = '7- Re-Ordered (PO Placed)';
           else if (res === 'scrapped_no_reorder') calculatedStage = '7- Scrapped / Written Off';
           else if (updatedRow.status === 'vendor_claimed') calculatedStage = '3- Vendor Claimed';
           else if (updatedRow.status === 'under_inspection') calculatedStage = '3- Under Inspection';
@@ -8501,7 +8567,11 @@ export default async function handler(req, res) {
 
           updatedRows.push({
             ...updatedRow,
-            lifecycle_stage: calculatedStage
+            lifecycle_stage: calculatedStage,
+            reorder_status: computedReorderStatus,
+            reordered_at: reorderMetaOut.reordered_at || null,
+            reordered_by: reorderMetaOut.reordered_by || null,
+            reorder_po_number: reorderMetaOut.po_number || updatedRow.po_number || null
           });
         }
 
@@ -8532,7 +8602,13 @@ export default async function handler(req, res) {
                     status: updateData.status !== undefined ? updateData.status : it.status,
                     warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
                     disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition,
-                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade
+                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade,
+                    ...(requestedReorderUpdate ? {
+                      reorder_status: requestedReorderUpdate,
+                      reordered_at: requestedReorderUpdate === 'reordered' ? nowIso : null,
+                      reordered_by: requestedReorderUpdate === 'reordered' ? actorName : null,
+                      reorder_po_number: updatedMeta.reorder?.po_number || it.reorder_po_number || null
+                    } : {})
                   };
                 }
                 return it;
@@ -13411,22 +13487,21 @@ If you are syncing returned goods back into your warehouse inventory:
    *(Passing \`"status": "restocked"\` is also supported and automatically resolved safely without Supabase constraint errors).*
    This marks the ticket as **6- Restocked** so it won't be double-counted.
 
-#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder):
-If you need to know which items were lost/scrapped so your procurement system can re-order replacement stock from suppliers:
-1. **Query Re-Order Needed Items**:
-   Send \`GET /api/v1/rma?queue=reorder\`
-   Retrieves all items that were flagged for replenishment with \`needs_reorder: true\`.
-2. **Place Replacement PO & Acknowledge**:
-   Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
+#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder & Independent Reorder Status):
+If you need to track or update supplier replacement Purchase Orders independently of an RMA's 4-Choice Outcome and 10-day pickup SLA:
+1. **Query Pending Re-Order Items**:
+   Send \`GET /api/v1/rma?queue=reorder\` (or filter with \`?reorder_status=pending\`).
+   Retrieves items awaiting replacement PO with \`reorder_status: "pending"\` and \`needs_reorder: true\`.
+2. **Mark Replacement PO Placed (Without Scrapping or Closing the RMA)**:
+   Send \`PATCH /api/v1/rma/{id}\` with:
    \`\`\`json
    {
-     "status": "resolved",
-     "workflow_resolution": "reordered",
-     "disposition": "5- Scrap / Dispose",
-     "notes": "Replacement supplier PO #PO-2026-9901 issued."
+     "reorder_status": "reordered",
+     "po_number": "PO-2026-9901",
+     "reorder_notes": "Replacement supplier PO #PO-2026-9901 placed."
    }
    \`\`\`
-   This marks the ticket as **7- Re-Ordered (PO Placed)**.
+   *(Passing \`"status": "reordered"\` is also accepted for backwards compatibility and strictly sets \`reorder_status: "reordered"\` without marking the RMA as **Scrapped** or closing its 10-day SLA).*
 
 #### 3. 🚫 No Re-Order / Write-Off Queue (?queue=scrap_no_reorder):
 If you need to audit items marked for disposal without placing a replacement supplier purchase order:
@@ -14688,6 +14763,21 @@ export const PickupPhotoSlotsSchema = z.object({
   pickup_items: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of physical merchandise (50 photos max across all 5 categories)' })
 }).optional();
 
+export const ReorderStatusEnum = z.enum([
+  'pending',
+  'reordered'
+]).openapi({
+  description: 'Independent Replacement Purchase Order status (never alters 4-Choice Outcome or 10-day SLA)'
+});
+
+export const ReorderMetadataSchema = z.object({
+  status: ReorderStatusEnum.optional().openapi({ example: 'reordered' }),
+  reordered_at: z.string().datetime().nullable().optional(),
+  reordered_by: z.string().optional().openapi({ example: 'Procurement / ERP' }),
+  po_number: z.string().optional().openapi({ example: 'PO-2026-9901' }),
+  notes: z.string().optional().openapi({ example: 'Replacement stock PO placed with supplier' })
+}).passthrough().openapi('ReorderMetadata');
+
 export const SupplierPickupMetadataSchema = z.object({
   disposition: FourChoiceOutcomeEnum.optional(),
   processed_by: z.string().min(1).optional().openapi({ example: 'Juan Dela Cruz', description: 'Mandatory manually entered Pingcon staff full name (zero auto-fill on new records)' }),
@@ -14755,13 +14845,18 @@ export const RMAReportSchema = z.object({
   total_items: z.number().int().default(1).openapi({ example: 1, description: 'Total distinct items in manifest' }),
   total_quantity: z.number().int().default(1).openapi({ example: 1, description: 'Summed quantity across all items in manifest' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
+  reorder_status: ReorderStatusEnum.optional().openapi({ example: 'pending', description: 'Independent replacement PO status (pending or reordered)' }),
+  reordered_at: z.string().datetime().nullable().optional(),
+  reordered_by: z.string().nullable().optional(),
+  reorder_po_number: z.string().nullable().optional(),
   ai_document_metadata: z.object({
     is_test: z.boolean().optional(),
     test_mode: z.boolean().optional(),
     workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional(),
+    reorder: ReorderMetadataSchema.optional(),
     supplier_pickup: SupplierPickupMetadataSchema.optional(),
     follow_up: FollowUpMetadataSchema.optional()
-  }).passthrough().optional().openapi({ description: 'Structured metadata including 5-slot multi-photo driver pickup (up to 10/slot, 50 total), 4-Step / 10-Day SLA follow-up tracking, and Test Mode isolation flags' }),
+  }).passthrough().optional().openapi({ description: 'Structured metadata including independent reorder tracking, 5-slot multi-photo driver pickup, 4-Step / 10-Day SLA follow-up tracking, and Test Mode isolation flags' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
 
@@ -14810,7 +14905,9 @@ export const UpdateRMAReportSchema = z.object({
   code: z.string().optional().openapi({ example: 'P2678P' }),
   supplier_name: z.string().optional().openapi({ example: 'Liwayway Marketing' }),
   unit_name: z.string().optional().openapi({ example: 'pc' }),
-  status: RMAStatusEnum.optional().openapi({ example: 'pending', description: 'Lifecycle status update or full reset via resetReportToPending ("pending" clears 4-Choice disposition, pickup/scrap/restock/closed metadata, and restarts the 10-day SLA countdown cleanly). Also accepts "restocked", "reordered", or "scrapped".' }),
+  status: z.union([RMAStatusEnum, z.literal('reordered')]).optional().openapi({ example: 'pending', description: 'Lifecycle status update ("pending" resets 4-Choice/SLA cleanly; "restocked" or "scrapped" resolves outcome; "reordered" updates reorder_status safely without marking Scrapped or closing SLA).' }),
+  reorder_status: ReorderStatusEnum.optional().openapi({ example: 'reordered', description: 'Set independent Replacement PO status ("pending" or "reordered") without altering 4-Choice Outcome or 10-day SLA' }),
+  reorder_notes: z.string().optional().openapi({ example: 'Replacement stock ordered under PO-2026-9901' }),
   warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
   notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
@@ -14856,18 +14953,18 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \
   -d '{"status": "restocked", "warehouse_location": "Good Stock Area"}'
 \`\`\`
 
-### 🔴 Queue 2: Re-Order Needed / Scrapped (?queue=reorder)
-To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
+### 🔴 Queue 2: Supplier Re-Order Queue (?queue=reorder & ?reorder_status=pending)
+To fetch items awaiting replacement PO without marking them Scrapped:
 \`\`\`bash
 curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=reorder" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-After re-ordering from suppliers, confirm via PATCH:
+After placing replacement PO, confirm independently via PATCH (keeps 4-Choice Outcome & 10-Day SLA untouched):
 \`\`\`bash
 curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \\
   -H "x-api-key: sk_live_rma_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"status": "scrapped", "warehouse_location": "Disposal / Scrap Area"}'
+  -d '{"reorder_status": "reordered", "po_number": "PO-2026-9901"}'
 \`\`\`
 
 ### 🟣 Queue 3: Vendor Recovery / RTV (?queue=rtv_debit)
@@ -14903,6 +15000,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         queue: z.enum(['restock', 'reorder', 'scrap', 'rtv_debit', 'quarantine']).optional().openapi({ description: 'Filter by 4-pillar operational queue: "restock" (ready to restock in WMS), "reorder" or "scrap" (re-order replacement from supplier), "rtv_debit" (vendor recovery / outbound RTV claims), "quarantine" (items on hold)', example: 'restock' }),
+        reorder_status: ReorderStatusEnum.optional().openapi({ description: 'Filter by independent Reorder Status ("pending" or "reordered")', example: 'pending' }),
         test_mode: z.enum(['true', 'false']).optional().openapi({ description: 'Filter by test mode: "true" returns sandbox test records only, "false" or omitted returns live production records only', example: 'false' }),
         lifecycle: z.enum(['active', 'archived', 'trashed']).optional().openapi({ description: 'Filter by lifecycle state: "active" (default), "archived" (Enterprise Archive Vault), "trashed" (30-day soft trash bin)', example: 'active' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),
@@ -18008,7 +18106,7 @@ export default function App() {
             status: 'resolved',
             ai_document_metadata: {
               ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
-              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              workflow_resolution: cleanStatus === 'scrapped' ? 'scrapped_no_reorder' : 'restocked',
               resolved_at: new Date().toISOString(),
               resolved_by: actorName
             }
@@ -18024,7 +18122,7 @@ export default function App() {
       showToast(
         cleanStatus === 'restocked'
           ? `✓ Marked ${item.rma_number} as 6- Restocked in WMS!`
-          : `✓ Marked ${item.rma_number} as 7- Scrapped / Disposed (Supplier Re-Order Confirmed)!`,
+          : `✓ Marked ${item.rma_number} as 7- Scrapped / Written Off!`,
         'success'
       );
       refreshAllData();
@@ -18203,14 +18301,21 @@ export default function App() {
       } else if (evt.type === 'coworker-queue-updated') {
         const rep = evt.payload?.report;
         const res = evt.payload?.workflow_resolution;
+        const reorderPayload = evt.payload?.reorder;
         let title = `Queue Action: ${evt.payload?.rmaNumber || 'RMA'}`;
         let message = `Status changed to ${evt.payload?.status || 'updated'}`;
-        if (res === 'restocked') {
+        if (reorderPayload?.status === 'reordered') {
+          title = `🔄 Reordered: ${evt.payload?.rmaNumber}`;
+          message = `${reorderPayload.po_number ? `PO #${reorderPayload.po_number} recorded. ` : ''}4-Choice Outcome & 10-Day SLA unchanged.`;
+        } else if (reorderPayload?.status === 'pending') {
+          title = `↩️ Reorder Pending: ${evt.payload?.rmaNumber}`;
+          message = `Reorder status reset to Pending.`;
+        } else if (res === 'restocked') {
           title = `📦 Stocked in WMS: ${evt.payload?.rmaNumber}`;
           message = `${rep?.name || 'Item'} confirmed restocked in inventory.`;
         } else if (res === 'reordered') {
-          title = `🔄 PO Placed: ${evt.payload?.rmaNumber}`;
-          message = `Supplier replacement order confirmed.`;
+          title = `🔄 Reordered: ${evt.payload?.rmaNumber}`;
+          message = `Supplier replacement order recorded.`;
         } else if (res === 'scrapped_no_reorder') {
           title = `🚫 Written Off: ${evt.payload?.rmaNumber}`;
           message = `Item scrap written off.`;
@@ -18222,7 +18327,7 @@ export default function App() {
           type: 'rma',
           title,
           message,
-          subtext: 'Coworker Queue'
+          subtext: reorderPayload ? 'Reorder Status' : 'Coworker Queue'
         });
       } else if (evt.type === 'report-updated') {
         const rep = evt.payload?.report;
@@ -18272,13 +18377,17 @@ export default function App() {
           } else if (payload?.eventType === 'UPDATE' && payload.new) {
             const rep = payload.new;
             const res = rep.ai_document_metadata?.workflow_resolution;
+            const reorderMeta = rep.ai_document_metadata?.reorder;
             let statusTitle = `RMA Updated: ${rep.rma_number}`;
             let statusMsg = `${rep.name || 'Item'} - Status: ${rep.status}`;
-            if (res === 'restocked') {
+            if (reorderMeta?.status === 'reordered' && !res) {
+              statusTitle = `🔄 Reordered: ${rep.rma_number}`;
+              statusMsg = `${reorderMeta.po_number ? `PO #${reorderMeta.po_number} recorded. ` : ''}4-Choice Outcome remains independent.`;
+            } else if (res === 'restocked') {
               statusTitle = `📦 Stocked in WMS: ${rep.rma_number}`;
               statusMsg = `${rep.name || 'Item'} restocked to inventory.`;
             } else if (res === 'reordered') {
-              statusTitle = `🔄 PO Placed: ${rep.rma_number}`;
+              statusTitle = `🔄 Reordered: ${rep.rma_number}`;
               statusMsg = `Replacement order placed with supplier.`;
             } else if (res === 'scrapped_no_reorder') {
               statusTitle = `🚫 Written Off: ${rep.rma_number}`;
@@ -26641,7 +26750,8 @@ import {
   getGpsMapUrl,
   isRealSupplierName,
   isMixedSuppliersSummary,
-  sumManifestQuantity
+  sumManifestQuantity,
+  resolveReorderStatus
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -26719,6 +26829,31 @@ export default function CustomerHubTab({
       setCustomerRowBusyId(null);
     }
   };
+
+  const handleMarkReordered = async (item, nextStatus = 'reordered') => {
+    if (!item || customerRowBusyId) return;
+    const key = item.id || item.rma_number;
+    setCustomerRowBusyId(key);
+    setCustomerFollowUpBanner(null);
+    try {
+      await catalogService.markAsReordered({
+        item,
+        reorderStatus: nextStatus,
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setCustomerFollowUpBanner({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `${item.rma_number} marked Reordered (4-Choice Outcome & 10-Day SLA unchanged).`
+          : `${item.rma_number} reorder status reset to Pending.`
+      });
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'reorder-updated', rmaNumber: item.rma_number } }));
+    } catch (err) {
+      setCustomerFollowUpBanner({ type: 'error', text: err?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setCustomerRowBusyId(null);
+    }
+  };
   const onSubTabChangeRef = React.useRef(onSubTabChange);
   onSubTabChangeRef.current = onSubTabChange;
 
@@ -26746,6 +26881,7 @@ export default function CustomerHubTab({
   const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
   const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
   const [reportsDispositionFilter, setReportsDispositionFilter] = useState('all');
+  const [reportsReorderFilter, setReportsReorderFilter] = useState('all');
   const [reportsConditionGradeFilter, setReportsConditionGradeFilter] = useState('all');
   const [reportsDateFrom, setReportsDateFrom] = useState('');
   const [reportsDateTo, setReportsDateTo] = useState('');
@@ -26818,6 +26954,7 @@ export default function CustomerHubTab({
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
     setReportsDispositionFilter('all');
+    setReportsReorderFilter('all');
     setReportsConditionGradeFilter('all');
     if (onClearCoworkerQueueFilter) onClearCoworkerQueueFilter();
     setReportsDateFrom('');
@@ -26970,6 +27107,12 @@ export default function CustomerHubTab({
         if (itemDate > reportsDateTo) return false;
       }
 
+      if (reportsReorderFilter !== 'all') {
+        const rInfo = resolveReorderStatus(item);
+        if (reportsReorderFilter === 'reordered' && !rInfo.isReordered) return false;
+        if (reportsReorderFilter === 'pending' && rInfo.isReordered) return false;
+      }
+
       return true;
     });
 
@@ -27046,6 +27189,7 @@ export default function CustomerHubTab({
     reportsReasonFilter,
     reportsStatusFilter,
     reportsDispositionFilter,
+    reportsReorderFilter,
     reportsConditionGradeFilter,
     coworkerQueueFilter,
     isItemReadyToRestock,
@@ -27421,6 +27565,22 @@ export default function CustomerHubTab({
           <option value="rejected">8- Rejected / Invalid Claim</option>
         </select>
 
+        {/* Reorder Status Filter Dropdown */}
+        <select
+          aria-label="Reorder Status Filter"
+          value={reportsReorderFilter}
+          onChange={(e) => {
+            setReportsReorderFilter(e.target.value);
+            setReportsCurrentPage(1);
+          }}
+          className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer truncate box-border"
+          title="Filter by Reorder Status (independent of 4-Choice Outcome)"
+        >
+          <option value="all">All Reorder Statuses</option>
+          <option value="pending">Reorder: Pending</option>
+          <option value="reordered">✓ Reordered</option>
+        </select>
+
         {/* Date Range Picker: Neatly split in 2 columns */}
         <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
           <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
@@ -27462,7 +27622,7 @@ export default function CustomerHubTab({
         </div>
 
         {/* Reset Filters */}
-        {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+        {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsReorderFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
           <button
             type="button"
             onClick={resetReportsFilters}
@@ -27479,7 +27639,7 @@ export default function CustomerHubTab({
       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
         <span>
           Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {customerScopedTotal} reports
-          {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+          {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsReorderFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
             <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
           )}
         </span>
@@ -28045,9 +28205,23 @@ export default function CustomerHubTab({
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
+                            {(() => {
+                              const reorderInfo = resolveReorderStatus(item);
+                              return (
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                  title={reorderInfo.isReordered
+                                    ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
+                                    : 'Replacement PO not yet ordered'}
+                                >
+                                  <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                                  {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                                </span>
+                              );
+                            })()}
                             {outcome.choiceKey === 'scrap' && (
                               <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(item) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                {getItemNeedsReorder(item) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
                               </div>
                             )}
                           </div>
@@ -28161,16 +28335,16 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* 1-Click Coworker Supplier Re-Order Action */}
-                          {isItemReorderNeeded(item, reportsList) && (
+                          {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                          {!resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(item.status || '').toLowerCase()) && (
                             <button
                               type="button"
-                              disabled={updatingQueueId === (item.id || item.rma_number)}
-                              onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
-                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                              title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                              disabled={customerRowBusyId === (item.id || item.rma_number)}
+                              onClick={() => handleMarkReordered(item, 'reordered')}
+                              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                             >
-                              <span>✓ PO Placed</span>
+                              <span>🔄 Mark Reordered</span>
                             </button>
                           )}
 
@@ -28569,15 +28743,15 @@ export default function CustomerHubTab({
                                                   <span>✓ Restocked in WMS</span>
                                                 </button>
                                               )}
-                                              {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
+                                              {!resolveReorderStatus(child).isReordered && !resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(child.status || '').toLowerCase()) && (
                                                 <button
                                                   type="button"
-                                                  disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
-                                                  onClick={() => onConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
-                                                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                                  title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                                  disabled={customerRowBusyId === (item.id || item.rma_number)}
+                                                  onClick={() => handleMarkReordered(item, 'reordered')}
+                                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                  title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                                                 >
-                                                  <span>✓ PO Placed</span>
+                                                  <span>🔄 Mark Reordered</span>
                                                 </button>
                                               )}
                                               {(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine') && (
@@ -28789,6 +28963,17 @@ export default function CustomerHubTab({
                           {outcome.label}
                         </span>
                       )}
+                      {(() => {
+                        const reorderInfo = resolveReorderStatus(item);
+                        return (
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border inline-flex items-center gap-0.5 shadow-2xs ${reorderInfo.badgeColor}`}
+                          >
+                            {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                            {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
+                          </span>
+                        );
+                      })()}
                       {isSplitChildTicket(item) ? (
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                           <span>✂️ Part 2</span>
@@ -28906,16 +29091,16 @@ export default function CustomerHubTab({
                       </button>
                     )}
 
-                    {/* 1-Click Coworker Supplier Re-Order Action */}
-                    {isItemReorderNeeded(item, reportsList) && (
+                    {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                    {!resolveReorderStatus(item).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(item.status || '').toLowerCase()) && (
                       <button
                         type="button"
-                        disabled={updatingQueueId === (item.id || item.rma_number)}
-                        onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
-                        className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                        title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                        disabled={customerRowBusyId === (item.id || item.rma_number)}
+                        onClick={() => handleMarkReordered(item, 'reordered')}
+                        className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                       >
-                        <span>✓ PO Placed</span>
+                        <span>🔄 Mark Reordered</span>
                       </button>
                     )}
 
@@ -39565,6 +39750,7 @@ import {
   isTestRecord,
   formatFourChoiceOutcome,
   getItemNeedsReorder,
+  resolveReorderStatus,
   formatDateYmd,
   doesCreditMemoLinkReport,
   getGpsAddressDisplay,
@@ -39715,6 +39901,49 @@ export default function QuickRMAActionModal({
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+
+  const [reorderPoInput, setReorderPoInput] = useState('');
+  const [reorderNotesInput, setReorderNotesInput] = useState('');
+  const [isReorderBusy, setIsReorderBusy] = useState(false);
+  const [reorderFeedback, setReorderFeedback] = useState(null);
+
+  useEffect(() => {
+    const rMeta = (report?.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+      ? report.ai_document_metadata
+      : {};
+    const reorderObj = (rMeta.reorder && typeof rMeta.reorder === 'object') ? rMeta.reorder : {};
+    setReorderPoInput(String(reorderObj.po_number || '').trim());
+    setReorderNotesInput(String(reorderObj.notes || '').trim());
+    setReorderFeedback(null);
+  }, [report?.id, report?.rma_number, report?.ai_document_metadata?.reorder?.po_number, report?.ai_document_metadata?.reorder?.notes]);
+
+  const handleUpdateReorderStatus = async (nextStatus = 'reordered') => {
+    if (!report || isReorderBusy) return;
+    setIsReorderBusy(true);
+    setReorderFeedback(null);
+    try {
+      const updated = await catalogService.markAsReordered({
+        item: report,
+        reorderStatus: nextStatus,
+        poNumber: reorderPoInput,
+        notes: reorderNotesInput,
+        actorName: verifiedAdmin?.name || currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setReport(updated);
+      onReportUpdated?.(updated);
+      onRefresh?.(updated);
+      setReorderFeedback({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `Marked Reordered${reorderPoInput.trim() ? ` (PO #${reorderPoInput.trim()})` : ''}. 4-Choice Outcome & 10-Day SLA remain unchanged.`
+          : 'Reorder status reset to Pending.'
+      });
+    } catch (e) {
+      setReorderFeedback({ type: 'error', text: e?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setIsReorderBusy(false);
+    }
+  };
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -42234,7 +42463,7 @@ export default function QuickRMAActionModal({
                         type: 'success',
                         text: `Timeline, 10-day countdown & disposition outcome reset to Pending for ${report.rma_number}.`
                       });
-                    } catch (e) {
+                      } catch (e) {
                       setFollowUpFeedback({
                         type: 'error',
                         text: e?.message || 'Failed resetting timeline to Pending.'
@@ -42245,6 +42474,116 @@ export default function QuickRMAActionModal({
                   }}
                 />
               </div>
+
+              {/* (b2) Independent Reorder Status (Replacement PO) Controls */}
+              {(() => {
+                const reorderInfo = resolveReorderStatus(report);
+                return (
+                  <div
+                    data-testid="quick-rma-reorder-card"
+                    className="p-4 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl space-y-3 shadow-xs"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Reorder Status (Replacement PO)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Tracked independently from 4-Choice Claim Outcome &amp; 10-Day Pickup SLA.
+                        </p>
+                      </div>
+                      <span
+                        data-testid="quick-rma-reorder-badge"
+                        className={`px-3 py-1 rounded-xl text-xs font-black border inline-flex items-center gap-1.5 shadow-2xs ${reorderInfo.badgeColor}`}
+                      >
+                        <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                        {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                      </span>
+                    </div>
+
+                    {reorderInfo.isReordered && (reorderInfo.formattedTime || reorderInfo.reorderedBy) && (
+                      <div className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl px-3 py-1.5 flex flex-wrap items-center gap-2">
+                        {reorderInfo.formattedTime && (
+                          <span>Reordered: <strong className="font-mono">{reorderInfo.formattedTime}</strong></span>
+                        )}
+                        {reorderInfo.reorderedBy && (
+                          <span>by <strong>{reorderInfo.reorderedBy}</strong></span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                          PO # (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={reorderPoInput}
+                          onChange={(e) => setReorderPoInput(e.target.value)}
+                          placeholder="e.g. PO-2026-8812"
+                          className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                          Reorder Notes (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={reorderNotesInput}
+                          onChange={(e) => setReorderNotesInput(e.target.value)}
+                          placeholder="Supplier replacement PO notes..."
+                          className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!reorderInfo.isReordered ? (
+                        <button
+                          type="button"
+                          disabled={isReorderBusy}
+                          onClick={() => handleUpdateReorderStatus('reordered')}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <span>{isReorderBusy ? 'Saving...' : 'Mark Reordered'}</span>
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            disabled={isReorderBusy}
+                            onClick={() => handleUpdateReorderStatus('reordered')}
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <span>{isReorderBusy ? 'Saving...' : 'Update PO / Notes'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isReorderBusy}
+                            onClick={() => handleUpdateReorderStatus('pending')}
+                            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-xs font-bold cursor-pointer disabled:opacity-50"
+                          >
+                            Reset Reorder to Pending
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {reorderFeedback && (
+                      <div className={`p-2 rounded-xl border text-[11px] font-bold ${
+                        reorderFeedback.type === 'success'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                          : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+                      }`}>
+                        {reorderFeedback.text}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* (c) Split Qty Feature Intact */}
               {(() => {
@@ -45528,7 +45867,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToXlsx } from '../utils/exportCsv';
-import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl, resolveReorderStatus } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -46204,14 +46543,26 @@ export default function RMAReportsModal({
                           })()}
                         </td>
 
-                        {/* 10. 4-Choice Outcome (Human-Readable + Date/Time) */}
+                        {/* 10. 4-Choice Outcome (Human-Readable + Date/Time) & Reorder Status */}
                         <td className="py-3 px-3.5 text-center whitespace-nowrap">
                           {(() => {
                             const outcome = formatFourChoiceOutcome(item);
+                            const reorderInfo = resolveReorderStatus(item);
                             return (
-                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
-                                {outcome.label}
-                              </span>
+                              <div className="inline-flex flex-col items-center gap-1">
+                                <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                                  {outcome.label}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-block whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                  title={reorderInfo.isReordered
+                                    ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}`
+                                    : 'Replacement PO not yet ordered'}
+                                >
+                                  {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                                  {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
+                                </span>
+                              </div>
                             );
                           })()}
                         </td>
@@ -46499,6 +46850,14 @@ export default function RMAReportsModal({
                         }`}>
                           {isPendingUnknown ? 'Unknown' : 'Logged'}
                         </span>
+                        {(() => {
+                          const reorderInfo = resolveReorderStatus(item);
+                          return (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${reorderInfo.badgeColor}`}>
+                              {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                            </span>
+                          );
+                        })()}
                         <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 shrink-0">
                           {item.reason || 'Damaged'}
                         </span>
@@ -46678,7 +47037,7 @@ import {
   Box,
   Layers
 } from 'lucide-react';
-import { formatFourChoiceOutcome, formatDateTimeYmdHm, doesCreditMemoLinkReport } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatDateTimeYmdHm, doesCreditMemoLinkReport, resolveReorderStatus } from '../utils/rmaHelpers';
 
 export default function RMATimelineAudit({ 
   report, 
@@ -46687,6 +47046,7 @@ export default function RMATimelineAudit({
   if (!report) return null;
 
   const outcome = formatFourChoiceOutcome(report);
+  const reorderInfo = resolveReorderStatus(report);
   const pickup = report.ai_document_metadata?.supplier_pickup || {};
 
   // Find linked credit memo if any
@@ -46734,6 +47094,25 @@ export default function RMATimelineAudit({
         ? `Driver: ${pickup.driver_name || 'N/A'} • Plate: ${pickup.truck_plate || 'N/A'}${outcome.claimNumber ? ` • Claim: ${outcome.claimNumber}` : ''}`
         : `Supplier: ${pickup.supplier_name || report.supplier_name || 'Pending Assignment'}`,
       badge: 'STAGE 3: 4-CHOICE OUTCOME'
+    });
+  }
+
+  // Parallel Milestone: Replacement PO / Reorder Tracking (independent from 4-Choice & 10-day SLA)
+  if (reorderInfo.isReordered) {
+    const reorderParts = [
+      reorderInfo.poNumber ? `PO #: ${reorderInfo.poNumber}` : null,
+      reorderInfo.notes || null,
+      `4-Choice / 10-Day SLA remains independent`
+    ].filter(Boolean);
+    events.push({
+      id: 'reorder_status',
+      title: reorderInfo.poNumber ? `Replacement Reordered (PO #${reorderInfo.poNumber})` : 'Replacement Reordered',
+      timestamp: reorderInfo.reorderedAt || report.updated_at || report.created_at,
+      actor: reorderInfo.reorderedBy || 'Purchasing / Admin',
+      icon: Box,
+      color: 'bg-emerald-600 text-white',
+      details: reorderParts.join(' • '),
+      badge: 'REORDER STATUS: REORDERED'
     });
   }
 
@@ -53768,7 +54147,8 @@ import {
   getGpsMapUrl,
   summarizeBatchSuppliers,
   isRealSupplierName,
-  isMixedSuppliersSummary
+  isMixedSuppliersSummary,
+  resolveReorderStatus
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -53799,12 +54179,38 @@ export default function SupplierClaimsTab({
   const effectiveBulkArchiveReports = onRequestBulkArchiveReports || onBulkArchiveReports;
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
+  const [reorderFilter, setReorderFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState('created_at');
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
   const [followUpModalReport, setFollowUpModalReport] = useState(null);
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
+
+  const handleMarkReordered = async (report, nextStatus = 'reordered') => {
+    if (!report || updatingQueueId) return;
+    const rowKey = report.id || report.rma_number;
+    setUpdatingQueueId(rowKey);
+    setFollowUpBanner(null);
+    try {
+      await catalogService.markAsReordered({
+        item: report,
+        reorderStatus: nextStatus,
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setFollowUpBanner({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `${report.rma_number} marked Reordered (4-Choice Outcome & 10-Day SLA unchanged).`
+          : `${report.rma_number} reorder status reset to Pending.`
+      });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setFollowUpBanner({ type: 'error', text: err?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
 
   const handleRowCloseCase = async (report) => {
     const rowKey = report.id || report.rma_number;
@@ -53851,7 +54257,7 @@ export default function SupplierClaimsTab({
             status: 'resolved',
             ai_document_metadata: {
               ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
-              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              workflow_resolution: cleanStatus === 'scrapped' ? 'scrapped_no_reorder' : 'restocked',
               resolved_at: new Date().toISOString(),
               resolved_by: actorName
             }
@@ -54215,7 +54621,12 @@ export default function SupplierClaimsTab({
         r.po_number?.toLowerCase().includes(q) ||
         r.invoice_dr_number?.toLowerCase().includes(q);
 
-      return matchesSupplier && matchesDisposition && matchesSearch;
+      const reorderInfo = resolveReorderStatus(r);
+      const matchesReorder =
+        reorderFilter === 'all' ||
+        (reorderFilter === 'reordered' ? reorderInfo.isReordered : !reorderInfo.isReordered);
+
+      return matchesSupplier && matchesDisposition && matchesReorder && matchesSearch;
     });
 
     list.sort((a, b) => {
@@ -54265,7 +54676,7 @@ export default function SupplierClaimsTab({
     });
 
     return list;
-  }, [allRtvItems, selectedSupplier, dispositionFilter, searchTerm, coworkerQueueFilter, sortField, sortDirection, savedProductsList]);
+  }, [allRtvItems, selectedSupplier, dispositionFilter, reorderFilter, searchTerm, coworkerQueueFilter, sortField, sortDirection, savedProductsList]);
 
 
   // Paginated Slice
@@ -54450,7 +54861,7 @@ export default function SupplierClaimsTab({
     }
   };
 
-  const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || Boolean(searchTerm);
+  const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || reorderFilter !== 'all' || Boolean(searchTerm);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200 w-full min-w-0 box-border">
@@ -54547,12 +54958,34 @@ export default function SupplierClaimsTab({
               </select>
             </div>
 
+            {/* Reorder Status Filter Dropdown */}
+            <div className="flex items-center gap-1.5 w-full md:w-auto min-w-0">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                Reorder:
+              </label>
+              <select
+                aria-label="Reorder Status Filter"
+                value={reorderFilter}
+                onChange={(e) => {
+                  setReorderFilter(e.target.value);
+                  setSelectedRmaIds(new Set());
+                }}
+                className="w-full md:w-auto px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs truncate box-border"
+                title="Filter by Reorder Status (independent of 4-Choice Outcome)"
+              >
+                <option value="all">All Reorder Statuses</option>
+                <option value="pending">Reorder: Pending</option>
+                <option value="reordered">✓ Reordered</option>
+              </select>
+            </div>
+
             {hasActiveFilters && (
               <button
                 type="button"
                 onClick={() => {
                   setSelectedSupplier('All');
                   setDispositionFilter('All');
+                  setReorderFilter('all');
                   setSearchTerm('');
                   setSelectedRmaIds(new Set());
                 }}
@@ -54731,6 +55164,7 @@ export default function SupplierClaimsTab({
                 onClick={() => {
                   setSelectedSupplier('All');
                   setDispositionFilter('All');
+                  setReorderFilter('all');
                   setSearchTerm('');
                   setSelectedRmaIds(new Set());
                 }}
@@ -55132,12 +55566,28 @@ export default function SupplierClaimsTab({
                           </div>
                         </td>
 
-                        {/* Single Clean Triage Status Badge + Reporter Explanation */}
+                        {/* Single Clean Triage Status Badge + Reorder Status Pill + Reporter Explanation */}
                         <td className="p-3 max-w-[240px]">
                           <div className="space-y-1">
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
+                            {(() => {
+                              const reorderInfo = resolveReorderStatus(r);
+                              return (
+                                <div>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    title={reorderInfo.isReordered
+                                      ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
+                                      : 'Replacement PO not yet ordered'}
+                                  >
+                                    <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                                    {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                             {wf.isCountdownActive && !wf.isClosed && (
                               <div className="text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">
                                 {wf.step2.text}
@@ -55145,7 +55595,7 @@ export default function SupplierClaimsTab({
                             )}
                             {outcome.choiceKey === 'scrap' && (
                               <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                {getItemNeedsReorder(r) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
                               </div>
                             )}
                             {r.reason && (
@@ -55310,16 +55760,16 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1-Click Re-Order Needed Action */}
-                            {isItemReorderNeeded(r) && (
+                            {/* 1-Click Mark Reordered Action (Independent of 4-Choice Outcome & 10-Day SLA) */}
+                            {!resolveReorderStatus(r).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(r.status || '').toLowerCase()) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
-                                onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
+                                onClick={() => handleMarkReordered(r, 'reordered')}
                                 className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                               >
-                                <span>✓ Confirm Re-Ordered (PO Placed)</span>
+                                <span>🔄 Mark Reordered</span>
                               </button>
                             )}
 
@@ -62731,28 +63181,177 @@ export const catalogService = {
   },
 
   /**
-   * 1-Click Coworker Queue Action (Mark as Stocked in WMS -> 'restocked' | Mark Re-ordered from Supplier -> 'scrapped')
+   * Independent Supplier Replacement Reorder Toggle / PO Logger.
+   * Stores Reorder Status strictly inside ai_document_metadata.reorder
+   * without touching 4-Choice Outcome, warehouse location, status, or the 10-day pickup SLA.
+   */
+  async markAsReordered({
+    item,
+    reorderStatus = 'reordered',
+    poNumber = '',
+    notes = '',
+    actorName = 'Admin'
+  }) {
+    if (!item) throw new Error('RMA item is required.');
+    const cleanActor = String(actorName || 'Admin').trim();
+    const cleanPo = String(poNumber || '').trim();
+    const cleanNotes = String(notes || '').trim();
+    const nextReorderStatus = (String(reorderStatus || '').toLowerCase().trim() === 'pending' || String(reorderStatus || '').toLowerCase().trim() === 'pending_reorder')
+      ? 'pending'
+      : 'reordered';
+    const isMarkingReordered = nextReorderStatus === 'reordered';
+    const nowIso = new Date().toISOString();
+
+    const targetId = item.parent_rma_id || item.id;
+    const targetRma = item.rma_number;
+
+    let fetchQuery = supabase.from('rma_reports').select('*');
+    if (targetId && /^\d+$/.test(String(targetId))) {
+      fetchQuery = fetchQuery.eq('id', Number(targetId));
+    } else if (targetRma) {
+      fetchQuery = fetchQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: rows, error: fetchErr } = await fetchQuery;
+    if (fetchErr) throw fetchErr;
+    const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : item;
+
+    const prevMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object')
+      ? { ...primaryRow.ai_document_metadata }
+      : {};
+    const prevReorder = (prevMeta.reorder && typeof prevMeta.reorder === 'object')
+      ? prevMeta.reorder
+      : {};
+
+    const nextReorderMeta = isMarkingReordered
+      ? {
+          status: 'reordered',
+          reordered_at: nowIso,
+          reordered_by: cleanActor,
+          po_number: cleanPo || prevReorder.po_number || '',
+          ...(cleanNotes ? { notes: cleanNotes } : (prevReorder.notes ? { notes: prevReorder.notes } : {}))
+        }
+      : {
+          status: 'pending',
+          reset_at: nowIso,
+          reset_by: cleanActor,
+          ...(cleanPo ? { po_number: cleanPo } : {}),
+          ...(cleanNotes ? { notes: cleanNotes } : {})
+        };
+
+    const updatedMeta = {
+      ...prevMeta,
+      reorder: nextReorderMeta
+    };
+    if (String(updatedMeta.workflow_resolution || '').toLowerCase() === 'reordered') {
+      delete updatedMeta.workflow_resolution;
+      delete updatedMeta.resolved_at;
+      delete updatedMeta.resolved_by;
+    }
+
+    const auditNote = isMarkingReordered
+      ? `Marked as Reordered by ${cleanActor}${nextReorderMeta.po_number ? ` (PO: ${nextReorderMeta.po_number})` : ''}${cleanNotes ? ` — ${cleanNotes}` : ''}`
+      : `Reorder Status reset to Pending by ${cleanActor}`;
+
+    const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
+    currentAudit.push({
+      timestamp: nowIso,
+      action: isMarkingReordered ? 'MARK_REORDERED' : 'RESET_REORDER_PENDING',
+      stage: isMarkingReordered ? 'SUPPLIER_REORDER' : 'SUPPLIER_REORDER_RESET',
+      actor: cleanActor,
+      reorder_status: nextReorderStatus,
+      ...(nextReorderMeta.po_number ? { po_number: nextReorderMeta.po_number } : {}),
+      note: auditNote
+    });
+
+    const updates = {
+      ai_document_metadata: updatedMeta,
+      audit_trail: currentAudit
+    };
+    if (cleanPo) {
+      updates.po_number = cleanPo;
+    }
+
+    // Also update items[] array if batch manifest (keeps unpacked items & parent in sync)
+    let parsedItems = [];
+    if (Array.isArray(primaryRow?.items) && primaryRow.items.length > 0) {
+      parsedItems = [...primaryRow.items];
+    } else if (typeof primaryRow?.items === 'string' && primaryRow.items.trim()) {
+      try {
+        const p = JSON.parse(primaryRow.items);
+        if (Array.isArray(p)) parsedItems = p;
+      } catch {}
+    }
+    if (parsedItems.length > 0) {
+      const targetBc = item.is_unpacked_manifest_item && item.barcode ? String(item.barcode).trim() : null;
+      updates.items = parsedItems.map((child) => {
+        const cBc = String(child.barcode || '').trim();
+        if (targetBc && cBc !== targetBc) return child;
+        return {
+          ...child,
+          reorder_status: nextReorderStatus,
+          reordered_at: isMarkingReordered ? nowIso : null,
+          reordered_by: isMarkingReordered ? cleanActor : null,
+          reorder_po_number: nextReorderMeta.po_number || child.reorder_po_number || null,
+          ...(cleanNotes ? { reorder_notes: cleanNotes } : {})
+        };
+      });
+    }
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (primaryRow?.id && /^\d+$/.test(String(primaryRow.id))) {
+      updateQuery = updateQuery.eq('id', Number(primaryRow.id));
+    } else if (targetRma) {
+      updateQuery = updateQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: updatedData, error: updateErr } = await updateQuery.select('*');
+    if (updateErr) throw updateErr;
+    const updatedReport = Array.isArray(updatedData) && updatedData.length > 0
+      ? updatedData[0]
+      : { ...primaryRow, ...updates };
+
+    // Sync separate child rows in rma_reports if parent has unpacked children
+    if (primaryRow?.id && primaryRow?.is_parent && item?.is_unpacked_manifest_item && item?.id && String(item.id) !== String(primaryRow.id)) {
+      await supabase
+        .from('rma_reports')
+        .update({
+          ...(cleanPo ? { po_number: cleanPo } : {}),
+          ai_document_metadata: {
+            ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
+            reorder: nextReorderMeta
+          }
+        })
+        .eq('id', Number(item.id))
+        .catch(() => {});
+    }
+
+    this.notifyChange('coworker-queue-updated', {
+      reportId: updatedReport.id,
+      rmaNumber: updatedReport.rma_number,
+      reorder_status: nextReorderStatus,
+      po_number: nextReorderMeta.po_number || '',
+      report: updatedReport
+    });
+
+    return updatedReport;
+  },
+
+  /**
+   * 1-Click Coworker Queue Action (Mark as Stocked in WMS -> 'restocked' | Confirm Scrap Disposal -> 'scrapped')
    */
   async confirmCoworkerQueueAction({ item, targetStatus, warehouseLocation = null, actorName = 'Warehouse Staff' }) {
     if (!item || !targetStatus) throw new Error('Item and targetStatus are required.');
     const cleanStatus = String(targetStatus).toLowerCase().trim() === 'scrapped' ? 'scrapped' : 'restocked';
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
 
-    let stage = 'SUPPLIER_REORDER';
-    let workflowResolution = 'reordered';
-    let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
+    let stage = 'SCRAP_DISPOSAL';
+    let workflowResolution = 'scrapped_no_reorder';
+    let auditNote = `Scrap disposal written off by ${cleanActor}`;
     if (cleanStatus === 'restocked') {
       stage = 'ERP_RESTOCK';
       workflowResolution = 'restocked';
       auditNote = `ERP Restock confirmed by ${cleanActor}`;
-    } else {
-      const notes = String(item?.notes || '');
-      const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
-      if (isExplicitNoReorder) {
-        stage = 'SCRAP_DISPOSAL';
-        workflowResolution = 'scrapped_no_reorder';
-        auditNote = `Scrap written off by ${cleanActor}`;
-      }
     }
 
     const auditEntry = {
@@ -62907,6 +63506,7 @@ export const catalogService = {
     delete currentMeta.workflow_resolution;
     delete currentMeta.resolved_at;
     delete currentMeta.resolved_by;
+    delete currentMeta.reorder;
     delete currentMeta.simple_rtv_disposition;
     delete currentMeta.simple_rtv_label;
     delete currentMeta.simple_rtv_updated_at;
@@ -62973,6 +63573,11 @@ export const catalogService = {
       updates.items = primaryRow.items.map(child => {
         const cleanChild = { ...child, status: 'pending', disposition: 'Pending' };
         delete cleanChild.workflow_resolution;
+        delete cleanChild.reorder_status;
+        delete cleanChild.reordered_at;
+        delete cleanChild.reordered_by;
+        delete cleanChild.reorder_po_number;
+        delete cleanChild.reorder_notes;
         delete cleanChild.simple_rtv_disposition;
         delete cleanChild.simple_rtv_label;
         delete cleanChild.needs_reorder;
@@ -71444,7 +72049,8 @@ import {
   getGpsMapUrl,
   summarizeBatchSuppliers,
   isRealSupplierName,
-  isMixedSuppliersSummary
+  isMixedSuppliersSummary,
+  resolveReorderStatus
 } from './rmaHelpers';
 import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
@@ -71452,6 +72058,7 @@ import { downloadTableXlsx } from './exportXlsx';
 function getWorkflowExportFields(r, savedProducts = []) {
   const statusInfo = getCleanHumanWorkflowStatus(r, savedProducts);
   const outcome = formatFourChoiceOutcome(r);
+  const reorderInfo = resolveReorderStatus(r);
   const wf = statusInfo.workflow;
   const followUpDay = wf.isClosed
     ? (wf.isAutoDisposed ? 'Expired (>10)' : 'Closed')
@@ -71463,7 +72070,12 @@ function getWorkflowExportFields(r, savedProducts = []) {
     workflowStep: wf.stepSummary,
     followUpDay,
     pickedUpDate,
-    caseClosedDate
+    caseClosedDate,
+    reorderStatusLabel: reorderInfo.isReordered ? 'Reordered' : 'Pending',
+    reorderPoNumber: reorderInfo.poNumber || '',
+    reorderedDateTime: reorderInfo.isReordered && reorderInfo.reorderedAt
+      ? formatDateTimeYmdHm(reorderInfo.reorderedAt)
+      : ''
   };
 }
 
@@ -71590,6 +72202,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     { header: 'Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Picked Up / Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'GPS Street Address', width: 38, type: 'text' },
@@ -71640,6 +72255,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate,
       getGpsAddressDisplay(r) || '',
@@ -71698,6 +72316,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
     { header: 'Customer Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'GPS Street Address', width: 38, type: 'text' },
@@ -71742,6 +72363,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate,
       getGpsAddressDisplay(r) || '',
@@ -71799,6 +72423,9 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
     { header: 'Warehouse Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Picked Up Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
   ];
@@ -71843,6 +72470,9 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate
     ];
@@ -71966,7 +72596,8 @@ import {
   isManifestSubItem,
   isTestRecord,
   isTrashedRecord,
-  parseCreditMemoMeta
+  parseCreditMemoMeta,
+  resolveReorderStatus
 } from './rmaHelpers.js';
 import { buildStoredZip, colToLetter, escapeXml } from './exportXlsx.js';
 
@@ -72283,7 +72914,6 @@ export function buildRmaMatrixDataset({
         statusLower === 'restocked';
       const isScrapped =
         outcome.choiceKey === 'scrap' ||
-        workflowRes === 'reordered' ||
         workflowRes === 'scrapped_no_reorder' ||
         statusLower === 'scrapped' ||
         statusLower === 'disposed';
@@ -72291,10 +72921,8 @@ export function buildRmaMatrixDataset({
         outcome.choiceKey === 'replacement' ||
         dispLower === 'supplier_exchange' ||
         dispLower === 'customer_exchange';
-      const isReordered =
-        workflowRes === 'reordered' ||
-        getItemNeedsReorder(lineWithParentMeta) ||
-        String(report.notes || '').includes('[REORDER: YES]');
+      const reorderInfo = resolveReorderStatus(lineWithParentMeta);
+      const isReordered = reorderInfo.isReordered;
       const isPickedUp = outcome.isPickedUp;
 
       const goodStockPcs = isRestocked ? totalPieces : 0;
@@ -72327,6 +72955,8 @@ export function buildRmaMatrixDataset({
         storeBranch: report.rma_type === 'supplier_outbound' ? '' : (report.store_branch || ''),
         reason: line.reason || report.reason || '',
         workflowOutcome: outcome.hasDecision ? outcome.label : 'Pending Decision',
+        reorderStatus: isReordered ? 'Reordered' : 'Pending',
+        reorderPoNumber: reorderInfo.poNumber || '',
         reordered: isReordered ? 'Yes' : 'No',
         restocked: isRestocked ? 'Yes' : 'No',
         scrapped: isScrapped ? 'Yes' : 'No',
@@ -72372,6 +73002,8 @@ export function buildRmaMatrixDataset({
         storeBranch: '',
         reason: '',
         workflowOutcome: '',
+        reorderStatus: '',
+        reorderPoNumber: '',
         reordered: '',
         restocked: '',
         scrapped: '',
@@ -72595,6 +73227,8 @@ export function buildRmaMatrixXlsxBytes({
     { kind: 'detail', field: 'storeBranch', header: 'Store / Branch', width: 24, align: 'left' },
     { kind: 'detail', field: 'reason', header: 'Defect / Return Reason', width: 28, align: 'left' },
     { kind: 'detail', field: 'workflowOutcome', header: 'Workflow Outcome', width: 32, align: 'left' },
+    { kind: 'detail', field: 'reorderStatus', header: 'Reorder Status', width: 15, align: 'center' },
+    { kind: 'detail', field: 'reorderPoNumber', header: 'Reorder PO #', width: 18, align: 'left' },
     { kind: 'detail', field: 'reordered', header: 'Re-Ordered?', width: 13, align: 'center' },
     { kind: 'detail', field: 'restocked', header: 'Restocked?', width: 13, align: 'center' },
     { kind: 'detail', field: 'scrapped', header: 'Scrapped?', width: 13, align: 'center' },
@@ -73490,7 +74124,6 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   const isRestocked = workflowRes === 'restocked' || statusLower === 'restocked';
   const isScrapped =
     isAutoDisposed ||
-    workflowRes === 'reordered' ||
     workflowRes === 'scrapped_no_reorder' ||
     statusLower === 'scrapped' ||
     statusLower === 'disposed';
@@ -77581,7 +78214,6 @@ export function formatFourChoiceOutcome(item) {
   }
 
   if (
-    workflowResolution === 'reordered' ||
     workflowResolution === 'scrapped_no_reorder' ||
     statusLower === 'scrapped' ||
     statusLower === 'disposed'
@@ -77897,16 +78529,17 @@ export function formatLifecycleStage(status, item = null) {
   if (s === 'resolved' || s === 'closed') {
     const resolution = item?.ai_document_metadata?.workflow_resolution;
     const disp = String(item?.disposition || '').toLowerCase();
-    if (resolution === 'reordered') {
-      return { label: '7- Re-Ordered (PO Placed)', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    }
-    if (resolution === 'scrapped_no_reorder' || (!resolution && (disp.includes('scrap') || disp.includes('dispose')))) {
+    if (resolution === 'scrapped_no_reorder' || (resolution !== 'restocked' && resolution !== 'reordered' && (disp.includes('scrap') || disp.includes('dispose')))) {
       return { label: '7- Scrapped / Written Off', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
     }
-    if (resolution === 'restocked' || (!resolution && (disp.includes('restock') || disp.includes('replacement')))) {
+    if (resolution === 'restocked' || disp.includes('restock') || disp.includes('replacement')) {
       return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     }
-    return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    const resolvedOutcome = formatFourChoiceOutcome(item);
+    if (resolvedOutcome.hasDecision) {
+      return { label: resolvedOutcome.shortStatus, color: resolvedOutcome.badgeColor };
+    }
+    return { label: 'Closed', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700' };
   }
 
   switch (s) {
@@ -77945,6 +78578,57 @@ export function formatLifecycleStage(status, item = null) {
     default:
       return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
   }
+}
+
+/**
+ * Resolves the independent Reorder / Replacement PO status ('pending' | 'reordered')
+ * strictly orthogonal to the 4-Choice Outcome and 10-day pickup SLA.
+ */
+export function resolveReorderStatus(item) {
+  const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
+    ? item.ai_document_metadata
+    : {};
+  const reorderMeta = (meta.reorder && typeof meta.reorder === 'object') ? meta.reorder : {};
+  const workflowRes = String(meta.workflow_resolution || item?.workflow_resolution || '').toLowerCase().trim();
+  const explicitStatus = String(
+    reorderMeta.status || item?.reorder_status || ''
+  ).toLowerCase().trim();
+
+  const hasPendingReset = explicitStatus === 'pending' || explicitStatus === 'pending_reorder';
+  const isReordered = !hasPendingReset && (
+    explicitStatus === 'reordered' ||
+    Boolean(reorderMeta.reordered_at || item?.reordered_at) ||
+    workflowRes === 'reordered'
+  );
+
+  const reorderedAt = isReordered
+    ? (reorderMeta.reordered_at || item?.reordered_at || (workflowRes === 'reordered' ? meta.resolved_at : null) || null)
+    : null;
+  const reorderedBy = isReordered
+    ? (reorderMeta.reordered_by || item?.reordered_by || (workflowRes === 'reordered' ? meta.resolved_by : null) || null)
+    : null;
+  const poNumber = String(
+    reorderMeta.po_number ||
+    item?.reorder_po_number ||
+    item?.reordered_po_number ||
+    (isReordered ? (item?.po_number || '') : '')
+  ).trim();
+  const notes = String(reorderMeta.notes || item?.reorder_notes || '').trim();
+  const formattedTime = reorderedAt ? formatDateTimeMinute(reorderedAt) : '';
+
+  return {
+    status: isReordered ? 'reordered' : 'pending',
+    isReordered,
+    label: isReordered ? 'Reordered' : 'Pending',
+    reorderedAt,
+    reorderedBy,
+    formattedTime,
+    poNumber,
+    notes,
+    badgeColor: isReordered
+      ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-950/70 dark:text-indigo-200 dark:border-indigo-700'
+      : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+  };
 }
 
 /**
@@ -77988,8 +78672,8 @@ export function isItemReadyToRestock(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
     return false;
   }
   const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
@@ -77997,10 +78681,10 @@ export function isItemReadyToRestock(item, allReports = []) {
 }
 
 /**
- * Helper to check if an item belongs to the Re-Order Needed queue:
+ * Helper to check if an item belongs to the Pending Supplier Re-Order queue:
  * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
  * AND needs_reorder !== false
- * AND not finalized/resolved.
+ * AND not yet marked Reordered (and not finalized/restocked).
  */
 export function isItemReorderNeeded(item, allReports = []) {
   if (!item) return false;
@@ -78008,10 +78692,13 @@ export function isItemReorderNeeded(item, allReports = []) {
     const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
     return children.some(c => isItemReorderNeeded(c, allReports));
   }
+  if (resolveReorderStatus(item).isReordered) {
+    return false;
+  }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
     return false;
   }
 
@@ -78053,8 +78740,8 @@ export function isItemScrappedNoReorder(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
     return false;
   }
 

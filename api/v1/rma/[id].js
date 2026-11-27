@@ -96,7 +96,7 @@ export default async function handler(req, res) {
         'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'reporter_name', 'reporter_contact', 'reported_by',
         'ae_name', 'ae_email', 'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
         'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number',
-        'is_test'
+        'is_test', 'reorder_status', 'reorder_notes'
       ];
 
       const updateData = {};
@@ -109,7 +109,7 @@ export default async function handler(req, res) {
       // Check lifecycle action (archive, trash, restore)
       const lifecycleAction = body?.lifecycle || body?.action || null;
 
-      if (Object.keys(updateData).length === 0 && !lifecycleAction) {
+      if (Object.keys(updateData).length === 0 && !lifecycleAction && body?.workflow_resolution === undefined && body?.needs_reorder === undefined) {
         return sendJson(res, 400, {
           success: false,
           error: 'BAD_REQUEST',
@@ -117,20 +117,38 @@ export default async function handler(req, res) {
         });
       }
 
-      // Normalize status and disposition for coworker restock, scrap/re-order, RTV & hold sync
+      // Separate independent Reorder Status update from 4-Choice Outcome / Scrap lifecycle updates
+      const rawStatusLower = updateData.status ? String(updateData.status).toLowerCase().trim() : '';
+      const rawWorkflowResLower = body?.workflow_resolution !== undefined ? String(body.workflow_resolution).toLowerCase().trim() : '';
+      const rawReorderLower = body?.reorder_status !== undefined ? String(body.reorder_status).toLowerCase().trim() : '';
+
+      let requestedReorderUpdate = null; // 'reordered' | 'pending' | null
+      if (rawReorderLower === 'reordered') {
+        requestedReorderUpdate = 'reordered';
+      } else if (rawReorderLower === 'pending' || rawReorderLower === 'pending_reorder') {
+        requestedReorderUpdate = 'pending';
+      } else if (rawStatusLower === 'reordered' || rawWorkflowResLower === 'reordered') {
+        requestedReorderUpdate = 'reordered';
+      }
+
+      if (rawStatusLower === 'reordered') {
+        delete updateData.status;
+      }
+
+      // Normalize status and disposition for restock, scrap, RTV & hold sync
       let requestedWorkflowResolution = null;
+      let explicitResetWorkflow = false;
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
         if (s === 'restocked' || s === '6- restocked') {
           updateData.status = 'resolved';
           requestedWorkflowResolution = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed' || s === 'reordered') {
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
           updateData.status = 'resolved';
-          const explicitNoReorder = body?.needs_reorder === false;
-          requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
+          requestedWorkflowResolution = 'scrapped_no_reorder';
         } else if (s === 'pending' || s === 'under_inspection' || s === 'received_at_dock' || s === 'reopen' || s === 'reset') {
           updateData.status = (s === 'received_at_dock' || s === 'pending') ? 'pending' : 'under_inspection';
-          requestedWorkflowResolution = null; // Clear resolution to reopen
+          explicitResetWorkflow = true;
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -142,13 +160,16 @@ export default async function handler(req, res) {
         } else if (s === 'resolved' || s === 'closed') {
           updateData.status = 'resolved';
           const d = String(updateData.disposition || '').toLowerCase();
-          const explicitNoReorder = body?.needs_reorder === false;
-          if (d.includes('scrap') || d.includes('dispose')) {
-            requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
-          } else {
+          if (rawWorkflowResLower === 'restocked') {
+            requestedWorkflowResolution = 'restocked';
+          } else if (rawWorkflowResLower === 'scrapped_no_reorder' || d.includes('scrap') || d.includes('dispose')) {
+            requestedWorkflowResolution = 'scrapped_no_reorder';
+          } else if (d.includes('restock')) {
             requestedWorkflowResolution = 'restocked';
           }
         }
+      } else if (rawWorkflowResLower === 'restocked' || rawWorkflowResLower === 'scrapped_no_reorder') {
+        requestedWorkflowResolution = rawWorkflowResLower;
       }
 
       if (updateData.reason && !updateData.condition_grade) {
@@ -193,13 +214,17 @@ export default async function handler(req, res) {
 
       const actorName = String(body?.actor || body?.user || body?.updated_by || client.name || 'Coworker').trim();
       const targetBarcode = body?.barcode ? String(body.barcode).trim() : null;
+      const cleanReorderPo = body?.po_number ? String(body.po_number).trim() : '';
+      const cleanReorderNotes = body?.reorder_notes ? String(body.reorder_notes).trim() : '';
 
-      // Standardized Audit Trail Note for 4 Operational Actions
-      let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
-      if (requestedWorkflowResolution === 'restocked') {
+      // Standardized Audit Trail Note
+      let auditNote = `RMA updated by ${actorName}`;
+      if (requestedReorderUpdate === 'reordered' && !requestedWorkflowResolution && !updateData.status) {
+        auditNote = `Supplier Re-order confirmed by ${actorName}${cleanReorderPo ? ` (PO: ${cleanReorderPo})` : ''}`;
+      } else if (requestedReorderUpdate === 'pending' && !requestedWorkflowResolution && !updateData.status) {
+        auditNote = `Reorder status reset to Pending by ${actorName}`;
+      } else if (requestedWorkflowResolution === 'restocked') {
         auditNote = `ERP Restock confirmed by ${actorName}`;
-      } else if (requestedWorkflowResolution === 'reordered') {
-        auditNote = `Supplier Re-order confirmed by ${actorName}`;
       } else if (requestedWorkflowResolution === 'scrapped_no_reorder') {
         auditNote = `Scrap written off by ${actorName}`;
       } else if (updateData.status === 'vendor_claimed') {
@@ -212,8 +237,6 @@ export default async function handler(req, res) {
 
       const lifecycleStageLabel = requestedWorkflowResolution === 'restocked'
         ? '6- Restocked'
-        : requestedWorkflowResolution === 'reordered'
-        ? '7- Re-Ordered (PO Placed)'
         : requestedWorkflowResolution === 'scrapped_no_reorder'
         ? '7- Scrapped / Written Off'
         : updateData.status === 'vendor_claimed'
@@ -224,9 +247,19 @@ export default async function handler(req, res) {
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: requestedWorkflowResolution === 'restocked' ? 'ERP_RESTOCK' : (requestedWorkflowResolution === 'reordered' ? 'SUPPLIER_REORDER' : (requestedWorkflowResolution === 'scrapped_no_reorder' ? 'SCRAP_DISPOSAL' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH')))),
+        stage: requestedReorderUpdate && !requestedWorkflowResolution && !updateData.status
+          ? (requestedReorderUpdate === 'reordered' ? 'SUPPLIER_REORDER' : 'SUPPLIER_REORDER_RESET')
+          : requestedWorkflowResolution === 'restocked'
+          ? 'ERP_RESTOCK'
+          : requestedWorkflowResolution === 'scrapped_no_reorder'
+          ? 'SCRAP_DISPOSAL'
+          : updateData.status === 'vendor_claimed'
+          ? 'VENDOR_RTV'
+          : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH'),
         actor: actorName,
-        status: updateData.status,
+        ...(updateData.status ? { status: updateData.status } : {}),
+        ...(requestedReorderUpdate ? { reorder_status: requestedReorderUpdate } : {}),
+        ...(cleanReorderPo ? { po_number: cleanReorderPo } : {}),
         lifecycle_stage: lifecycleStageLabel,
         warehouse_location: updateData.warehouse_location || undefined,
         hold_reason: body?.hold_reason || undefined,
@@ -234,6 +267,7 @@ export default async function handler(req, res) {
       };
 
       const updatedRows = [];
+      const nowIso = new Date().toISOString();
 
       const explicitNeedsReorder = body?.needs_reorder !== undefined ? Boolean(body.needs_reorder) : undefined;
       const explicitHoldReason = body?.hold_reason ? String(body.hold_reason).trim() : undefined;
@@ -245,6 +279,7 @@ export default async function handler(req, res) {
 
         // Merge operational metadata safely into JSONB ai_document_metadata
         const currentMeta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object') ? row.ai_document_metadata : {};
+        const prevReorder = (currentMeta.reorder && typeof currentMeta.reorder === 'object') ? currentMeta.reorder : {};
         const updatedMeta = {
           ...currentMeta,
           ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
@@ -252,14 +287,36 @@ export default async function handler(req, res) {
           ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {}),
           ...(requestedWorkflowResolution ? {
             workflow_resolution: requestedWorkflowResolution,
-            resolved_at: new Date().toISOString(),
+            resolved_at: nowIso,
             resolved_by: actorName
           } : {})
         };
-        if (!requestedWorkflowResolution) {
+        if (explicitResetWorkflow) {
           delete updatedMeta.workflow_resolution;
           delete updatedMeta.resolved_at;
           delete updatedMeta.resolved_by;
+        }
+        if (requestedReorderUpdate) {
+          updatedMeta.reorder = requestedReorderUpdate === 'reordered'
+            ? {
+                status: 'reordered',
+                reordered_at: nowIso,
+                reordered_by: actorName,
+                po_number: cleanReorderPo || prevReorder.po_number || row.po_number || '',
+                ...(cleanReorderNotes ? { notes: cleanReorderNotes } : (prevReorder.notes ? { notes: prevReorder.notes } : {}))
+              }
+            : {
+                status: 'pending',
+                reset_at: nowIso,
+                reset_by: actorName,
+                ...(cleanReorderPo ? { po_number: cleanReorderPo } : {}),
+                ...(cleanReorderNotes ? { notes: cleanReorderNotes } : {})
+              };
+          if (String(updatedMeta.workflow_resolution || '').toLowerCase() === 'reordered') {
+            delete updatedMeta.workflow_resolution;
+            delete updatedMeta.resolved_at;
+            delete updatedMeta.resolved_by;
+          }
         }
 
         if (lifecycleAction === 'archive' || lifecycleAction === 'archived') {
@@ -320,6 +377,8 @@ export default async function handler(req, res) {
 
         // Ensure non-existent columns are never sent to Supabase
         delete rowPayload.needs_reorder;
+        delete rowPayload.reorder_status;
+        delete rowPayload.reorder_notes;
         delete rowPayload.hold_reason;
         delete rowPayload.rejection_reason;
         delete rowPayload.actor;
@@ -344,6 +403,8 @@ export default async function handler(req, res) {
           } catch (e) {}
         }
 
+        const isStatusOrDispositionChange = Boolean(updateData.status || updateData.disposition || updateData.warehouse_location || requestedWorkflowResolution || explicitResetWorkflow);
+
         if (parsedRowItems.length > 0) {
           parsedRowItems = parsedRowItems.map(it => {
             const itBarcode = String(it.barcode || '').trim();
@@ -360,39 +421,47 @@ export default async function handler(req, res) {
             if (matchesSpecificBarcode || matchesQueueDisposition) {
               return {
                 ...it,
-                status: updateData.status !== undefined ? updateData.status : it.status,
-                workflow_resolution: requestedWorkflowResolution || it.workflow_resolution,
-                warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
-                disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
+                ...(updateData.status !== undefined ? { status: updateData.status } : {}),
+                ...(requestedWorkflowResolution ? { workflow_resolution: requestedWorkflowResolution } : {}),
+                ...(updateData.warehouse_location !== undefined ? { warehouse_location: updateData.warehouse_location } : {}),
+                ...(updateData.disposition !== undefined ? { disposition: updateData.disposition } : {}),
+                ...(requestedReorderUpdate ? {
+                  reorder_status: requestedReorderUpdate,
+                  reordered_at: requestedReorderUpdate === 'reordered' ? nowIso : null,
+                  reordered_by: requestedReorderUpdate === 'reordered' ? actorName : null,
+                  reorder_po_number: updatedMeta.reorder?.po_number || it.reorder_po_number || null
+                } : {})
               };
             }
             return it;
           });
 
-          // Recompute parent manifest lifecycle status dynamically
-          let restockCnt = 0;
-          let scrapCnt = 0;
-          let pendingCnt = 0;
-          parsedRowItems.forEach(it => {
-            const d = String(it.disposition || '').toLowerCase();
-            const st = String(it.status || '').toLowerCase();
-            const res = it.workflow_resolution;
-            if (st === 'resolved' && res === 'restocked') restockCnt += 1;
-            else if (st === 'resolved' && (res === 'reordered' || res === 'scrapped_no_reorder')) scrapCnt += 1;
-            else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
-            else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
-            else if (!d || d.includes('pending')) pendingCnt += 1;
-          });
-          if (restockCnt === parsedRowItems.length) {
-            rowPayload.status = 'resolved';
-            updatedMeta.workflow_resolution = 'restocked';
-          } else if (scrapCnt === parsedRowItems.length) {
-            rowPayload.status = 'resolved';
-            updatedMeta.workflow_resolution = explicitNeedsReorder === false ? 'scrapped_no_reorder' : 'reordered';
-          } else if (pendingCnt === parsedRowItems.length) {
-            rowPayload.status = 'under_inspection';
-          } else {
-            rowPayload.status = 'partially_completed';
+          if (isStatusOrDispositionChange) {
+            // Recompute parent manifest lifecycle status only when status/disposition/resolution actually changed
+            let restockCnt = 0;
+            let scrapCnt = 0;
+            let pendingCnt = 0;
+            parsedRowItems.forEach(it => {
+              const d = String(it.disposition || '').toLowerCase();
+              const st = String(it.status || '').toLowerCase();
+              const res = it.workflow_resolution;
+              if (st === 'resolved' && res === 'restocked') restockCnt += 1;
+              else if (st === 'resolved' && res === 'scrapped_no_reorder') scrapCnt += 1;
+              else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+              else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
+              else if (!d || d.includes('pending')) pendingCnt += 1;
+            });
+            if (restockCnt === parsedRowItems.length) {
+              rowPayload.status = 'resolved';
+              updatedMeta.workflow_resolution = 'restocked';
+            } else if (scrapCnt === parsedRowItems.length) {
+              rowPayload.status = 'resolved';
+              updatedMeta.workflow_resolution = 'scrapped_no_reorder';
+            } else if (pendingCnt === parsedRowItems.length) {
+              rowPayload.status = 'under_inspection';
+            } else {
+              rowPayload.status = 'partially_completed';
+            }
           }
           rowPayload.items = parsedRowItems;
         }
@@ -408,9 +477,10 @@ export default async function handler(req, res) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
           const res = updatedRow.ai_document_metadata?.workflow_resolution || requestedWorkflowResolution;
+          const reorderMetaOut = updatedRow.ai_document_metadata?.reorder || {};
+          const computedReorderStatus = reorderMetaOut.status || (res === 'reordered' ? 'reordered' : 'pending');
           let calculatedStage = updatedRow.status;
           if (res === 'restocked') calculatedStage = '6- Restocked';
-          else if (res === 'reordered') calculatedStage = '7- Re-Ordered (PO Placed)';
           else if (res === 'scrapped_no_reorder') calculatedStage = '7- Scrapped / Written Off';
           else if (updatedRow.status === 'vendor_claimed') calculatedStage = '3- Vendor Claimed';
           else if (updatedRow.status === 'under_inspection') calculatedStage = '3- Under Inspection';
@@ -419,7 +489,11 @@ export default async function handler(req, res) {
 
           updatedRows.push({
             ...updatedRow,
-            lifecycle_stage: calculatedStage
+            lifecycle_stage: calculatedStage,
+            reorder_status: computedReorderStatus,
+            reordered_at: reorderMetaOut.reordered_at || null,
+            reordered_by: reorderMetaOut.reordered_by || null,
+            reorder_po_number: reorderMetaOut.po_number || updatedRow.po_number || null
           });
         }
 
@@ -450,7 +524,13 @@ export default async function handler(req, res) {
                     status: updateData.status !== undefined ? updateData.status : it.status,
                     warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
                     disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition,
-                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade
+                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade,
+                    ...(requestedReorderUpdate ? {
+                      reorder_status: requestedReorderUpdate,
+                      reordered_at: requestedReorderUpdate === 'reordered' ? nowIso : null,
+                      reordered_by: requestedReorderUpdate === 'reordered' ? actorName : null,
+                      reorder_po_number: updatedMeta.reorder?.po_number || it.reorder_po_number || null
+                    } : {})
                   };
                 }
                 return it;

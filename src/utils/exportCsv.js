@@ -15,7 +15,8 @@ import {
   getGpsMapUrl,
   summarizeBatchSuppliers,
   isRealSupplierName,
-  isMixedSuppliersSummary
+  isMixedSuppliersSummary,
+  resolveReorderStatus
 } from './rmaHelpers';
 import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
@@ -23,6 +24,7 @@ import { downloadTableXlsx } from './exportXlsx';
 function getWorkflowExportFields(r, savedProducts = []) {
   const statusInfo = getCleanHumanWorkflowStatus(r, savedProducts);
   const outcome = formatFourChoiceOutcome(r);
+  const reorderInfo = resolveReorderStatus(r);
   const wf = statusInfo.workflow;
   const followUpDay = wf.isClosed
     ? (wf.isAutoDisposed ? 'Expired (>10)' : 'Closed')
@@ -34,7 +36,12 @@ function getWorkflowExportFields(r, savedProducts = []) {
     workflowStep: wf.stepSummary,
     followUpDay,
     pickedUpDate,
-    caseClosedDate
+    caseClosedDate,
+    reorderStatusLabel: reorderInfo.isReordered ? 'Reordered' : 'Pending',
+    reorderPoNumber: reorderInfo.poNumber || '',
+    reorderedDateTime: reorderInfo.isReordered && reorderInfo.reorderedAt
+      ? formatDateTimeYmdHm(reorderInfo.reorderedAt)
+      : ''
   };
 }
 
@@ -161,6 +168,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     { header: 'Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Picked Up / Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'GPS Street Address', width: 38, type: 'text' },
@@ -211,6 +221,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate,
       getGpsAddressDisplay(r) || '',
@@ -269,6 +282,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
     { header: 'Customer Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'GPS Street Address', width: 38, type: 'text' },
@@ -313,6 +329,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate,
       getGpsAddressDisplay(r) || '',
@@ -370,6 +389,9 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
     { header: 'Warehouse Notes', width: 32, type: 'text' },
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Reorder Status', width: 16, type: 'text' },
+    { header: 'Reorder PO #', width: 18, type: 'text' },
+    { header: 'Reordered Date (YYYY-MM-DD HH:mm)', width: 24, type: 'text' },
     { header: 'Picked Up Date (YYYY-MM-DD)', width: 24, type: 'text' },
     { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
   ];
@@ -414,6 +436,9 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
       r.notes || '',
       wfExport.workflowStep,
       wfExport.followUpDay,
+      wfExport.reorderStatusLabel,
+      wfExport.reorderPoNumber,
+      wfExport.reorderedDateTime,
       wfExport.pickedUpDate,
       wfExport.caseClosedDate
     ];

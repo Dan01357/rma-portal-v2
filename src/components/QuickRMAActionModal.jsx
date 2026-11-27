@@ -56,6 +56,7 @@ import {
   isTestRecord,
   formatFourChoiceOutcome,
   getItemNeedsReorder,
+  resolveReorderStatus,
   formatDateYmd,
   doesCreditMemoLinkReport,
   getGpsAddressDisplay,
@@ -206,6 +207,49 @@ export default function QuickRMAActionModal({
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+
+  const [reorderPoInput, setReorderPoInput] = useState('');
+  const [reorderNotesInput, setReorderNotesInput] = useState('');
+  const [isReorderBusy, setIsReorderBusy] = useState(false);
+  const [reorderFeedback, setReorderFeedback] = useState(null);
+
+  useEffect(() => {
+    const rMeta = (report?.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+      ? report.ai_document_metadata
+      : {};
+    const reorderObj = (rMeta.reorder && typeof rMeta.reorder === 'object') ? rMeta.reorder : {};
+    setReorderPoInput(String(reorderObj.po_number || '').trim());
+    setReorderNotesInput(String(reorderObj.notes || '').trim());
+    setReorderFeedback(null);
+  }, [report?.id, report?.rma_number, report?.ai_document_metadata?.reorder?.po_number, report?.ai_document_metadata?.reorder?.notes]);
+
+  const handleUpdateReorderStatus = async (nextStatus = 'reordered') => {
+    if (!report || isReorderBusy) return;
+    setIsReorderBusy(true);
+    setReorderFeedback(null);
+    try {
+      const updated = await catalogService.markAsReordered({
+        item: report,
+        reorderStatus: nextStatus,
+        poNumber: reorderPoInput,
+        notes: reorderNotesInput,
+        actorName: verifiedAdmin?.name || currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setReport(updated);
+      onReportUpdated?.(updated);
+      onRefresh?.(updated);
+      setReorderFeedback({
+        type: 'success',
+        text: nextStatus === 'reordered'
+          ? `Marked Reordered${reorderPoInput.trim() ? ` (PO #${reorderPoInput.trim()})` : ''}. 4-Choice Outcome & 10-Day SLA remain unchanged.`
+          : 'Reorder status reset to Pending.'
+      });
+    } catch (e) {
+      setReorderFeedback({ type: 'error', text: e?.message || 'Failed updating Reorder status.' });
+    } finally {
+      setIsReorderBusy(false);
+    }
+  };
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -2725,7 +2769,7 @@ export default function QuickRMAActionModal({
                         type: 'success',
                         text: `Timeline, 10-day countdown & disposition outcome reset to Pending for ${report.rma_number}.`
                       });
-                    } catch (e) {
+                      } catch (e) {
                       setFollowUpFeedback({
                         type: 'error',
                         text: e?.message || 'Failed resetting timeline to Pending.'
@@ -2736,6 +2780,116 @@ export default function QuickRMAActionModal({
                   }}
                 />
               </div>
+
+              {/* (b2) Independent Reorder Status (Replacement PO) Controls */}
+              {(() => {
+                const reorderInfo = resolveReorderStatus(report);
+                return (
+                  <div
+                    data-testid="quick-rma-reorder-card"
+                    className="p-4 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl space-y-3 shadow-xs"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Reorder Status (Replacement PO)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Tracked independently from 4-Choice Claim Outcome &amp; 10-Day Pickup SLA.
+                        </p>
+                      </div>
+                      <span
+                        data-testid="quick-rma-reorder-badge"
+                        className={`px-3 py-1 rounded-xl text-xs font-black border inline-flex items-center gap-1.5 shadow-2xs ${reorderInfo.badgeColor}`}
+                      >
+                        <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                        {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                      </span>
+                    </div>
+
+                    {reorderInfo.isReordered && (reorderInfo.formattedTime || reorderInfo.reorderedBy) && (
+                      <div className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl px-3 py-1.5 flex flex-wrap items-center gap-2">
+                        {reorderInfo.formattedTime && (
+                          <span>Reordered: <strong className="font-mono">{reorderInfo.formattedTime}</strong></span>
+                        )}
+                        {reorderInfo.reorderedBy && (
+                          <span>by <strong>{reorderInfo.reorderedBy}</strong></span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                          PO # (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={reorderPoInput}
+                          onChange={(e) => setReorderPoInput(e.target.value)}
+                          placeholder="e.g. PO-2026-8812"
+                          className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                          Reorder Notes (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={reorderNotesInput}
+                          onChange={(e) => setReorderNotesInput(e.target.value)}
+                          placeholder="Supplier replacement PO notes..."
+                          className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!reorderInfo.isReordered ? (
+                        <button
+                          type="button"
+                          disabled={isReorderBusy}
+                          onClick={() => handleUpdateReorderStatus('reordered')}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <span>{isReorderBusy ? 'Saving...' : 'Mark Reordered'}</span>
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            disabled={isReorderBusy}
+                            onClick={() => handleUpdateReorderStatus('reordered')}
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <span>{isReorderBusy ? 'Saving...' : 'Update PO / Notes'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isReorderBusy}
+                            onClick={() => handleUpdateReorderStatus('pending')}
+                            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-xs font-bold cursor-pointer disabled:opacity-50"
+                          >
+                            Reset Reorder to Pending
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {reorderFeedback && (
+                      <div className={`p-2 rounded-xl border text-[11px] font-bold ${
+                        reorderFeedback.type === 'success'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                          : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+                      }`}>
+                        {reorderFeedback.text}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* (c) Split Qty Feature Intact */}
               {(() => {

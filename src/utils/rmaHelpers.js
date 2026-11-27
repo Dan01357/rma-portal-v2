@@ -887,7 +887,6 @@ export function formatFourChoiceOutcome(item) {
   }
 
   if (
-    workflowResolution === 'reordered' ||
     workflowResolution === 'scrapped_no_reorder' ||
     statusLower === 'scrapped' ||
     statusLower === 'disposed'
@@ -1203,16 +1202,17 @@ export function formatLifecycleStage(status, item = null) {
   if (s === 'resolved' || s === 'closed') {
     const resolution = item?.ai_document_metadata?.workflow_resolution;
     const disp = String(item?.disposition || '').toLowerCase();
-    if (resolution === 'reordered') {
-      return { label: '7- Re-Ordered (PO Placed)', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    }
-    if (resolution === 'scrapped_no_reorder' || (!resolution && (disp.includes('scrap') || disp.includes('dispose')))) {
+    if (resolution === 'scrapped_no_reorder' || (resolution !== 'restocked' && resolution !== 'reordered' && (disp.includes('scrap') || disp.includes('dispose')))) {
       return { label: '7- Scrapped / Written Off', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
     }
-    if (resolution === 'restocked' || (!resolution && (disp.includes('restock') || disp.includes('replacement')))) {
+    if (resolution === 'restocked' || disp.includes('restock') || disp.includes('replacement')) {
       return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     }
-    return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    const resolvedOutcome = formatFourChoiceOutcome(item);
+    if (resolvedOutcome.hasDecision) {
+      return { label: resolvedOutcome.shortStatus, color: resolvedOutcome.badgeColor };
+    }
+    return { label: 'Closed', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700' };
   }
 
   switch (s) {
@@ -1251,6 +1251,57 @@ export function formatLifecycleStage(status, item = null) {
     default:
       return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
   }
+}
+
+/**
+ * Resolves the independent Reorder / Replacement PO status ('pending' | 'reordered')
+ * strictly orthogonal to the 4-Choice Outcome and 10-day pickup SLA.
+ */
+export function resolveReorderStatus(item) {
+  const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
+    ? item.ai_document_metadata
+    : {};
+  const reorderMeta = (meta.reorder && typeof meta.reorder === 'object') ? meta.reorder : {};
+  const workflowRes = String(meta.workflow_resolution || item?.workflow_resolution || '').toLowerCase().trim();
+  const explicitStatus = String(
+    reorderMeta.status || item?.reorder_status || ''
+  ).toLowerCase().trim();
+
+  const hasPendingReset = explicitStatus === 'pending' || explicitStatus === 'pending_reorder';
+  const isReordered = !hasPendingReset && (
+    explicitStatus === 'reordered' ||
+    Boolean(reorderMeta.reordered_at || item?.reordered_at) ||
+    workflowRes === 'reordered'
+  );
+
+  const reorderedAt = isReordered
+    ? (reorderMeta.reordered_at || item?.reordered_at || (workflowRes === 'reordered' ? meta.resolved_at : null) || null)
+    : null;
+  const reorderedBy = isReordered
+    ? (reorderMeta.reordered_by || item?.reordered_by || (workflowRes === 'reordered' ? meta.resolved_by : null) || null)
+    : null;
+  const poNumber = String(
+    reorderMeta.po_number ||
+    item?.reorder_po_number ||
+    item?.reordered_po_number ||
+    (isReordered ? (item?.po_number || '') : '')
+  ).trim();
+  const notes = String(reorderMeta.notes || item?.reorder_notes || '').trim();
+  const formattedTime = reorderedAt ? formatDateTimeMinute(reorderedAt) : '';
+
+  return {
+    status: isReordered ? 'reordered' : 'pending',
+    isReordered,
+    label: isReordered ? 'Reordered' : 'Pending',
+    reorderedAt,
+    reorderedBy,
+    formattedTime,
+    poNumber,
+    notes,
+    badgeColor: isReordered
+      ? 'bg-indigo-50 text-indigo-800 border-indigo-300 dark:bg-indigo-950/70 dark:text-indigo-200 dark:border-indigo-700'
+      : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+  };
 }
 
 /**
@@ -1294,8 +1345,8 @@ export function isItemReadyToRestock(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
     return false;
   }
   const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
@@ -1303,10 +1354,10 @@ export function isItemReadyToRestock(item, allReports = []) {
 }
 
 /**
- * Helper to check if an item belongs to the Re-Order Needed queue:
+ * Helper to check if an item belongs to the Pending Supplier Re-Order queue:
  * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
  * AND needs_reorder !== false
- * AND not finalized/resolved.
+ * AND not yet marked Reordered (and not finalized/restocked).
  */
 export function isItemReorderNeeded(item, allReports = []) {
   if (!item) return false;
@@ -1314,10 +1365,13 @@ export function isItemReorderNeeded(item, allReports = []) {
     const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
     return children.some(c => isItemReorderNeeded(c, allReports));
   }
+  if (resolveReorderStatus(item).isReordered) {
+    return false;
+  }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
     return false;
   }
 
@@ -1359,8 +1413,8 @@ export function isItemScrappedNoReorder(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const resolution = item?.ai_document_metadata?.workflow_resolution;
-  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
+  const resolution = String(item?.ai_document_metadata?.workflow_resolution || '').toLowerCase();
+  if (resolution === 'restocked' || resolution === 'scrapped_no_reorder' || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
     return false;
   }
 

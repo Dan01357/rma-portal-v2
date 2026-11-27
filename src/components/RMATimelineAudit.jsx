@@ -8,7 +8,7 @@ import {
   Box,
   Layers
 } from 'lucide-react';
-import { formatFourChoiceOutcome, formatDateTimeYmdHm, doesCreditMemoLinkReport } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatDateTimeYmdHm, doesCreditMemoLinkReport, resolveReorderStatus } from '../utils/rmaHelpers';
 
 export default function RMATimelineAudit({ 
   report, 
@@ -17,6 +17,7 @@ export default function RMATimelineAudit({
   if (!report) return null;
 
   const outcome = formatFourChoiceOutcome(report);
+  const reorderInfo = resolveReorderStatus(report);
   const pickup = report.ai_document_metadata?.supplier_pickup || {};
 
   // Find linked credit memo if any
@@ -64,6 +65,25 @@ export default function RMATimelineAudit({
         ? `Driver: ${pickup.driver_name || 'N/A'} • Plate: ${pickup.truck_plate || 'N/A'}${outcome.claimNumber ? ` • Claim: ${outcome.claimNumber}` : ''}`
         : `Supplier: ${pickup.supplier_name || report.supplier_name || 'Pending Assignment'}`,
       badge: 'STAGE 3: 4-CHOICE OUTCOME'
+    });
+  }
+
+  // Parallel Milestone: Replacement PO / Reorder Tracking (independent from 4-Choice & 10-day SLA)
+  if (reorderInfo.isReordered) {
+    const reorderParts = [
+      reorderInfo.poNumber ? `PO #: ${reorderInfo.poNumber}` : null,
+      reorderInfo.notes || null,
+      `4-Choice / 10-Day SLA remains independent`
+    ].filter(Boolean);
+    events.push({
+      id: 'reorder_status',
+      title: reorderInfo.poNumber ? `Replacement Reordered (PO #${reorderInfo.poNumber})` : 'Replacement Reordered',
+      timestamp: reorderInfo.reorderedAt || report.updated_at || report.created_at,
+      actor: reorderInfo.reorderedBy || 'Purchasing / Admin',
+      icon: Box,
+      color: 'bg-emerald-600 text-white',
+      details: reorderParts.join(' • '),
+      badge: 'REORDER STATUS: REORDERED'
     });
   }
 
