@@ -24,7 +24,7 @@ export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '13:00';
 export const DEFAULT_FOLLOWUP_CONFIG = {
   autoEnabled: true,
   autoSendTimePht: DEFAULT_FOLLOWUP_SEND_TIME_PHT,
-  customerFollowUpDefaultEnabled: false
+  customerFollowUpDefaultEnabled: true
 };
 
 export function normalizeSandboxEmail(raw) {
@@ -266,7 +266,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   const caseClosedAtIso =
     followUpMeta.case_closed_at ||
     pickedUpAtIso ||
-    ((isRestocked || isScrapped || isRejected || statusLower === 'resolved' || statusLower === 'closed' || (stream === 'customer_inbound' && isCreditMemoIssued && followUpMeta.enabled !== true))
+    ((isRestocked || isScrapped || isRejected || statusLower === 'resolved' || statusLower === 'closed' || (stream === 'customer_inbound' && isCreditMemoIssued && !followUpMeta.updated_at))
       ? (meta.resolved_at || meta.simple_rtv_updated_at || report?.inspected_at || report?.updated_at || null)
       : null);
 
@@ -281,26 +281,41 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     statusLower === 'closed'
   );
 
-  let followUpEnabled = false;
-  if (followUpMeta.enabled === false) {
+  const defaultCustomerEnabled =
+    options.customerFollowUpDefaultEnabled !== undefined
+      ? Boolean(options.customerFollowUpDefaultEnabled)
+      : Boolean(DEFAULT_FOLLOWUP_CONFIG.customerFollowUpDefaultEnabled);
+
+  const wasExplicitlyDisabled = Boolean(
+    followUpMeta.manually_disabled === true ||
+    (followUpMeta.enabled === false && (
+      followUpMeta.updated_at ||
+      followUpMeta.case_closed_at ||
+      followUpMeta.auto_disposed_at
+    ))
+  );
+
+  let followUpEnabled = true;
+  if (wasExplicitlyDisabled) {
     followUpEnabled = false;
   } else if (followUpMeta.enabled === true) {
     followUpEnabled = true;
   } else if (isSupplierStream) {
-    followUpEnabled = party.hasValidSupplier;
+    followUpEnabled = true;
   } else {
-    followUpEnabled = Boolean(options.customerFollowUpDefaultEnabled);
+    followUpEnabled = defaultCustomerEnabled;
   }
 
   const reportDateIso = report?.created_at || followUpMeta.started_at || meta.simple_rtv_updated_at || report?.updated_at || nowDate.toISOString();
   const startedAtIso =
     followUpMeta.started_at ||
-    (isSupplierStream && party.hasValidSupplier
-      ? (report?.created_at || meta.simple_rtv_updated_at || report?.updated_at || nowDate.toISOString())
-      : (report?.created_at || report?.updated_at || nowDate.toISOString()));
+    report?.created_at ||
+    meta.simple_rtv_updated_at ||
+    report?.updated_at ||
+    nowDate.toISOString();
 
   const calendarDay = diffManilaCalendarDays(startedAtIso, nowDate);
-  const isCountdownActive = !isClosed && followUpEnabled && (!isSupplierStream || party.hasValidSupplier || followUpMeta.enabled === true);
+  const isCountdownActive = !isClosed && followUpEnabled;
   const isExpiredAfter10Days = isCountdownActive && calendarDay > FOLLOW_UP_MAX_DAYS;
   const todayManila = getManilaDateYmd(nowDate);
   const lastSentPhtDate = String(followUpMeta.last_sent_pht_date || '').trim() || null;

@@ -1389,26 +1389,49 @@ export const catalogService = {
     const existingFollowUpMeta = (ai_document_metadata?.follow_up && typeof ai_document_metadata.follow_up === 'object')
       ? { ...ai_document_metadata.follow_up }
       : {};
-    let customerFollowUpDefault = false;
+    let customerFollowUpDefault = true;
     try {
-      customerFollowUpDefault = Boolean(notificationService.getDailyFollowUpConfig()?.customerFollowUpDefaultEnabled);
+      customerFollowUpDefault = notificationService.getDailyFollowUpConfig()?.customerFollowUpDefaultEnabled !== false;
     } catch {}
 
     const shouldStartFollowUp =
       existingFollowUpMeta.enabled !== false &&
-      (
-        existingFollowUpMeta.enabled === true ||
-        (effectiveRmaType === 'supplier_outbound' && !isPlaceholderSupplier(resolvedSupplierName)) ||
-        (effectiveRmaType === 'customer_inbound' && customerFollowUpDefault)
-      );
+      (effectiveRmaType === 'supplier_outbound' || customerFollowUpDefault || existingFollowUpMeta.enabled === true);
 
     if (shouldStartFollowUp) {
       existingFollowUpMeta.enabled = true;
       if (!existingFollowUpMeta.started_at) {
         existingFollowUpMeta.started_at = nowIso;
       }
+      // Auto-populate known Supplier Directory emails when available so daily cron can send right away
+      if (!existingFollowUpMeta.supplier_email_to) {
+        try {
+          const itemSuppliers = hasItems ? extractDistinctSuppliersFromItems(items) : [];
+          const candidateSups = itemSuppliers.length > 0
+            ? itemSuppliers
+            : (!isPlaceholderSupplier(resolvedSupplierName) && !isMixedSuppliersSummary(resolvedSupplierName) ? [resolvedSupplierName] : []);
+          const dirToSet = new Set();
+          const dirCcSet = new Set();
+          candidateSups.forEach((sup) => {
+            const match = supplierDirectoryService.findBySupplierName(sup);
+            if (match?.email_to) {
+              String(match.email_to).split(/[,;\s]+/).forEach((e) => { if (e.includes('@')) dirToSet.add(e.trim().toLowerCase()); });
+            }
+            if (match?.email_cc) {
+              String(match.email_cc).split(/[,;\s]+/).forEach((e) => { if (e.includes('@')) dirCcSet.add(e.trim().toLowerCase()); });
+            }
+          });
+          if (dirToSet.size > 0) {
+            existingFollowUpMeta.supplier_email_to = Array.from(dirToSet).join(', ');
+          }
+          if (dirCcSet.size > 0) {
+            existingFollowUpMeta.supplier_email_cc = Array.from(dirCcSet).filter((e) => !dirToSet.has(e)).join(', ');
+          }
+        } catch {}
+      }
     } else if (existingFollowUpMeta.enabled === undefined) {
       existingFollowUpMeta.enabled = false;
+      existingFollowUpMeta.manually_disabled = true;
     }
 
     const mergedMetadata = {
@@ -3115,14 +3138,12 @@ export const catalogService = {
         case_closed_at: prevFollowUp.case_closed_at || nowIso,
         case_status: 'picked_up_closed'
       };
-    } else if (existing?.rma_type === 'supplier_outbound' && !isPlaceholderSupplier(effectiveSup)) {
-      if (prevFollowUp.enabled !== false) {
-        updatedMeta.follow_up = {
-          ...prevFollowUp,
-          enabled: true,
-          started_at: prevFollowUp.started_at || nowIso
-        };
-      }
+    } else if (prevFollowUp.manually_disabled !== true && prevFollowUp.enabled !== false) {
+      updatedMeta.follow_up = {
+        ...prevFollowUp,
+        enabled: true,
+        started_at: prevFollowUp.started_at || nowIso
+      };
     }
 
     let baseNotes = String(existing?.notes || '').replace(/\s*\[REORDER:[^\]]*\]/gi, '').trim();
@@ -3277,13 +3298,14 @@ export const catalogService = {
     const ccEmailStr = String(payload.supplier_email_cc ?? prevFollowUp.supplier_email_cc ?? '').trim();
     const followUpEnabled = payload.followUpEnabled !== undefined
       ? Boolean(payload.followUpEnabled)
-      : (prevFollowUp.enabled ?? (!isPlaceholderSupplier(cleanSupplier || existing?.supplier_name)));
+      : (prevFollowUp.enabled ?? true);
 
     const nextFollowUp = {
       ...prevFollowUp,
       supplier_email_to: toEmailStr,
       supplier_email_cc: ccEmailStr,
       enabled: followUpEnabled,
+      manually_disabled: !followUpEnabled,
       updated_at: nowIso
     };
     if (followUpEnabled && (!nextFollowUp.started_at || payload.resetTimer)) {

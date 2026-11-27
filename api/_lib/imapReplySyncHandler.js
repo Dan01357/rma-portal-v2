@@ -685,6 +685,17 @@ export async function applyRmaXlsxUpdates({
       metaChanged = true;
     }
   }
+  if (
+    prevFollowUp.manually_disabled !== true &&
+    nextFollowUp.enabled !== true &&
+    (nextFollowUp.supplier_email_to || patch.supplier_name || parsed.manifestUpdates.some((m) => m.supplier_name))
+  ) {
+    nextFollowUp.enabled = true;
+    if (!nextFollowUp.started_at) {
+      nextFollowUp.started_at = existing.created_at || new Date().toISOString();
+    }
+    metaChanged = true;
+  }
 
   // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
   const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0

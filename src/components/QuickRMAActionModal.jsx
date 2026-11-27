@@ -32,7 +32,9 @@ import {
   Zap,
   Clock,
   Send,
-  MapPin
+  MapPin,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -61,7 +63,10 @@ import {
   sumManifestQuantity,
   summarizeBatchSuppliers,
   isMixedSuppliersSummary,
-  isRealSupplierName
+  isRealSupplierName,
+  computeItemPiecesAndValue,
+  formatManifestBreakdown,
+  formatPeso
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -196,6 +201,7 @@ export default function QuickRMAActionModal({
   const [editableManifestItems, setEditableManifestItems] = useState([]);
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
+  const [isAdvancedEditOpen, setIsAdvancedEditOpen] = useState(false);
   const isEditingAiDetailsRef = useRef(false);
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
@@ -768,9 +774,10 @@ export default function QuickRMAActionModal({
     });
   };
 
-  // Reset edit mode only when opening modal or switching to a different RMA ticket
+  // Reset edit mode & Advanced accordion only when opening modal or switching to a different RMA ticket
   useEffect(() => {
     setIsEditingAiDetails(false);
+    setIsAdvancedEditOpen(false);
   }, [isOpen, report?.id, report?.rma_number]);
 
   // Synchronize AI-extracted or existing paperwork document details whenever report changes (unless actively editing)
@@ -801,20 +808,35 @@ export default function QuickRMAActionModal({
       setAdminPoNumber(report.po_number || meta.po_number || '');
       setAdminSupplierName(resolvedInitSupplier);
       const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
-      const dirMatch = resolvedInitSupplier ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier) : null;
+      const itemEmailsMap = (followUpMeta.item_emails && typeof followUpMeta.item_emails === 'object') ? followUpMeta.item_emails : {};
+      const dirMatch = (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier))
+        ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier)
+        : null;
       setAdminSupplierEmailTo(followUpMeta.supplier_email_to || pickup.supplier_email_to || dirMatch?.email_to || '');
       setAdminSupplierEmailCc(followUpMeta.supplier_email_cc || pickup.supplier_email_cc || dirMatch?.email_cc || '');
       supplierDirectoryService.loadDirectory().then(() => {
-        if (!resolvedInitSupplier) return;
-        const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier);
-        if (refreshed) {
-          setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (refreshed.email_to || ''));
-          setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (refreshed.email_cc || ''));
+        if (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier)) {
+          const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier);
+          if (refreshed) {
+            setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (refreshed.email_to || ''));
+            setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (refreshed.email_cc || ''));
+          }
         }
+        setEditableManifestItems((prev) => prev.map((row) => {
+          const sup = String(row.supplier_name || '').trim();
+          if (!sup || isPlaceholderSup(sup)) return row;
+          const m = supplierDirectoryService.findBySupplierName(sup);
+          if (!m) return row;
+          return {
+            ...row,
+            supplier_email_to: String(row.supplier_email_to || '').trim() || m.email_to || '',
+            supplier_email_cc: String(row.supplier_email_cc || '').trim() || m.email_cc || ''
+          };
+        }));
       }).catch(() => {});
       setAdminExpiryDate(report.expiry_date ? String(report.expiry_date).slice(0, 10) : '');
 
-      // Super Admin Silent Restitution & Record Re-creation Hooks
+      // Advanced override hooks
       setAdminRmaNumber(report.rma_number || '');
       setAdminCreatedAt(report.created_at ? new Date(report.created_at).toISOString().slice(0, 16) : '');
       const isTestFlag = Boolean(report.is_test || meta.is_test || (report.notes && report.notes.includes('[TEST_MODE]')));
@@ -825,8 +847,27 @@ export default function QuickRMAActionModal({
       const baseManifestList = manifestItems.length > 0
         ? manifestItems
         : (Array.isArray(report.items) ? report.items : []);
-      const mappedManifest = baseManifestList.map((it) => {
+      const mappedManifest = baseManifestList.map((it, idx) => {
         const rawSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(resolvedInitSupplier) ? resolvedInitSupplier : '') || '';
+        const itemDir = (rawSup && !isPlaceholderSup(rawSup)) ? supplierDirectoryService.findBySupplierName(rawSup) : null;
+        const itMetaFu = (it.ai_document_metadata?.follow_up && typeof it.ai_document_metadata.follow_up === 'object')
+          ? it.ai_document_metadata.follow_up
+          : {};
+        const keyOverrides = itemEmailsMap[String(it.id || it.barcode || idx)] || itemEmailsMap[String(it.barcode || '')] || {};
+        const initTo = String(
+          it.supplier_email_to ||
+          keyOverrides.supplier_email_to ||
+          itMetaFu.supplier_email_to ||
+          itemDir?.email_to ||
+          (baseManifestList.length === 1 ? (followUpMeta.supplier_email_to || pickup.supplier_email_to || '') : '')
+        ).trim();
+        const initCc = String(
+          it.supplier_email_cc ||
+          keyOverrides.supplier_email_cc ||
+          itMetaFu.supplier_email_cc ||
+          itemDir?.email_cc ||
+          (baseManifestList.length === 1 ? (followUpMeta.supplier_email_cc || pickup.supplier_email_cc || '') : '')
+        ).trim();
         return {
           ...it,
           name: it.name || it.productName || '',
@@ -835,6 +876,8 @@ export default function QuickRMAActionModal({
           supplier_name: rawSup,
           supplierName: rawSup,
           supplier: rawSup,
+          supplier_email_to: initTo,
+          supplier_email_cc: initCc,
           quantity: Math.max(1, Number(it.quantity ?? it.qty) || 1),
           unit_name: it.unit_name || it.unit || 'pc',
           price: Number(it.price || 0),
@@ -1031,60 +1074,202 @@ export default function QuickRMAActionModal({
         ? parsedVatPrice
         : (safeNetPrice > 0 ? Number((safeNetPrice * 1.12).toFixed(2)) : Number(report.price_with_vat || 0));
 
+      const isManifestReport = Boolean(
+        report?.is_parent ||
+        editableManifestItems.length > 1 ||
+        manifestItems.length > 1 ||
+        (Array.isArray(report?.items) && report.items.length > 1)
+      );
+
       const updates = {
         rma_number: cleanRmaNum,
         created_at: cleanCreated,
         si_number: cleanSi || null,
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
-        invoice_dr_number: primaryDoc,
-        expiry_date: cleanExpiry
+        invoice_dr_number: primaryDoc
       };
-
-      if (adminProductName.trim()) updates.name = adminProductName.trim();
-      if (adminSku.trim()) updates.code = adminSku.trim();
-      if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
-      if (adminPrice !== undefined && adminPrice !== '') {
-        updates.price = safeNetPrice;
-        updates.price_with_vat = safeVatPrice;
-      }
-
-      if (cleanSupplier) {
-        updates.supplier_name = cleanSupplier;
-      }
 
       const baseMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
         ? { ...report.ai_document_metadata }
         : {};
-      if (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc) {
-        const prevFu = (baseMeta.follow_up && typeof baseMeta.follow_up === 'object') ? baseMeta.follow_up : {};
-        const prevPu = (baseMeta.supplier_pickup && typeof baseMeta.supplier_pickup === 'object') ? baseMeta.supplier_pickup : {};
-        baseMeta.follow_up = {
-          ...prevFu,
-          supplier_email_to: cleanSupplierEmailTo,
-          supplier_email_cc: cleanSupplierEmailCc
-        };
-        if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
-          baseMeta.supplier_pickup = {
-            ...prevPu,
-            ...(cleanSupplier && !isMixedSuppliersSummary(cleanSupplier) ? { supplier_name: cleanSupplier } : {}),
+      const prevFu = (baseMeta.follow_up && typeof baseMeta.follow_up === 'object') ? baseMeta.follow_up : {};
+      const prevPu = (baseMeta.supplier_pickup && typeof baseMeta.supplier_pickup === 'object') ? baseMeta.supplier_pickup : {};
+
+      if (!isManifestReport) {
+        updates.expiry_date = cleanExpiry;
+        if (adminProductName.trim()) updates.name = adminProductName.trim();
+        if (adminSku.trim()) updates.code = adminSku.trim();
+        if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
+        if (adminPrice !== undefined && adminPrice !== '') {
+          updates.price = safeNetPrice;
+          updates.price_with_vat = safeVatPrice;
+        }
+
+        if (cleanSupplier) {
+          updates.supplier_name = cleanSupplier;
+        }
+
+        if (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+          baseMeta.follow_up = {
+            ...prevFu,
             supplier_email_to: cleanSupplierEmailTo,
             supplier_email_cc: cleanSupplierEmailCc
           };
+          if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+            baseMeta.supplier_pickup = {
+              ...prevPu,
+              ...(cleanSupplier && !isMixedSuppliersSummary(cleanSupplier) ? { supplier_name: cleanSupplier } : {}),
+              supplier_email_to: cleanSupplierEmailTo,
+              supplier_email_cc: cleanSupplierEmailCc
+            };
+          }
+          updates.ai_document_metadata = baseMeta;
         }
-        updates.ai_document_metadata = baseMeta;
+
+        if (isAdminOrSuperRole && adminQuantity) {
+          const singleQty = Math.max(1, Number(adminQuantity) || 1);
+          updates.quantity = singleQty;
+          updates.total_quantity = singleQty;
+        }
       }
 
-      if (isAdminOrSuperRole && adminQuantity) {
-        const singleQty = Math.max(1, Number(adminQuantity) || 1);
-        updates.quantity = singleQty;
-        updates.total_quantity = singleQty;
+      let updatedItems = report.items;
+      const sourceManifestForSave = editableManifestItems.length > 0
+        ? editableManifestItems
+        : (Array.isArray(report.items) ? report.items : []);
+
+      const dirUpserts = [];
+      const itemEmailsMap = (prevFu.item_emails && typeof prevFu.item_emails === 'object')
+        ? { ...prevFu.item_emails }
+        : {};
+
+      if (sourceManifestForSave.length > 0) {
+        const fallbackSingleSup = !isManifestReport && isRealSupplierName(cleanSupplier)
+          ? cleanSupplier
+          : (!isManifestReport && isRealSupplierName(report.supplier_name) ? report.supplier_name : '');
+        updatedItems = sourceManifestForSave.map((it, idx) => {
+          const isSingleOverlay = !isManifestReport && sourceManifestForSave.length === 1;
+          const itemQty = isSingleOverlay && isAdminOrSuperRole && adminQuantity
+            ? Math.max(1, Number(adminQuantity) || 1)
+            : Math.max(1, parseInt(it.quantity ?? it.qty, 10) || 1);
+          const itemSupRaw = isSingleOverlay && fallbackSingleSup
+            ? fallbackSingleSup
+            : String(it.supplier_name || it.supplierName || it.supplier || '').trim();
+          const itemSup = isRealSupplierName(itemSupRaw)
+            ? itemSupRaw
+            : (fallbackSingleSup || 'Pending Assignment');
+          const itemSku = (isSingleOverlay && adminSku.trim())
+            ? adminSku.trim()
+            : (String(it.code || it.sku || '').trim() || null);
+          const itemUnit = (isSingleOverlay && adminUnitName.trim())
+            ? adminUnitName.trim()
+            : (String(it.unit_name || it.unit || 'pc').trim() || 'pc');
+          const rawNet = isSingleOverlay && adminPrice !== undefined && adminPrice !== ''
+            ? safeNetPrice
+            : parseFloat(it.price);
+          const rawVat = isSingleOverlay && adminPrice !== undefined && adminPrice !== ''
+            ? safeVatPrice
+            : parseFloat(it.price_with_vat ?? it.priceWithVat);
+          const resolvedNet = Number.isFinite(rawNet) && rawNet >= 0 ? Number(rawNet.toFixed(2)) : undefined;
+          const resolvedVat = Number.isFinite(rawVat) && rawVat >= 0
+            ? Number(rawVat.toFixed(2))
+            : (resolvedNet !== undefined ? Number((resolvedNet * 1.12).toFixed(2)) : undefined);
+          const itemExpiry = isSingleOverlay
+            ? (cleanExpiry || (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null))
+            : (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null);
+          const itemEmailTo = isSingleOverlay
+            ? String(cleanSupplierEmailTo || it.supplier_email_to || '').trim()
+            : String(it.supplier_email_to || '').trim();
+          const itemEmailCc = isSingleOverlay
+            ? String(cleanSupplierEmailCc || it.supplier_email_cc || '').trim()
+            : String(it.supplier_email_cc || '').trim();
+
+          const itemKey = String(it.id || it.barcode || idx);
+          if (itemEmailTo || itemEmailCc || itemEmailsMap[itemKey]) {
+            itemEmailsMap[itemKey] = {
+              supplier_name: itemSup,
+              supplier_email_to: itemEmailTo,
+              supplier_email_cc: itemEmailCc
+            };
+          }
+          if (isRealSupplierName(itemSup) && (itemEmailTo || itemEmailCc)) {
+            dirUpserts.push({
+              supplier_name: itemSup,
+              supplier_email_to: itemEmailTo,
+              supplier_email_cc: itemEmailCc
+            });
+          }
+
+          return {
+            ...it,
+            name: (isSingleOverlay && adminProductName.trim())
+              ? adminProductName.trim()
+              : (String(it.name || it.productName || '').trim() || 'Item'),
+            code: itemSku,
+            sku: itemSku,
+            quantity: itemQty,
+            unit_name: itemUnit,
+            unit: itemUnit,
+            supplier_name: itemSup,
+            supplierName: itemSup,
+            supplier: itemSup,
+            supplier_email_to: itemEmailTo,
+            supplier_email_cc: itemEmailCc,
+            ...(resolvedNet !== undefined ? { price: resolvedNet } : {}),
+            ...(resolvedVat !== undefined ? { price_with_vat: resolvedVat } : {}),
+            expiry_date: itemExpiry
+          };
+        });
+
+        const totalBatchQty = sumManifestQuantity(updatedItems, 1);
+        updates.items = updatedItems;
+        updates.total_items = updatedItems.length;
+        updates.total_quantity = totalBatchQty;
+        updates.quantity = totalBatchQty;
+        updates.supplier_name = isManifestReport
+          ? summarizeBatchSuppliers(updatedItems, '')
+          : summarizeBatchSuppliers(updatedItems, fallbackSingleSup);
+
+        if (isManifestReport) {
+          updates.name = formatManifestBreakdown(updatedItems, true) || `${updatedItems.length} Batch Items`;
+          updates.code = null;
+          updates.unit_name = updatedItems.every((i) => i.unit_name === updatedItems[0].unit_name)
+            ? updatedItems[0].unit_name
+            : 'mixed';
+          const netTotal = updatedItems.reduce((sum, it) => sum + ((Number(it.price || 0)) * (Number(it.quantity || 1))), 0);
+          const vatTotal = updatedItems.reduce((sum, it) => {
+            const calc = computeItemPiecesAndValue(it, savedProductsList);
+            if (calc.lineTotal > 0) return sum + calc.lineTotal;
+            const unitVat = Number(it.price_with_vat || 0) || (Number(it.price || 0) * 1.12);
+            return sum + (unitVat * Number(it.quantity || 1));
+          }, 0);
+          updates.price = Number(netTotal.toFixed(2));
+          updates.price_with_vat = Number(vatTotal.toFixed(2));
+          const sortedExpiries = updatedItems.map((i) => i.expiry_date).filter(Boolean).sort();
+          updates.expiry_date = sortedExpiries[0] || null;
+
+          const distinctTos = Array.from(new Set(updatedItems.map((i) => i.supplier_email_to).filter(Boolean)));
+          const distinctCcs = Array.from(new Set(updatedItems.map((i) => i.supplier_email_cc).filter(Boolean)));
+          baseMeta.follow_up = {
+            ...prevFu,
+            item_emails: itemEmailsMap,
+            ...(distinctTos.length > 0 ? { supplier_email_to: distinctTos.join(', ') } : {}),
+            ...(distinctCcs.length > 0 ? { supplier_email_cc: distinctCcs.join(', ') } : {})
+          };
+          updates.ai_document_metadata = {
+            ...(updates.ai_document_metadata || baseMeta),
+            follow_up: baseMeta.follow_up
+          };
+        }
       }
 
       if (isSuperAdminRole) {
-        if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
+        if (!isManifestReport && adminBarcode.trim()) updates.barcode = adminBarcode.trim();
 
-        const currentMeta = { ...baseMeta };
+        const currentMeta = (updates.ai_document_metadata && typeof updates.ai_document_metadata === 'object')
+          ? { ...updates.ai_document_metadata }
+          : { ...baseMeta };
         let currentNotes = report.notes || '';
         if (adminIsTest === false) {
           delete currentMeta.is_test;
@@ -1100,56 +1285,6 @@ export default function QuickRMAActionModal({
           updates.notes = currentNotes;
           updates.ai_document_metadata = currentMeta;
         }
-      }
-
-      const isManifestReport = Boolean(
-        report?.is_parent ||
-        editableManifestItems.length > 1 ||
-        manifestItems.length > 1 ||
-        (Array.isArray(report?.items) && report.items.length > 1)
-      );
-
-      let updatedItems = report.items;
-      const sourceManifestForSave = editableManifestItems.length > 0
-        ? editableManifestItems
-        : (Array.isArray(report.items) ? report.items : []);
-
-      if (sourceManifestForSave.length > 0) {
-        const fallbackSingleSup = isRealSupplierName(cleanSupplier)
-          ? cleanSupplier
-          : (isRealSupplierName(report.supplier_name) ? report.supplier_name : '');
-        updatedItems = sourceManifestForSave.map((it) => {
-          const itemQty = Math.max(1, parseInt(it.quantity ?? it.qty, 10) || 1);
-          const itemSupRaw = String(it.supplier_name || it.supplierName || it.supplier || '').trim();
-          const itemSup = isRealSupplierName(itemSupRaw)
-            ? itemSupRaw
-            : (fallbackSingleSup || 'Pending Assignment');
-          const itemSku = String(it.code || it.sku || '').trim() || null;
-          const itemNet = parseFloat(it.price);
-          const itemVat = parseFloat(it.price_with_vat ?? it.priceWithVat);
-          return {
-            ...it,
-            name: String(it.name || it.productName || '').trim() || 'Item',
-            code: itemSku,
-            sku: itemSku,
-            quantity: itemQty,
-            unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
-            supplier_name: itemSup,
-            supplierName: itemSup,
-            supplier: itemSup,
-            ...(Number.isFinite(itemNet) && itemNet >= 0 ? { price: Number(itemNet.toFixed(2)) } : {}),
-            ...(Number.isFinite(itemVat) && itemVat >= 0
-              ? { price_with_vat: Number(itemVat.toFixed(2)) }
-              : (Number.isFinite(itemNet) && itemNet >= 0 ? { price_with_vat: Number((itemNet * 1.12).toFixed(2)) } : {})),
-            expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : (cleanExpiry || null)
-          };
-        });
-        const totalBatchQty = sumManifestQuantity(updatedItems, 1);
-        updates.items = updatedItems;
-        updates.total_items = updatedItems.length;
-        updates.total_quantity = totalBatchQty;
-        updates.quantity = totalBatchQty;
-        updates.supplier_name = summarizeBatchSuppliers(updatedItems, fallbackSingleSup);
       }
 
       const updatePromise = supabase
@@ -1202,6 +1337,9 @@ export default function QuickRMAActionModal({
                 childPatch.name = matched.name;
                 childPatch.code = matched.code || null;
                 childPatch.quantity = matched.quantity;
+                if (matched.unit_name) childPatch.unit_name = matched.unit_name;
+                if (Number.isFinite(matched.price)) childPatch.price = matched.price;
+                if (Number.isFinite(matched.price_with_vat)) childPatch.price_with_vat = matched.price_with_vat;
                 if (matched.supplier_name) childPatch.supplier_name = matched.supplier_name;
                 if (matched.expiry_date !== undefined) childPatch.expiry_date = matched.expiry_date || null;
               }
@@ -1235,6 +1373,10 @@ export default function QuickRMAActionModal({
         }
       }
 
+      const resolvedSupplierDisplay = isManifestReport
+        ? (updates.supplier_name || report.supplier_name || 'Pending Assignment')
+        : (updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment');
+
       const updatedReport = {
         ...report,
         ...updates,
@@ -1242,19 +1384,23 @@ export default function QuickRMAActionModal({
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
         invoice_dr_number: primaryDoc,
-        supplier_name: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
-        supplier: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
-        expiry_date: cleanExpiry,
-        ...(adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
+        supplier_name: resolvedSupplierDisplay,
+        supplier: resolvedSupplierDisplay,
+        expiry_date: isManifestReport ? (updates.expiry_date ?? null) : cleanExpiry,
+        ...(!isManifestReport && adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
       };
 
-      if (cleanSupplier && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
+      if (!isManifestReport && isRealSupplierName(cleanSupplier) && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
         supplierDirectoryService.upsertFromSubmission({
           supplier_name: cleanSupplier,
           supplier_email_to: cleanSupplierEmailTo,
           supplier_email_cc: cleanSupplierEmailCc
         }).catch(() => {});
+      } else if (dirUpserts.length > 0) {
+        dirUpserts.forEach((entry) => {
+          supplierDirectoryService.upsertFromSubmission(entry).catch(() => {});
+        });
       }
 
       setReport(updatedReport);
@@ -1325,7 +1471,7 @@ export default function QuickRMAActionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
+      <div className="relative w-full max-w-xl sm:max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
         {/* Mobile Drag Indicator */}
         <div className="bottom-sheet-handle sm:hidden" />
 
@@ -1577,7 +1723,7 @@ export default function QuickRMAActionModal({
                         )}
                       </div>
                     </div>
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    <div className="space-y-1.5">
                       {displayItems.map((it, idx) => (
                         <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
                           <div className="min-w-0 flex-1">
@@ -1760,7 +1906,7 @@ export default function QuickRMAActionModal({
                       )}
                       {(adminExpiryDate || report.expiry_date) && (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date (YYYY-MM-DD):</span>
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
                           <strong className="text-rose-600 dark:text-rose-400 font-bold">{formatDateYmd(adminExpiryDate || report.expiry_date) || adminExpiryDate || report.expiry_date}</strong>
                         </div>
                       )}
@@ -1792,263 +1938,310 @@ export default function QuickRMAActionModal({
                   </div>
                 </div>
 
-                {/* Manual Override Editor for Admin & Super Admin Silent Restitution */}
+                {/* Edit RMA Details Panel */}
                 {isEditingAiDetails && (
-                  <div className="p-3.5 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-3.5 animate-in fade-in shadow-md">
+                  <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-4 animate-in fade-in shadow-md">
                     <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
-                      <div className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      <div className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                         <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        <span>{isSuperAdmin ? '🛠️ Super Admin Record Restitution & Document Editor' : 'Edit Commercial Documents & Paperwork Metadata'}</span>
+                        <span>Edit RMA Details</span>
                       </div>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
-                        {isSuperAdmin ? 'Super Admin Mode' : 'Admin'}
+                        {isSuperAdmin ? 'Super Admin' : 'Admin'}
                       </span>
                     </div>
 
-                    {isSuperAdmin && (
+                    <datalist id="admin-supplier-suggestions">
+                      {knownSuppliers.map(s => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+
+                    {editableManifestItems.length > 1 ? (
                       <>
-                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-emerald-900 dark:text-emerald-200 text-xs space-y-1">
-                          <div className="flex items-center gap-1.5 font-black text-[11px] text-emerald-800 dark:text-emerald-300">
-                            <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>🔒 100% Silent Record Restitution Guarantee</span>
-                          </div>
-                          <p className="text-[10.5px] leading-relaxed text-emerald-800/90 dark:text-emerald-300/90">
-                            Saving edits or converting this record to Live Production is <strong>completely silent</strong> — zero email notifications triggered.
-                          </p>
-                        </div>
-
-                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
-                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
-                            Record Environment &amp; Destination Hub
-                          </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setAdminIsTest(true)}
-                              className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                                adminIsTest
-                                  ? 'bg-amber-600 text-white shadow-sm'
-                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span>🧪 Test Mode Sandbox</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setAdminIsTest(false)}
-                              className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                                !adminIsTest
-                                  ? 'bg-emerald-600 text-white shadow-sm'
-                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span>🟢 Live Production Hub</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
+                        {/* Read-only Batch Summary Bar */}
+                        <div className="grid grid-cols-3 gap-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs">
                           <div>
-                            <div className="flex items-center justify-between mb-0.5">
-                              <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300">
-                                RMA Identifier (Ticket ID)
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const nextId = catalogService.generateRMANumber(null, adminIsTest);
-                                  setAdminRmaNumber(nextId);
-                                }}
-                                className="text-[9px] font-bold text-blue-700 dark:text-blue-300 hover:underline flex items-center gap-0.5 cursor-pointer"
-                              >
-                                ⚡ Generate {adminIsTest ? 'Test' : 'Live'} ID
-                              </button>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Items</div>
+                            <div className="font-black text-slate-900 dark:text-white">{editableManifestItems.length} Line Items</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Qty</div>
+                            <div data-testid="batch-summary-total-qty" className="font-mono font-black text-indigo-700 dark:text-indigo-300">
+                              {sumManifestQuantity(editableManifestItems, 1)}
                             </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Value</div>
+                            <div className="font-mono font-black text-emerald-700 dark:text-emerald-300">
+                              {formatPeso(editableManifestItems.reduce((sum, item) => {
+                                const calc = computeItemPiecesAndValue(item, savedProductsList);
+                                const unitVat = Number(item.price_with_vat || 0) || (Number(item.price || 0) * 1.12);
+                                const fallbackVal = unitVat * (Number(item.quantity || 1));
+                                return sum + (calc.lineTotal > 0 ? calc.lineTotal : fallbackVal);
+                              }, 0))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Un-cramped Batch Line Items */}
+                        <div className="space-y-2.5 p-2.5 sm:p-3 bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
+                              Batch Line Items ({editableManifestItems.length} Items)
+                            </span>
+                            <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
+                              Total Qty: {sumManifestQuantity(editableManifestItems, 1)}
+                            </span>
+                          </div>
+                          <div className="space-y-2.5">
+                            {editableManifestItems.map((it, idx) => {
+                              const calc = computeItemPiecesAndValue(it, savedProductsList);
+                              const lineSubtotal = calc.lineTotal > 0
+                                ? calc.lineTotal
+                                : ((Number(it.price_with_vat || 0) || (Number(it.price || 0) * 1.12)) * Number(it.quantity || 1));
+                              return (
+                                <div key={idx} className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5 shadow-2xs">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-black text-slate-900 dark:text-slate-100 truncate">
+                                      #{idx + 1}: {it.name || it.barcode}
+                                    </span>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className="text-[10px] font-mono text-slate-400">
+                                        BC: {it.barcode}
+                                      </span>
+                                      {lineSubtotal > 0 && (
+                                        <span className="text-[10px] font-mono font-black text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                                          {formatPeso(lineSubtotal)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
+                                    <div className="sm:col-span-2">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Qty</label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        aria-label={`Batch item ${idx + 1} quantity`}
+                                        value={it.quantity ?? 1}
+                                        onChange={(e) => {
+                                          const parsed = parseInt(e.target.value, 10);
+                                          handleUpdateEditableManifestItem(idx, { quantity: Number.isFinite(parsed) && parsed >= 1 ? parsed : 1 });
+                                        }}
+                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                    <div className="sm:col-span-3">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Unit</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} unit`}
+                                        value={it.unit_name || 'pc'}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          handleUpdateEditableManifestItem(idx, { unit_name: val, unit: val });
+                                        }}
+                                        placeholder="pc, case"
+                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                    <div className="sm:col-span-4">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">SKU</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} SKU`}
+                                        value={it.code || it.sku || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          handleUpdateEditableManifestItem(idx, { code: val, sku: val });
+                                        }}
+                                        placeholder="SKU / code"
+                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                    <div className="sm:col-span-3">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Unit Price (PHP)</label>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        aria-label={`Batch item ${idx + 1} unit price`}
+                                        value={it.price ?? 0}
+                                        onChange={(e) => {
+                                          const rawVal = e.target.value;
+                                          const num = parseFloat(rawVal);
+                                          handleUpdateEditableManifestItem(idx, {
+                                            price: rawVal === '' ? '' : (Number.isFinite(num) && num >= 0 ? num : 0),
+                                            ...(!Number.isNaN(num) && num >= 0 ? { price_with_vat: Number((num * 1.12).toFixed(2)) } : {})
+                                          });
+                                        }}
+                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                                    <div className="sm:col-span-8">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Name</label>
+                                      <input
+                                        type="text"
+                                        list="admin-supplier-suggestions"
+                                        aria-label={`Batch item ${idx + 1} supplier`}
+                                        value={it.supplier_name || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          const dirMatch = supplierDirectoryService.findBySupplierName(val);
+                                          handleUpdateEditableManifestItem(idx, {
+                                            supplier_name: val,
+                                            supplierName: val,
+                                            supplier: val,
+                                            ...(dirMatch && !String(it.supplier_email_to || '').trim() ? { supplier_email_to: dirMatch.email_to || '' } : {}),
+                                            ...(dirMatch && !String(it.supplier_email_cc || '').trim() ? { supplier_email_cc: dirMatch.email_cc || '' } : {})
+                                          });
+                                        }}
+                                        placeholder="e.g. Suy Sing Commercial Corp"
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                    <div className="sm:col-span-4">
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Expiry Date</label>
+                                      <input
+                                        type="date"
+                                        aria-label={`Batch item ${idx + 1} expiry date`}
+                                        value={it.expiry_date || ''}
+                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { expiry_date: e.target.value })}
+                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} supplier email To`}
+                                        value={it.supplier_email_to || ''}
+                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_to: e.target.value })}
+                                        placeholder="claims@supplier.com (auto-fills from Directory)"
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
+                                      <input
+                                        type="text"
+                                        aria-label={`Batch item ${idx + 1} supplier email CC`}
+                                        value={it.supplier_email_cc || ''}
+                                        onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_cc: e.target.value })}
+                                        placeholder="coordinator@supplier.com (Optional)"
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* Single-Item Product & Catalog Specifications */
+                      <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Product &amp; Catalog Specifications
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
+                            <ProductAutoSuggest
+                              mode="name"
+                              value={adminProductName}
+                              onChange={(val) => setAdminProductName(val)}
+                              onSelectProduct={handleAutoPopulateEditDetails}
+                              placeholder="Type product name to search catalog..."
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
                             <input
                               type="text"
-                              value={adminRmaNumber}
-                              onChange={(e) => setAdminRmaNumber(e.target.value)}
-                              placeholder="e.g. RMA-2026-0099-6KKW"
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-mono font-black text-blue-700 dark:text-blue-300 shadow-2xs"
+                              value={adminBarcode}
+                              readOnly={!isSuperAdmin}
+                              disabled={!isSuperAdmin}
+                              onChange={(e) => isSuperAdmin && setAdminBarcode(e.target.value)}
+                              className={`w-full px-2.5 py-1.5 border rounded-xl text-xs font-mono font-bold ${
+                                isSuperAdmin
+                                  ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                                  : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                              }`}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
+                            <ProductAutoSuggest
+                              mode="code"
+                              value={adminSku}
+                              onChange={(val) => setAdminSku(val)}
+                              onSelectProduct={handleAutoPopulateEditDetails}
+                              placeholder="Type SKU / code..."
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                             />
                           </div>
                           <div>
-                            <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
-                              Date Logged (YYYY-MM-DD HH:mm) (Historical Ingest Timestamp)
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                              Quantity &amp; Unit
                             </label>
-                            <input
-                              type="datetime-local"
-                              value={adminCreatedAt}
-                              onChange={(e) => setAdminCreatedAt(e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs"
-                            />
+                            <div className="flex gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                aria-label="Ticket total quantity"
+                                value={adminQuantity}
+                                readOnly={!isAdminOrSuper}
+                                disabled={!isAdminOrSuper}
+                                onChange={(e) => {
+                                  if (isAdminOrSuper) {
+                                    setAdminQuantity(e.target.value);
+                                  }
+                                }}
+                                className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
+                                  isAdminOrSuper
+                                    ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
+                                    : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
+                                }`}
+                              />
+                              <input
+                                type="text"
+                                value={adminUnitName}
+                                onChange={(e) => setAdminUnitName(e.target.value)}
+                                placeholder="pc, case"
+                                className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              />
+                            </div>
                           </div>
-                        </div>
-
-                      </>
-                    )}
-
-                    {/* Product & Catalog Specifications (Auto-Suggest Searchable by Name or SKU) */}
-                    <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Product &amp; Catalog Specifications
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div className="sm:col-span-2">
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
-                          <ProductAutoSuggest
-                            mode="name"
-                            value={adminProductName}
-                            onChange={(val) => setAdminProductName(val)}
-                            onSelectProduct={handleAutoPopulateEditDetails}
-                            placeholder="Type product name to search catalog..."
-                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
-                          <input
-                            type="text"
-                            value={adminBarcode}
-                            readOnly={!isSuperAdmin}
-                            disabled={!isSuperAdmin}
-                            onChange={(e) => isSuperAdmin && setAdminBarcode(e.target.value)}
-                            className={`w-full px-2.5 py-1.5 border rounded-xl text-xs font-mono font-bold ${
-                              isSuperAdmin
-                                ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
-                                : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
-                          <ProductAutoSuggest
-                            mode="code"
-                            value={adminSku}
-                            onChange={(val) => setAdminSku(val)}
-                            onSelectProduct={handleAutoPopulateEditDetails}
-                            placeholder="Type SKU / code..."
-                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
-                            {editableManifestItems.length > 1 ? 'Total Quantity (Auto) & Unit' : 'Quantity & Unit'}
-                          </label>
-                          <div className="flex gap-1">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Net Purchase Unit Price (PHP)</label>
                             <input
                               type="number"
-                              min="1"
-                              aria-label="Ticket total quantity"
-                              value={editableManifestItems.length > 1 ? sumManifestQuantity(editableManifestItems, adminQuantity) : adminQuantity}
-                              readOnly={!isAdminOrSuper || editableManifestItems.length > 1}
-                              disabled={!isAdminOrSuper || editableManifestItems.length > 1}
+                              step="0.01"
+                              value={adminPrice}
                               onChange={(e) => {
-                                if (isAdminOrSuper && editableManifestItems.length <= 1) {
-                                  setAdminQuantity(e.target.value);
+                                const val = e.target.value;
+                                setAdminPrice(val);
+                                const num = parseFloat(val);
+                                if (!Number.isNaN(num)) {
+                                  setAdminPriceWithVat(Number((num * 1.12).toFixed(2)));
                                 }
                               }}
-                              className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
-                                isAdminOrSuper && editableManifestItems.length <= 1
-                                  ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
-                                  : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
-                              }`}
-                            />
-                            <input
-                              type="text"
-                              value={adminUnitName}
-                              onChange={(e) => setAdminUnitName(e.target.value)}
-                              placeholder="pc, case"
-                              className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
                           </div>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Net Purchase Unit Price (PHP)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adminPrice}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setAdminPrice(val);
-                              const num = parseFloat(val);
-                              if (!Number.isNaN(num)) {
-                                setAdminPriceWithVat(Number((num * 1.12).toFixed(2)));
-                              }
-                            }}
-                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Editable Batch Line Items (Qty & Supplier per Item) */}
-                    {editableManifestItems.length > 1 && (
-                      <div className="space-y-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
-                            Batch Line Items — Edit Quantity &amp; Supplier ({editableManifestItems.length} Items)
-                          </span>
-                          <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
-                            Total Qty: {sumManifestQuantity(editableManifestItems, 1)} pcs
-                          </span>
-                        </div>
-                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
-                          {editableManifestItems.map((it, idx) => (
-                            <div key={idx} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate">
-                                  #{idx + 1}: {it.name || it.barcode}
-                                </span>
-                                <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                                  BC: {it.barcode}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                                <div className="sm:col-span-3">
-                                  <label className="text-[9.5px] font-bold text-slate-400 block">Qty ({it.unit_name || 'pc'})</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    aria-label={`Batch item ${idx + 1} quantity`}
-                                    value={it.quantity ?? 1}
-                                    onChange={(e) => {
-                                      const parsed = parseInt(e.target.value, 10);
-                                      handleUpdateEditableManifestItem(idx, { quantity: Number.isFinite(parsed) && parsed >= 1 ? parsed : 1 });
-                                    }}
-                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
-                                  />
-                                </div>
-                                <div className="sm:col-span-5">
-                                  <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Name</label>
-                                  <input
-                                    type="text"
-                                    list="admin-supplier-suggestions"
-                                    aria-label={`Batch item ${idx + 1} supplier`}
-                                    value={it.supplier_name || ''}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      handleUpdateEditableManifestItem(idx, { supplier_name: val, supplierName: val, supplier: val });
-                                    }}
-                                    placeholder="Supplier for this item..."
-                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
-                                  />
-                                </div>
-                                <div className="sm:col-span-4">
-                                  <label className="text-[9.5px] font-bold text-slate-400 block">Expiry (YYYY-MM-DD)</label>
-                                  <input
-                                    type="date"
-                                    value={it.expiry_date || ''}
-                                    onChange={(e) => handleUpdateEditableManifestItem(idx, { expiry_date: e.target.value })}
-                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          ))}
                         </div>
                       </div>
                     )}
@@ -2092,92 +2285,156 @@ export default function QuickRMAActionModal({
                       </div>
                     </div>
 
-                    {/* Supplier & Product Expiry Information */}
-                    <div className="space-y-1">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Supplier &amp; Product Expiry Information
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Name</label>
-                          <input
-                            type="text"
-                            list="admin-supplier-suggestions"
-                            value={adminSupplierName}
-                            onChange={(e) => {
-                              const nextVal = e.target.value;
-                              setAdminSupplierName(nextVal);
-                              const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
-                              if (dirMatch) {
-                                setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
-                                setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
-                              }
-                            }}
-                            placeholder="e.g. Suy Sing Commercial Corp, Mondelez, URC..."
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                          <datalist id="admin-supplier-suggestions">
-                            {knownSuppliers.map(s => (
-                              <option key={s} value={s} />
-                            ))}
-                          </datalist>
+                    {/* Single-Item Supplier & Product Expiry Information (hidden for Batch RMAs) */}
+                    {editableManifestItems.length <= 1 && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Supplier &amp; Product Expiry Information
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date (YYYY-MM-DD)</label>
-                          <div className="flex flex-wrap items-center gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Name</label>
+                            <input
+                              type="text"
+                              list="admin-supplier-suggestions"
+                              value={adminSupplierName}
+                              onChange={(e) => {
+                                const nextVal = e.target.value;
+                                setAdminSupplierName(nextVal);
+                                const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+                                if (dirMatch) {
+                                  setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
+                                  setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+                                }
+                              }}
+                              placeholder="e.g. Suy Sing Commercial Corp, Mondelez, URC..."
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date</label>
                             <input
                               type="date"
                               value={adminExpiryDate}
                               onChange={(e) => setAdminExpiryDate(e.target.value)}
-                              className="flex-1 min-w-[140px] px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
-                            <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300 shrink-0">
-                              ISO (YYYY-MM-DD): {adminExpiryDate ? adminExpiryDate.slice(0, 10) : '—'}
-                            </span>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
+                            <input
+                              type="text"
+                              value={adminSupplierEmailTo}
+                              onChange={(e) => setAdminSupplierEmailTo(e.target.value)}
+                              placeholder="claims@supplier.com (auto-fills from Directory)"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
+                            <input
+                              type="text"
+                              value={adminSupplierEmailCc}
+                              onChange={(e) => setAdminSupplierEmailCc(e.target.value)}
+                              placeholder="coordinator@supplier.com (Optional)"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                            />
                           </div>
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
-                          <input
-                            type="text"
-                            value={adminSupplierEmailTo}
-                            onChange={(e) => setAdminSupplierEmailTo(e.target.value)}
-                            placeholder="claims@supplier.com (auto-fills from Directory)"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
-                          <input
-                            type="text"
-                            value={adminSupplierEmailCc}
-                            onChange={(e) => setAdminSupplierEmailCc(e.target.value)}
-                            placeholder="coordinator@supplier.com (Optional)"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
-                          />
-                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    {/* Save / Cancel */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                      <button
-                        type="button"
-                        disabled={isSavingAiDetails}
-                        onClick={handleSaveAiDetails}
-                        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                      >
-                        {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                        <span>{isSavingAiDetails ? 'Saving Record...' : 'Save & Apply Restitution'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingAiDetails(false)}
-                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                    {/* Collapsed Advanced / Danger Zone Accordion */}
+                    {isSuperAdmin && (
+                      <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setIsAdvancedEditOpen((v) => !v)}
+                          aria-expanded={isAdvancedEditOpen}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between gap-2 text-xs font-black text-slate-700 dark:text-slate-200 cursor-pointer transition-colors"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Shield className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>Advanced / Danger Zone</span>
+                          </span>
+                          <span className="flex items-center gap-2 text-[10px] font-bold text-slate-500 truncate">
+                            <span className="truncate">{adminIsTest ? 'Test Sandbox' : 'Live Production'} • {adminRmaNumber || report?.rma_number}</span>
+                            {isAdvancedEditOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+                          </span>
+                        </button>
+                        {isAdvancedEditOpen && (
+                          <div className="p-3 bg-white dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
+                                Record Environment &amp; Destination Hub
+                              </label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setAdminIsTest(true)}
+                                  className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    adminIsTest
+                                      ? 'bg-amber-600 text-white shadow-sm'
+                                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <span>🧪 Test Mode Sandbox</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdminIsTest(false)}
+                                  className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    !adminIsTest
+                                      ? 'bg-emerald-600 text-white shadow-sm'
+                                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <span>🟢 Live Production Hub</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
+                              <div>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300">
+                                    RMA Identifier (Ticket ID)
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextId = catalogService.generateRMANumber(null, adminIsTest);
+                                      setAdminRmaNumber(nextId);
+                                    }}
+                                    className="text-[9px] font-bold text-blue-700 dark:text-blue-300 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    ⚡ Generate {adminIsTest ? 'Test' : 'Live'} ID
+                                  </button>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={adminRmaNumber}
+                                  onChange={(e) => setAdminRmaNumber(e.target.value)}
+                                  placeholder="e.g. RMA-2026-0099-6KKW"
+                                  className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-mono font-black text-blue-700 dark:text-blue-300 shadow-2xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
+                                  Date Logged
+                                </label>
+                                <input
+                                  type="datetime-local"
+                                  value={adminCreatedAt}
+                                  onChange={(e) => setAdminCreatedAt(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2883,17 +3140,38 @@ export default function QuickRMAActionModal({
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 bg-slate-50 dark:bg-slate-800/80 px-4 sm:px-6 py-3 pb-safe border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+        <div className="shrink-0 bg-slate-50 dark:bg-slate-800/80 px-4 sm:px-6 py-3 pb-safe border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs">
           <span className="text-slate-500 font-mono text-[11px] truncate pr-2">
             {report?.rma_number || rmaNumber || 'RMA Portal'}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="touch-target px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl font-bold transition-colors cursor-pointer"
-          >
-            Done / Close
-          </button>
+          {report && isEditingAiDetails ? (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsEditingAiDetails(false)}
+                className="touch-target px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingAiDetails}
+                onClick={handleSaveAiDetails}
+                className="touch-target px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSavingAiDetails ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className="touch-target px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl font-bold transition-colors cursor-pointer"
+            >
+              Done / Close
+            </button>
+          )}
         </div>
       </div>
 

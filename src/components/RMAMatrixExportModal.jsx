@@ -97,6 +97,17 @@ export default function RMAMatrixExportModal({
       ? 'Customer Hub Only'
       : 'Overall RMA (Customer Hub + Supplier RTV)';
 
+  const applyAllTimeRange = () => {
+    const end = toManilaDateKey(new Date());
+    const dateCandidates = (Array.isArray(reports) ? reports : [])
+      .filter((r) => r && !r.parent_rma_id && (Boolean(isTestMode) === Boolean(r.is_test || r.ai_document_metadata?.is_test || String(r.notes || '').includes('[TEST_MODE]') || String(r.rma_number || '').includes('TEST'))))
+      .map((r) => toManilaDateKey(r.created_at || r.updated_at))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    setStartDate(dateCandidates[0] || defaultStart);
+    setEndDate(end);
+  };
+
   const applyQuickRange = (daysBack) => {
     const end = toManilaDateKey(new Date());
     const d = new Date(`${end}T00:00:00Z`);
@@ -281,6 +292,13 @@ export default function RMAMatrixExportModal({
           {/* Quick Presets */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] font-bold uppercase text-slate-400 mr-1">Quick Range:</span>
+            <button
+              type="button"
+              onClick={applyAllTimeRange}
+              className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-200 text-xs font-black transition-colors cursor-pointer"
+            >
+              All Time (Start to Finish)
+            </button>
             {[
               { label: 'Last 7 Days', days: 6 },
               { label: 'Last 14 Days', days: 13 },

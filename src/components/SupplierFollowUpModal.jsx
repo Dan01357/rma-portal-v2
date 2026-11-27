@@ -57,11 +57,7 @@ export default function SupplierFollowUpModal({
     setSupplierName(cleanSup);
     setSupplierEmailTo(party.supplierEmailTo || dirMatch?.email_to || '');
     setSupplierEmailCc(party.supplierEmailCc || dirMatch?.email_cc || '');
-    setFollowUpEnabled(
-      party.followUpMeta.enabled !== undefined
-        ? Boolean(party.followUpMeta.enabled)
-        : (report.rma_type === 'supplier_outbound' ? true : wf.followUpEnabled)
-    );
+    setFollowUpEnabled(Boolean(wf.followUpEnabled));
     setFeedback(null);
 
     supplierDirectoryService.loadDirectory().then(() => {

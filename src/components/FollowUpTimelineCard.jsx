@@ -11,7 +11,7 @@ export default function FollowUpTimelineCard({
   report,
   catalogProducts = [],
   workflow = null,
-  customerFollowUpDefaultEnabled = false,
+  customerFollowUpDefaultEnabled = true,
   compact = false,
   onResetTimeline = null,
   isResettingTimeline = false

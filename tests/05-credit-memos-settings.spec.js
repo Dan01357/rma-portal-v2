@@ -69,7 +69,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible();
       await page.getByRole('button', { name: /Edit Details & Documents/i }).click();
       await page.locator('input[type="number"][min="1"]').first().fill('350');
-      await page.getByRole('button', { name: /Save & Apply Restitution/i }).click();
+      await page.getByRole('button', { name: /Save Changes/i }).click();
       await expect(page.getByText(/Super Admin Approved \(> ₱10,000 Claim\)/i)).toBeVisible({
         timeout: 25_000
       });
@@ -296,8 +296,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
       await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
       await expect(page.locator('input[aria-label="Auto Daily Matrix Email Enabled"]')).toBeVisible();
+      await expect(page.locator('input[aria-label="Include All Records (Start to Finish)"]')).toBeChecked();
       await expect(page.locator('input[aria-label="Auto Daily Follow-Up Enabled"]')).toBeVisible();
-      await expect(page.locator('input[aria-label="Customer Hub Default Follow-Up Enabled"]')).toBeVisible();
+      await expect(page.locator('input[aria-label="Customer Hub Default Follow-Up Enabled"]')).toBeChecked();
 
       const settingsTestToggle = page
         .locator('div:has(> div > h2:has-text("Simulation / Test Mode Toggle"))')
@@ -364,11 +365,15 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
       await expect(page.getByText(/Synced TO & CC recipients between Auto Daily .* Matrix and Manual Matrix/i)).toBeVisible();
 
-      // Update Auto-Send Time (Matrix & Follow-Up) + Custom Date Range, save, reload to assert persistence, then restore defaults
+      // Update Auto-Send Time (Matrix & Follow-Up) + Include All Records toggle + Custom Date Range, save, reload to assert persistence, then restore defaults
       const matrixTimeInput = page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]');
       const followUpTimeInput = page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]');
+      const includeAllMatrixChk = page.locator('input[aria-label="Include All Records (Start to Finish)"]');
       await matrixTimeInput.fill('14:30');
       await followUpTimeInput.fill('09:15');
+      if (await includeAllMatrixChk.isChecked()) {
+        await includeAllMatrixChk.uncheck();
+      }
       await page.getByRole('button', { name: /Custom Date Range/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
@@ -383,10 +388,12 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Settings & SMTP/i }).click();
       await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('14:30');
       await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('09:15');
+      await expect(page.locator('input[aria-label="Include All Records (Start to Finish)"]')).not.toBeChecked();
 
-      // Restore clean corporate default schedules & Rolling Days
+      // Restore clean corporate default schedules, Include All Records ON & Rolling Days
       await page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
       await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
+      await page.locator('input[aria-label="Include All Records (Start to Finish)"]').check();
       await page.getByRole('button', { name: /Rolling Days/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
@@ -485,14 +492,14 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
                     await fetch(`${url}/rest/v1/rma_settings?key=eq.daily_matrix_config`, {
                       method: 'PATCH',
                       headers: hdrs,
-                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '13:00', rangeMode: 'rolling' } })
+                      body: JSON.stringify({ value: { ...row.value, defaultPolicyVersion: 2, includeAllRecords: true, autoSendTimePht: '13:00', rangeMode: 'rolling' } })
                     });
                   }
                   if (row.key === 'daily_followup_config' && row.value) {
                     await fetch(`${url}/rest/v1/rma_settings?key=eq.daily_followup_config`, {
                       method: 'PATCH',
                       headers: hdrs,
-                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '13:00' } })
+                      body: JSON.stringify({ value: { ...row.value, defaultPolicyVersion: 2, customerFollowUpDefaultEnabled: true, autoSendTimePht: '13:00' } })
                     });
                   }
                 }

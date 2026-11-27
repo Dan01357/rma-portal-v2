@@ -219,7 +219,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await barcodeInput.fill(rtvBarcode);
       await page.locator('input[placeholder*="Oishi Prawn Crackers" i]').first().fill('Supplier RTV NoBranch Widget');
       await page.locator('input[type="date"]').first().fill(isoDateDaysOffset(45));
-      await page.locator('#intake-supplier-input').fill('Test Vendor NoBranch Corp');
+      await page.locator('#intake-item-supplier-input').fill('Test Vendor NoBranch Corp');
       await itemPhotoInput.setInputFiles({ name: 'pw8a-rtv.png', mimeType: 'image/png', buffer: PNG_BUFFER });
       await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
 
@@ -888,15 +888,23 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({ timeout: 25_000 });
       await setPublicPortalTestMode(page, true);
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      await expect(page.locator('#intake-item-supplier-input')).toHaveCount(0);
+      await expect(page.locator('#intake-company-input')).toBeVisible();
+
+      await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
+      await expect(page.locator('#intake-supplier-input')).toHaveCount(0);
+      await expect(page.locator('#intake-company-input')).toHaveCount(0);
 
       const barcodeInput = page.locator('input[placeholder*="barcode" i]').first();
       const qtyInput = page.locator('input[type="number"][min="1"]').first();
       const itemSupplierInput = page.locator('#intake-item-supplier-input');
+      await expect(itemSupplierInput).toBeVisible();
       const itemPhotoInput = page.locator('input[type="file"][accept="image/*"]').first();
 
       const uniq = String(Date.now()).slice(-5);
       await barcodeInput.fill(`PW-MIXED-1-${uniq}`);
       await page.locator('input[placeholder*="Oishi Prawn Crackers" i]').first().fill('Mixed Batch Item One');
+      await page.locator('input[type="date"]').first().fill(isoDateDaysOffset(45));
       await qtyInput.fill('2');
       await itemSupplierInput.fill('Supplier A');
       await itemPhotoInput.setInputFiles({ name: 'mix1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
@@ -913,6 +921,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       // Add Item 2 with a DIFFERENT supplier ("Suysing") & Qty 3 directly via active form
       await barcodeInput.fill(`PW-MIXED-2-${uniq}`);
       await page.locator('input[placeholder*="Oishi Prawn Crackers" i]').first().fill('Mixed Batch Item Two');
+      await page.locator('input[type="date"]').first().fill(isoDateDaysOffset(60));
       await qtyInput.fill('3');
       await itemSupplierInput.fill('Suysing');
       await itemPhotoInput.setInputFiles({ name: 'mix2.png', mimeType: 'image/png', buffer: PNG_BUFFER });
@@ -956,8 +965,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
 
       const singleRma1 = `RMA-TEST-S1-${uniq}`;
       const singleRma2 = `RMA-TEST-S2-${uniq}`;
+      const custBatchRma = `RMA-TEST-2026-CM${uniq.slice(-3)}`;
       const rtvMixedRma = `RMA-TEST-RM-${uniq}`;
-      createdRmas.push(singleRma1, singleRma2, rtvMixedRma);
+      createdRmas.push(singleRma1, singleRma2, custBatchRma, rtvMixedRma);
 
       const rtvItems = [
         {
@@ -999,7 +1009,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       ];
 
       const seedExtra = await page.evaluate(
-        async ({ url, key, s1, s2, rtvNum, items }) => {
+        async ({ url, key, s1, s2, cmNum, rtvNum, items, portalRtvNum }) => {
           const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
           const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : '';
           const headers = {
@@ -1059,6 +1069,63 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
             body: JSON.stringify(singleRows)
           });
 
+          const custItems = items.map((it, idx) => ({
+            ...it,
+            id: `cm_it${idx + 1}_${cmNum.slice(-5)}`,
+            name: idx === 0 ? 'Customer Mixed Item One' : 'Customer Mixed Item Two',
+            productName: idx === 0 ? 'Customer Mixed Item One' : 'Customer Mixed Item Two'
+          }));
+          const custParentPayload = {
+            ...common,
+            rma_number: cmNum,
+            rma_type: 'customer_inbound',
+            is_parent: true,
+            barcode: cmNum,
+            name: 'Batch Return Manifest (2 items)',
+            quantity: 8,
+            total_items: 2,
+            total_quantity: 8,
+            unit_name: 'pc',
+            supplier_name: 'Multiple Suppliers (Supplier A, Suysing)',
+            store_branch: 'PW Customer Branch',
+            reason: 'Multi-Item Defect (2 items)',
+            items: custItems,
+            notes: '[TEST_MODE] Mixed Customer Batch'
+          };
+          const cmRes = await fetch(`${url}/rest/v1/rma_reports`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(custParentPayload)
+          });
+          const cmJson = await cmRes.json().catch(() => null);
+          const cmRow = Array.isArray(cmJson) ? cmJson[0] : cmJson;
+          if (cmRow?.id) {
+            const cmChildren = custItems.map((it) => ({
+              ...common,
+              rma_number: cmNum,
+              parent_rma_id: cmRow.id,
+              is_parent: false,
+              rma_type: 'customer_inbound',
+              barcode: it.barcode,
+              code: it.code,
+              name: it.name,
+              quantity: it.quantity,
+              unit_name: it.unit_name,
+              supplier_name: it.supplier_name,
+              store_branch: 'PW Customer Branch',
+              price: it.price,
+              price_with_vat: it.price_with_vat,
+              expiry_date: it.expiry_date,
+              reason: it.reason,
+              notes: '[TEST_MODE] Mixed Customer Child'
+            }));
+            await fetch(`${url}/rest/v1/rma_reports`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(cmChildren)
+            });
+          }
+
           const rtvParentPayload = {
             ...common,
             rma_number: rtvNum,
@@ -1109,37 +1176,57 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
               body: JSON.stringify(childPayloads)
             });
           }
-          return { sOk: sRes.ok, pOk: pRes.ok, rtvParentId: pRow?.id, token };
+          const portalRes = await fetch(`${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(portalRtvNum)}&select=*`, {
+            headers
+          });
+          const portalRows = await portalRes.json().catch(() => []);
+          const portalParent = Array.isArray(portalRows) ? portalRows.find((r) => !r.parent_rma_id) : null;
+          return { sOk: sRes.ok, cmOk: cmRes.ok, pOk: pRes.ok, rtvParentId: pRow?.id, portalParent, token };
         },
-        { url: supaUrl, key: anonKey, s1: singleRma1, s2: singleRma2, rtvNum: rtvMixedRma, items: rtvItems }
+        { url: supaUrl, key: anonKey, s1: singleRma1, s2: singleRma2, cmNum: custBatchRma, rtvNum: rtvMixedRma, items: rtvItems, portalRtvNum: batchRma }
       );
       expect(seedExtra.sOk).toBe(true);
+      expect(seedExtra.cmOk).toBe(true);
       expect(seedExtra.pOk).toBe(true);
+      expect(seedExtra.portalParent?.quantity).toBe(8);
+      expect(seedExtra.portalParent?.total_quantity).toBe(8);
+      expect(seedExtra.portalParent?.supplier_name).toBe('Multiple Suppliers (Supplier A, Suysing)');
+      expect(seedExtra.portalParent?.ai_document_metadata?.follow_up?.enabled).toBe(true);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 30_000 });
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
 
-      // Verify our Public Portal submission persisted with Qty 8 (5+3) & Multiple Suppliers (Supplier A, Suysing)
+      // Verify Customer Batch RMA persisted with Qty 8 (5+3) & Multiple Suppliers (Supplier A, Suysing)
       const searchCust = page.locator('input[placeholder*="Search" i]').first();
-      await searchCust.fill(batchRma);
-      const mixedRow = page.locator('tr', { hasText: batchRma }).first();
+      await searchCust.fill(custBatchRma);
+      const mixedRow = page.locator('tr', { hasText: custBatchRma }).first();
       await expect(mixedRow).toBeVisible({ timeout: 20_000 });
       await expect(mixedRow).toContainText('8 pcs');
       await expect(mixedRow).toContainText(/Multiple Suppliers \(Supplier A, Suysing\)/i);
 
-      // Verify Portal Edit UI (QuickRMAActionModal): edit Item 1 Qty (5 -> 6) -> Total auto-updates (6+3=9) & preserves Item 2 Supplier ("Suysing")
+      // Verify Cleaned-up Portal Batch Edit UI (QuickRMAActionModal): no single-item top/bottom clutter, collapsed Advanced accordion, editable Qty + per-item Supplier & Emails, sticky Save Changes
       await mixedRow.getByRole('button', { name: /Details|Inspect|Split Qty/i }).first().click();
       const quickModal = page.locator('div.fixed', { hasText: 'RMA Details & Quick Actions' }).first();
       await expect(quickModal).toBeVisible({ timeout: 10_000 });
       await quickModal.getByRole('button', { name: /Edit Batch Qty & Suppliers/i }).click();
+      await expect(quickModal.getByText('Edit RMA Details')).toBeVisible();
+      await expect(quickModal.locator('input[aria-label="Ticket total quantity"]')).toHaveCount(0);
+      await expect(quickModal.getByText(/Supplier & Product Expiry Information/i)).toHaveCount(0);
+      await expect(quickModal.getByRole('button', { name: /Advanced \/ Danger Zone/i })).toHaveAttribute('aria-expanded', 'false');
+      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('8');
+
       const item1QtyEdit = quickModal.locator('input[aria-label="Batch item 1 quantity"]');
       await expect(item1QtyEdit).toHaveValue('5');
       await item1QtyEdit.fill('6');
-      await expect(quickModal.locator('input[aria-label="Ticket total quantity"]')).toHaveValue('9');
+      await expect(quickModal.locator('[data-testid="batch-summary-total-qty"]')).toContainText('9');
+      await expect(quickModal.locator('input[aria-label="Batch item 1 unit"]')).toHaveValue('pc');
+      await expect(quickModal.locator('input[aria-label="Batch item 1 SKU"]')).toBeVisible();
+      await expect(quickModal.locator('input[aria-label="Batch item 1 unit price"]')).toBeVisible();
+      await quickModal.locator('input[aria-label="Batch item 1 supplier email To"]').fill('claims-supa@pingcon-test.local');
       await expect(quickModal.locator('input[aria-label="Batch item 2 supplier"]')).toHaveValue('Suysing');
-      await quickModal.getByRole('button', { name: /Save & Apply/i }).click();
+      await quickModal.getByRole('button', { name: /Save Changes/i }).click();
       await expect(quickModal.getByText('Total: 9 Units')).toBeVisible({ timeout: 15_000 });
       await quickModal.getByRole('button', { name: /Done \/ Close/i }).click();
       await expect(quickModal).toBeHidden();
@@ -1164,7 +1251,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       // Verify Admin multi-select in Customer Hub including a multi-item RMA ALWAYS shows QR split toggle
       await searchCust.fill('RMA-TEST-');
       const s1Pick = page.locator('tr', { hasText: singleRma1 }).first();
-      const mixPick = page.locator('tr', { hasText: batchRma }).first();
+      const mixPick = page.locator('tr', { hasText: custBatchRma }).first();
       await expect(s1Pick).toBeVisible({ timeout: 15_000 });
       await expect(mixPick).toBeVisible({ timeout: 15_000 });
       await s1Pick.locator('input[type="checkbox"]').first().check();
@@ -1213,14 +1300,14 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           });
           return await r.json();
         },
-        { url: supaUrl, key: anonKey, targetRma: batchRma }
+        { url: supaUrl, key: anonKey, targetRma: custBatchRma }
       );
       const currentParent = parentFetch.find((r) => !r.parent_rma_id);
       expect(currentParent).toBeTruthy();
 
       const xlsxOrig = Buffer.from(
         buildRmaAlertXlsxBytes(currentParent, {
-          subject: `[TEST] [RMA Alert] ${batchRma}`
+          subject: `[TEST] [RMA Alert] ${custBatchRma}`
         })
       );
       const origEntries = parseZipEntriesFromBuffer(xlsxOrig);
@@ -1254,7 +1341,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           });
           return { status: res.status, json: await res.json().catch(() => null) };
         },
-        { b64: modXlsx.toString('base64'), targetRma: batchRma }
+        { b64: modXlsx.toString('base64'), targetRma: custBatchRma }
       );
       expect(xlsxIngestRes.status).toBe(200);
       expect(xlsxIngestRes.json?.success).toBe(true);
@@ -1270,7 +1357,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           });
           return await r.json();
         },
-        { url: supaUrl, key: anonKey, targetRma: batchRma }
+        { url: supaUrl, key: anonKey, targetRma: custBatchRma }
       );
       const afterParent = dbAfterXlsx.find((r) => !r.parent_rma_id);
       expect(afterParent?.quantity).toBe(10);

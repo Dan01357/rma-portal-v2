@@ -630,12 +630,15 @@ export default function SettingsTab({
     const autoProf = notificationService.getEmailProfile('daily_matrix_auto', Boolean(isTestMode));
     const chosenProf = manualProf.isCustom ? manualProf : autoProf;
 
-    const payloadDates = matrixConfig.rangeMode === 'custom' && matrixConfig.startDate && matrixConfig.endDate
+    const useAll = matrixConfig.includeAllRecords !== false;
+    const payloadDates = !useAll && matrixConfig.rangeMode === 'custom' && matrixConfig.startDate && matrixConfig.endDate
       ? { startDate: matrixConfig.startDate, endDate: matrixConfig.endDate }
       : {};
 
     const res = await notificationService.sendDailyMatrixEmailNow({
       ...payloadDates,
+      includeAllRecords: useAll,
+      rollingDays: matrixConfig.rollingDays,
       stream: matrixConfig.stream || 'overall',
       includeZeroCatalogSkus: Boolean(matrixConfig.includeZeroCatalogSkus),
       toList: chosenProf.toList,
@@ -1437,10 +1440,36 @@ export default function SettingsTab({
             </div>
           )}
 
+          {/* Include All Records (Start to Finish) — Default ON */}
+          <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 space-y-1">
+            <label className="flex items-center gap-2 text-xs font-black text-emerald-950 dark:text-emerald-200 cursor-pointer">
+              <input
+                type="checkbox"
+                aria-label="Include All Records (Start to Finish)"
+                checked={matrixConfig.includeAllRecords !== false}
+                onChange={(e) => setMatrixConfig((p) => ({ ...p, includeAllRecords: e.target.checked }))}
+                className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>Include All Records (Start to Finish)</span>
+              {matrixConfig.includeAllRecords !== false && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white uppercase">
+                  All-Time Default ON
+                </span>
+              )}
+            </label>
+            <p className="text-[11px] text-emerald-800/85 dark:text-emerald-300/85 pl-6">
+              {matrixConfig.includeAllRecords !== false
+                ? 'Auto-emailed Daily Overall Matrix includes every record from start to finish through today. Uncheck to filter by Rolling Days or Custom Date Range below.'
+                : 'Filtered mode active: Matrix emails will use the Rolling Days or Custom Date Range configured below.'}
+            </p>
+          </div>
+
           {/* Range Mode + Scope */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Date Window Mode</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                Date Window Mode {matrixConfig.includeAllRecords !== false ? '(Used When Unchecked)' : ''}
+              </span>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"

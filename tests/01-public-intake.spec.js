@@ -248,19 +248,25 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       // Customer Inbound vs Supplier RTV expiration & Section 3 labels in LIVE Mode
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
       await expect(page.getByText('3. Company / Store Name (Optional)')).toBeVisible();
+      await expect(page.locator('#intake-item-supplier-input')).toHaveCount(0);
+      await expect(page.locator('#intake-supplier-input')).toHaveCount(0);
       const expiryInput = page.locator('input[type="date"]').first();
       await expect(expiryInput).not.toHaveAttribute('required', /.*/);
       await expect(page.getByText('Optional', { exact: true }).first()).toBeVisible();
 
       await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
-      await expect(page.getByText('3. Supplier Name (Optional)')).toBeVisible();
+      await expect(page.locator('#intake-supplier-input')).toHaveCount(0);
+      await expect(page.locator('#intake-company-input')).toHaveCount(0);
+      await expect(page.locator('#intake-item-supplier-input')).toBeVisible();
+      await expect(page.getByText(/Supplier Name \(Optional\)/i).first()).toBeVisible();
+      await expect(page.getByText(/3\. Reporter Information/i)).toBeVisible();
       await expect(expiryInput).toHaveAttribute('required', '');
       await expect(page.getByText('Required *', { exact: true }).first()).toBeVisible();
 
       // Switch to Test Mode & verify mgan@pingconmarketing.com + strict Required * expiration
       await setPublicPortalTestMode(page, true);
       await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
-      await expect(page.locator('#intake-supplier-input')).toBeVisible();
+      await expect(page.locator('#intake-item-supplier-input')).toBeVisible();
       await expect(expiryInput).toHaveAttribute('required', '');
 
       // 3. ScannerModal: Camera fallback, Unknown RMA QR warning banner, & Close
@@ -314,8 +320,8 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await expect(page.getByText(/Supplier \/ Vendor Name \(Optional\)/i)).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Take Photo/i })).toHaveCount(2);
       await expect(page.getByText(/Upload from Gallery/i)).toHaveCount(2);
-      await expect(page.getByText(/3\. Supplier Name \(Optional\)/i)).toBeVisible();
-      await expect(page.locator('#intake-supplier-input')).toBeVisible();
+      await expect(page.locator('#intake-supplier-input')).toHaveCount(0);
+      await expect(page.locator('#intake-item-supplier-input')).toBeVisible();
 
       const itemPhotoInput = page.locator('input[type="file"][accept="image/*"]').first();
       await itemPhotoInput.setInputFiles({

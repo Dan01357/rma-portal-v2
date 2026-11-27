@@ -507,6 +507,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
           await expect(page.locator('[data-email-recipients-editor]')).toHaveCount(0);
 
           await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+          await expect(page.locator('#intake-item-supplier-input')).toHaveCount(0);
           await expect(page.getByText(/3\. Company \/ Store Name \(Optional\)/i)).toBeVisible();
           const compInput = page.locator('#intake-company-input');
           await expect(compInput).toBeVisible();
@@ -514,8 +515,10 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
           expect(parseFloat(compBorder)).toBeGreaterThanOrEqual(1);
 
           await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
-          await expect(page.getByText(/3\. Supplier Name \(Optional\)/i)).toBeVisible();
-          const suppInput = page.locator('#intake-supplier-input');
+          await expect(page.locator('#intake-supplier-input')).toHaveCount(0);
+          await expect(page.locator('#intake-company-input')).toHaveCount(0);
+          await expect(page.getByText(/3\. Reporter Information/i)).toBeVisible();
+          const suppInput = page.locator('#intake-item-supplier-input');
           await expect(suppInput).toBeVisible();
           const suppBorder = await suppInput.evaluate((el) => getComputedStyle(el).borderTopWidth);
           expect(parseFloat(suppBorder)).toBeGreaterThanOrEqual(1);

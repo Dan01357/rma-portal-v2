@@ -532,6 +532,9 @@ export const notificationService = {
         ? saved.endDate
         : (rangeDates.endDate || defaultsWindow.endDate),
       stream: validStream,
+      includeAllRecords: Number(saved?.defaultPolicyVersion || 0) >= 2
+        ? saved?.includeAllRecords !== false
+        : true,
       includeZeroCatalogSkus: Boolean(saved?.includeZeroCatalogSkus),
       autoEnabled: saved?.autoEnabled !== false,
       autoSendTimePht: normalizeTimeHhmm(saved?.autoSendTimePht, DEFAULT_MATRIX_SEND_TIME_PHT)
@@ -561,6 +564,7 @@ export const notificationService = {
     const ccList = splitEmailList(cfg.ccList !== undefined ? cfg.ccList : prev.ccList).filter((e) => !finalToSet.has(e));
 
     const nextCfg = {
+      defaultPolicyVersion: 2,
       toList: finalTo,
       ccList,
       rangeMode,
@@ -568,6 +572,9 @@ export const notificationService = {
       startDate,
       endDate,
       stream,
+      includeAllRecords: cfg.includeAllRecords !== undefined
+        ? Boolean(cfg.includeAllRecords)
+        : prev.includeAllRecords !== false,
       includeZeroCatalogSkus: cfg.includeZeroCatalogSkus !== undefined
         ? Boolean(cfg.includeZeroCatalogSkus)
         : Boolean(prev.includeZeroCatalogSkus),
@@ -672,18 +679,21 @@ export const notificationService = {
     return {
       autoEnabled: saved?.autoEnabled !== false,
       autoSendTimePht: normalizeTimeHhmm(saved?.autoSendTimePht, DEFAULT_FOLLOWUP_CONFIG.autoSendTimePht),
-      customerFollowUpDefaultEnabled: Boolean(saved?.customerFollowUpDefaultEnabled)
+      customerFollowUpDefaultEnabled: Number(saved?.defaultPolicyVersion || 0) >= 2
+        ? (saved?.customerFollowUpDefaultEnabled !== undefined ? Boolean(saved.customerFollowUpDefaultEnabled) : true)
+        : true
     };
   },
 
   async saveDailyFollowUpConfig(cfg = {}) {
     const prev = this.getDailyFollowUpConfig();
     const nextCfg = {
+      defaultPolicyVersion: 2,
       autoEnabled: cfg.autoEnabled !== undefined ? Boolean(cfg.autoEnabled) : prev.autoEnabled !== false,
       autoSendTimePht: normalizeTimeHhmm(cfg.autoSendTimePht ?? prev.autoSendTimePht, DEFAULT_FOLLOWUP_CONFIG.autoSendTimePht),
       customerFollowUpDefaultEnabled: cfg.customerFollowUpDefaultEnabled !== undefined
         ? Boolean(cfg.customerFollowUpDefaultEnabled)
-        : Boolean(prev.customerFollowUpDefaultEnabled),
+        : prev.customerFollowUpDefaultEnabled !== false,
       updatedAt: new Date().toISOString()
     };
     if (typeof window !== 'undefined') {
@@ -1681,7 +1691,9 @@ export const notificationService = {
 
             <div class="section-title">Full 4-Step &amp; 10-Calendar-Day Pickup Timeline</div>
             <div class="card" style="padding: 12px 14px;">
-              ${renderWorkflowStepsHtml(computeFourStepWorkflow(primaryReport, catalogProducts))}
+              ${renderWorkflowStepsHtml(computeFourStepWorkflow(primaryReport, catalogProducts, {
+                customerFollowUpDefaultEnabled: this.getDailyFollowUpConfig().customerFollowUpDefaultEnabled
+              }))}
             </div>
 
             <div class="section-title">Itemized Return Breakdown (${itemsTable.length} line${itemsTable.length > 1 ? 's' : ''})</div>
@@ -1959,7 +1971,9 @@ export const notificationService = {
         effectiveReports.map((r) => String(r.store_branch || '').trim()).filter(Boolean)
       )).join(', ') || 'Warehouse / N/A';
 
-      const wfForText = computeFourStepWorkflow(primaryReport, catalogProducts);
+      const wfForText = computeFourStepWorkflow(primaryReport, catalogProducts, {
+        customerFollowUpDefaultEnabled: this.getDailyFollowUpConfig().customerFollowUpDefaultEnabled
+      });
       const plainTextLines = [
         `${testActive ? '[TEST] ' : ''}${baseSubject}`,
         `${isCustomerStream && isPickupEvent ? 'Customer / Outlet' : 'Supplier / Vendor'}: ${partyDisplay}`,
@@ -2037,6 +2051,8 @@ export const notificationService = {
   async sendDailyMatrixEmailNow({
     startDate,
     endDate,
+    rollingDays,
+    includeAllRecords,
     stream,
     includeZeroCatalogSkus,
     to,
@@ -2070,6 +2086,12 @@ export const notificationService = {
       };
       if (startDate) payload.startDate = startDate;
       if (endDate) payload.endDate = endDate;
+      if (rollingDays !== undefined && rollingDays !== null) {
+        payload.rollingDays = Number(rollingDays);
+      }
+      if (includeAllRecords !== undefined) {
+        payload.includeAllRecords = Boolean(includeAllRecords);
+      }
       if (stream) payload.stream = stream;
       if (includeZeroCatalogSkus !== undefined) {
         payload.includeZeroCatalogSkus = Boolean(includeZeroCatalogSkus);

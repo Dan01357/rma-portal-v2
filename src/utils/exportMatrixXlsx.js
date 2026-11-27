@@ -67,7 +67,7 @@ export function formatManilaHhmm(date = new Date()) {
   }
 }
 
-function enumerateDateRange(startYmd, endYmd) {
+function enumerateDateRange(startYmd, endYmd, maxDays = 370) {
   if (!startYmd || !endYmd || !/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || !/^\d{4}-\d{2}-\d{2}$/.test(endYmd)) {
     return [];
   }
@@ -81,7 +81,7 @@ function enumerateDateRange(startYmd, endYmd) {
   const dates = [];
   const cur = new Date(start.getTime());
   let guard = 0;
-  while (cur <= end && guard < 370) {
+  while (cur <= end && guard < maxDays) {
     dates.push(cur.toISOString().slice(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
     guard += 1;
@@ -139,23 +139,44 @@ export function buildRmaMatrixDataset({
   isTestMode = false,
   startDate = '',
   endDate = '',
+  includeAllRecords = false,
   includeZeroCatalogSkus = false
 }) {
-  const safeEnd = endDate || toManilaDateKey(new Date());
+  const normalizedStream = (stream === 'supplier_outbound' || stream === 'customer_inbound')
+    ? stream
+    : 'overall';
+
+  const scopedDateCandidates = (Array.isArray(reports) ? reports : [])
+    .filter((r) => {
+      if (!r || isTrashedRecord(r)) return false;
+      if (Boolean(isTestMode) !== isTestRecord(r)) return false;
+      if (normalizedStream !== 'overall') {
+        const rStream = r.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+        if (rStream !== normalizedStream) return false;
+      }
+      if (isManifestSubItem(r, reports)) return false;
+      return true;
+    })
+    .map((r) => toManilaDateKey(r.created_at || r.updated_at))
+    .filter((ymd) => /^\d{4}-\d{2}-\d{2}$/.test(ymd))
+    .sort();
+
+  const todayManila = toManilaDateKey(new Date());
+  let safeEnd = endDate || todayManila;
   let safeStart = startDate;
-  if (!safeStart) {
+  if (includeAllRecords && !startDate && !endDate) {
+    safeStart = scopedDateCandidates[0] || todayManila;
+    const latestCandidate = scopedDateCandidates[scopedDateCandidates.length - 1] || todayManila;
+    safeEnd = latestCandidate > todayManila ? latestCandidate : todayManila;
+  } else if (!safeStart) {
     const d = new Date(`${safeEnd}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - 13);
     safeStart = d.toISOString().slice(0, 10);
   }
 
-  const allDates = enumerateDateRange(safeStart, safeEnd);
+  const allDates = enumerateDateRange(safeStart, safeEnd, includeAllRecords ? 3660 : 370);
   const weekBlocks = buildWeekBlocks(allDates);
   const dateSet = new Set(allDates);
-
-  const normalizedStream = (stream === 'supplier_outbound' || stream === 'customer_inbound')
-    ? stream
-    : 'overall';
 
   const creditMemoByRma = new Map();
   (Array.isArray(creditMemos) ? creditMemos : []).forEach((cm) => {
@@ -549,6 +570,7 @@ export function buildRmaMatrixXlsxBytes({
   isTestMode = false,
   startDate = '',
   endDate = '',
+  includeAllRecords = false,
   includeZeroCatalogSkus = false
 }) {
   const dataset = buildRmaMatrixDataset({
@@ -559,6 +581,7 @@ export function buildRmaMatrixXlsxBytes({
     isTestMode,
     startDate,
     endDate,
+    includeAllRecords,
     includeZeroCatalogSkus
   });
 

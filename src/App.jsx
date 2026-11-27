@@ -565,7 +565,11 @@ export default function App() {
     if (gateSession?.stream_type !== 'rma_editor') {
       const resolvedEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
       if (resolvedEntity) {
-        setStoreBranch(resolvedEntity);
+        if (gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse') {
+          setItemSupplierName((prev) => prev || resolvedEntity);
+        } else {
+          setStoreBranch(resolvedEntity);
+        }
       }
     }
   }, [gateSession]);
@@ -2574,12 +2578,11 @@ export default function App() {
         }
         const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
         if (foundSup && !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)) {
-          setItemSupplierName(foundSup);
-          lastAutoSupplierRef.current = foundSup;
           if (isSupplierRtvPortal) {
-            setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+            setItemSupplierName(foundSup);
+            lastAutoSupplierRef.current = foundSup;
           }
-        } else {
+        } else if (isSupplierRtvPortal) {
           setItemSupplierName((prev) => (prev === lastAutoSupplierRef.current ? '' : prev));
           lastAutoSupplierRef.current = '';
         }
@@ -2956,14 +2959,15 @@ export default function App() {
       ? detectedProduct.code
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
-    const explicitItemSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+    const inviteDefaultSup = isSupplierRtvPortal ? inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) : '';
+    const explicitItemSup = isSupplierRtvPortal && !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
     const catalogSup = String(
       detectedProduct?.supplier_name ||
       detectedProduct?.supplierName ||
       detectedProduct?.supplier ||
       ''
     ).trim();
-    const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+    const defaultPortalSup = inviteDefaultSup && !isPlaceholderSupplier(inviteDefaultSup) ? inviteDefaultSup : '';
     const resolvedDetectedSupplier = explicitItemSup || (!isPlaceholderSupplier(catalogSup) ? catalogSup : '') || defaultPortalSup || 'Pending Assignment';
 
     const newItem = {
@@ -3096,14 +3100,15 @@ export default function App() {
         ? detectedProduct.code
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
-      const explicitActiveSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+      const inviteDefaultActiveSup = isSupplierRtvPortal ? inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) : '';
+      const explicitActiveSup = isSupplierRtvPortal && !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
       const catalogActiveSup = String(
         detectedProduct?.supplier_name ||
         detectedProduct?.supplierName ||
         detectedProduct?.supplier ||
         ''
       ).trim();
-      const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+      const defaultPortalSup = inviteDefaultActiveSup && !isPlaceholderSupplier(inviteDefaultActiveSup) ? inviteDefaultActiveSup : '';
       const resolvedActiveSupplier = explicitActiveSup || (!isPlaceholderSupplier(catalogActiveSup) ? catalogActiveSup : '') || defaultPortalSup || 'Pending Assignment';
 
       itemsToSubmit.push({
@@ -3173,8 +3178,7 @@ export default function App() {
       const s = String(val || '').trim().toLowerCase();
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
     };
-    const manualSupTrimmed = (isSupplierStream && !isPlaceholderSup(cleanBranchInput)) ? cleanBranchInput : '';
-    const fallbackPortalSup = manualSupTrimmed || (isSupplierStream && inviteEntity ? inviteEntity : '');
+    const fallbackPortalSup = (isSupplierStream && inviteEntity && !isPlaceholderSup(inviteEntity)) ? inviteEntity : '';
     const resolvedSupplierFromPortal = summarizeBatchSuppliers(itemsToSubmit, fallbackPortalSup);
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
@@ -4158,44 +4162,46 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Per-Item Supplier / Vendor Name (supports different suppliers inside a batch RMA) */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <label htmlFor="intake-item-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                        Line-Item Supplier (Optional)
-                      </label>
-                      {itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
-                        <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full">
-                          Per-item supplier set
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                          Supports multi-supplier batches
-                        </span>
-                      )}
+                  {/* Per-Item Supplier Name (Supplier RTV mode only) */}
+                  {isSupplierRtvPortal && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <label htmlFor="intake-item-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                          Supplier Name (Optional)
+                        </label>
+                        {itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full">
+                            Per-item supplier set
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                            Supports multi-supplier batches
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative w-full">
+                        <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none z-10" />
+                        <SupplierInput
+                          id="intake-item-supplier-input"
+                          name="intakeItemSupplierName"
+                          value={itemSupplierName}
+                          onChange={setItemSupplierName}
+                          placeholder="Optional: e.g., Supplier A, Suy Sing Commercial Corp"
+                          className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 shadow-2xs"
+                        />
+                        {itemSupplierName && (
+                          <button
+                            type="button"
+                            onClick={() => setItemSupplierName('')}
+                            className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
+                            title="Clear supplier name"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="relative w-full">
-                      <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none z-10" />
-                      <SupplierInput
-                        id="intake-item-supplier-input"
-                        name="intakeItemSupplierName"
-                        value={itemSupplierName}
-                        onChange={setItemSupplierName}
-                        placeholder="Optional: e.g., Supplier A, Suysing (set per item)"
-                        className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 shadow-2xs"
-                      />
-                      {itemSupplierName && (
-                        <button
-                          type="button"
-                          onClick={() => setItemSupplierName('')}
-                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
-                          title="Clear item supplier"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  )}
 
                   {/* Recognized Product Banner */}
                   {isCheckingBarcode ? (
@@ -4506,9 +4512,9 @@ export default function App() {
                             </button>
                           </div>
 
-                          {/* Inline Editable Qty & Supplier per Batch Manifest Item */}
+                          {/* Inline Editable Qty (and Per-Item Supplier in Supplier RTV mode) */}
                           <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 items-center">
-                            <div className="sm:col-span-5 flex items-center gap-1.5">
+                            <div className={`${isSupplierRtvPortal ? 'sm:col-span-5' : 'sm:col-span-12'} flex items-center gap-1.5`}>
                               <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Qty:</span>
                               <div className="inline-flex items-center border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 p-0.5">
                                 <button
@@ -4540,19 +4546,21 @@ export default function App() {
                               <span className="text-[10px] font-bold text-slate-500">{item.unit_name || item.unit || 'pc'}</span>
                             </div>
 
-                            <div className="sm:col-span-7 flex items-center gap-1.5 min-w-0">
-                              <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Supplier:</span>
-                              <div className="flex-1 min-w-0">
-                                <SupplierInput
-                                  id={`manifest-item-supplier-${idx}`}
-                                  name={`manifestItemSupplier_${idx}`}
-                                  value={!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : ''}
-                                  onChange={(val) => handleUpdateManifestItem(item.id, { supplier_name: val })}
-                                  placeholder="Supplier name (optional)"
-                                  className="w-full px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
-                                />
+                            {isSupplierRtvPortal && (
+                              <div className="sm:col-span-7 flex items-center gap-1.5 min-w-0">
+                                <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Supplier:</span>
+                                <div className="flex-1 min-w-0">
+                                  <SupplierInput
+                                    id={`manifest-item-supplier-${idx}`}
+                                    name={`manifestItemSupplier_${idx}`}
+                                    value={!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : ''}
+                                    onChange={(val) => handleUpdateManifestItem(item.id, { supplier_name: val })}
+                                    placeholder="Supplier name (optional)"
+                                    className="w-full px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
+                                  />
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -4815,49 +4823,33 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. SUPPLIER NAME (SUPPLIER RTV) OR COMPANY / STORE NAME (CUSTOMER HUB) */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Building className="w-4 h-4 text-blue-600" />
-                      <span>
-                        {isSupplierRtvPortal
-                          ? '3. Supplier Name (Optional)'
-                          : '3. Company / Store Name (Optional)'}
-                      </span>
-                    </label>
-                    {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${isSupplierRtvPortal
-                        ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
-                        : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
-                        }`}>
-                        <CheckCircle className="w-3 h-3" />
-                        <span>Auto-Populated via {isSupplierRtvPortal ? 'Supplier RTV' : 'Customer'} Invite</span>
-                      </span>
-                    ) : storeBranch && paperworkMetadata?.store_branch ? (
-                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        Auto-filled from Paperwork
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
-                        Optional
-                      </span>
-                    )}
-                  </div>
+                {/* 3. COMPANY / STORE NAME (CUSTOMER INTAKE ONLY — SUPPLIER RTV USES PER-ITEM SUPPLIER ABOVE) */}
+                {!isSupplierRtvPortal && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Building className="w-4 h-4 text-blue-600" />
+                        <span>3. Company / Store Name (Optional)</span>
+                      </label>
+                      {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800">
+                          <CheckCircle className="w-3 h-3" />
+                          <span>Auto-Populated via Customer Invite</span>
+                        </span>
+                      ) : storeBranch && paperworkMetadata?.store_branch ? (
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          Auto-filled from Paperwork
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                          Optional
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="relative">
-                    <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none z-10" />
-                    {isSupplierRtvPortal ? (
-                      <SupplierInput
-                        id="intake-supplier-input"
-                        name="intakeVendorName"
-                        value={storeBranch}
-                        onChange={setStoreBranch}
-                        placeholder="Optional: e.g., Suy Sing Commercial Corp, Mondelez (auto-filled if product has saved supplier, or type N/A)"
-                        className="w-full pl-10 pr-9 py-3 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
-                      />
-                    ) : (
+                    <div className="relative">
+                      <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none z-10" />
                       <input
                         id="intake-company-input"
                         type="text"
@@ -4866,31 +4858,29 @@ export default function App() {
                         placeholder="Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or type N/A if not applicable)"
                         className="w-full pl-10 pr-9 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
                       />
-                    )}
-                    {storeBranch && (
-                      <button
-                        type="button"
-                        onClick={() => setStoreBranch('')}
-                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
-                        title={isSupplierRtvPortal ? 'Clear supplier name' : 'Clear company / store name'}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                      {storeBranch && (
+                        <button
+                          type="button"
+                          onClick={() => setStoreBranch('')}
+                          className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
+                          title="Clear company / store name"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Optional: Enter your company or store name, or leave blank / type N/A if not applicable.
+                    </p>
                   </div>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {isSupplierRtvPortal
-                      ? 'Optional default fallback supplier (individual items queued above with their own supplier keep their own vendor name). Leave blank or type N/A if not applicable.'
-                      : 'Optional: Enter your company or store name, or leave blank / type N/A if not applicable.'}
-                  </p>
-                </div>
+                )}
 
-                {/* 4. REPORTER CONTACT INFORMATION */}
+                {/* REPORTER CONTACT INFORMATION */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <User className="w-4 h-4 text-blue-600" />
-                      <span>4. Reporter Information (Required) *</span>
+                      <span>{isSupplierRtvPortal ? '3. Reporter Information (Required) *' : '4. Reporter Information (Required) *'}</span>
                     </label>
                     {(reporterName || reporterContact) && (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">

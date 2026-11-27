@@ -67,9 +67,11 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await page.getByRole('button', { name: 'Done', exact: true }).click();
       await expect(page.getByText('Print RMA QR Code')).toBeHidden();
 
-      // 3. Edit Details & Documents (ProductAutoSuggest on SKU & Name, no Store Branch / Batch Lot inputs, SI/DR/PO, Supplier, Expiry ISO readout, Restitution + >P10k)
+      // 3. Edit Details (ProductAutoSuggest on SKU & Name, no Store Branch / Batch Lot inputs, SI/DR/PO, Supplier, collapsed Advanced / Danger Zone, sticky Cancel + Save Changes)
       await page.getByRole('button', { name: /Edit Details & Documents/i }).click();
-      await expect(page.getByRole('button', { name: /Save & Apply Restitution/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Save Changes/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Advanced \/ Danger Zone/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Advanced \/ Danger Zone/i })).toHaveAttribute('aria-expanded', 'false');
       await expect(page.locator('input[placeholder*="Savemore Market" i]')).toHaveCount(0);
       await expect(page.locator('input[placeholder*="LOT-B42" i]')).toHaveCount(0);
 
@@ -95,9 +97,14 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
         }
       }
 
-      // Cancel once then re-open & commit updates (Qty 350 > P10k, SI/DR/PO, Supplier, Expiry YYYY-MM-DD)
-      await page.locator('div:has(> button:has-text("Save & Apply Restitution")) > button:has-text("Cancel")').click();
+      // Cancel once then re-open & commit updates (Qty 350 > P10k, SI/DR/PO, Supplier, Expiry date, collapsed Advanced / Danger Zone)
+      await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
       await page.getByRole('button', { name: /Edit Details & Documents/i }).click();
+
+      const advBtn = page.getByRole('button', { name: /Advanced \/ Danger Zone/i });
+      await expect(advBtn).toHaveAttribute('aria-expanded', 'false');
+      await advBtn.click();
+      await expect(advBtn).toHaveAttribute('aria-expanded', 'true');
 
       const liveBtn = page.getByRole('button', { name: /Live Production/i }).last();
       const testBtn = page.getByRole('button', { name: /Test Mode Sandbox/i }).last();
@@ -122,9 +129,10 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await page.locator('input[placeholder*="Suy Sing" i]').first().fill('Playwright Master Vendor');
       const expStr = isoDateDaysOffset(90);
       await page.locator('div.fixed input[type="date"]').first().fill(expStr);
-      await expect(page.getByText(new RegExp(`ISO \\(YYYY-MM-DD\\):\\s*${expStr}`))).toBeVisible();
+      await expect(page.locator('div.fixed input[type="date"]').first()).toHaveValue(expStr);
+      await expect(page.getByText(/ISO \(YYYY-MM-DD\)/i)).toHaveCount(0);
 
-      await page.getByRole('button', { name: /Save & Apply Restitution/i }).click();
+      await page.getByRole('button', { name: /Save Changes/i }).click();
       await expect(page.getByRole('button', { name: /Edit Details & Documents/i })).toBeVisible({
         timeout: 25_000
       });

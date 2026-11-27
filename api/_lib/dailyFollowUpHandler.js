@@ -11,7 +11,9 @@ import {
   isTrashedRecord,
   isArchivedRecord,
   isTestRecord,
-  isManifestSubItem
+  isManifestSubItem,
+  extractDistinctSuppliersFromItems,
+  isMixedSuppliersSummary
 } from '../../src/utils/rmaHelpers.js';
 import {
   FOLLOW_UP_MAX_DAYS,
@@ -177,7 +179,9 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   };
   const autoEnabled = followUpConfig.autoEnabled !== false;
   const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '13:00');
-  const customerFollowUpDefaultEnabled = Boolean(followUpConfig.customerFollowUpDefaultEnabled);
+  const customerFollowUpDefaultEnabled = Number(followUpConfig.defaultPolicyVersion || 0) >= 2
+    ? followUpConfig.customerFollowUpDefaultEnabled !== false
+    : true;
 
   let replySyncSummary = null;
   if (alsoSyncReplies && !dryRun) {
@@ -477,14 +481,35 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       continue;
     }
 
-    const dirContact = directoryMap.get(normalizeDirKey(wf.party.supplierName)) || null;
+    const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && directoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
+    const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
+    const itemDirTo = [];
+    const itemDirCc = [];
+    const perItemTo = [];
+    const perItemCc = [];
+    if (Array.isArray(report.items)) {
+      for (const it of report.items) {
+        splitEmailStringOrList(it?.supplier_email_to ?? it?.email_to).forEach((e) => perItemTo.push(e));
+        splitEmailStringOrList(it?.supplier_email_cc ?? it?.email_cc).forEach((e) => perItemCc.push(e));
+      }
+    }
+    for (const sup of itemSuppliers) {
+      const match = directoryMap.get(normalizeDirKey(sup));
+      if (match) {
+        match.emailToList.forEach((e) => itemDirTo.push(e));
+        match.emailCcList.forEach((e) => itemDirCc.push(e));
+      }
+    }
     const overrideTo = splitEmailStringOrList(body.overrideToEmail);
-    const partyOrDirTo = wf.party.toEmails.length > 0
-      ? wf.party.toEmails
-      : (dirContact?.emailToList?.length ? dirContact.emailToList : []);
+    const aggregatedSupplierTo = Array.from(new Set([
+      ...wf.party.toEmails,
+      ...perItemTo,
+      ...(dirContact?.emailToList || []),
+      ...itemDirTo
+    ]));
     const liveTo = overrideTo.length > 0
       ? overrideTo
-      : (partyOrDirTo.length > 0 ? partyOrDirTo : followUpProfileTo);
+      : (aggregatedSupplierTo.length > 0 ? aggregatedSupplierTo : followUpProfileTo);
 
     if (!isTestMode && liveTo.length === 0) {
       skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
@@ -504,7 +529,9 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       : Array.from(
           new Set([
             ...wf.party.ccEmails,
+            ...perItemCc,
             ...(dirContact?.emailCcList || []),
+            ...itemDirCc,
             ...followUpProfileTo,
             ...followUpProfileCc,
             ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])

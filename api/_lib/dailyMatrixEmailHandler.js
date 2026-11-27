@@ -278,31 +278,27 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       }, req);
     }
 
-    // Resolve date window: explicit request override -> saved matrixConfig (custom or rollingDays) -> default 14 days
-    let endDate = requestedEndDate;
-    let startDate = requestedStartDate;
-    if (!startDate || !endDate) {
-      if (matrixConfig.rangeMode === 'custom' && sanitizeYmd(matrixConfig.startDate) && sanitizeYmd(matrixConfig.endDate)) {
-        startDate = startDate || sanitizeYmd(matrixConfig.startDate);
-        endDate = endDate || sanitizeYmd(matrixConfig.endDate);
-      } else {
-        const rollingDays = Math.max(1, Math.min(365, parseInt(matrixConfig.rollingDays, 10) || 14));
-        endDate = endDate || todayManila;
-        startDate = startDate || subtractCalendarDaysYmd(endDate, rollingDays - 1);
-      }
-    }
-
-    const validStreams = ['overall', 'customer_inbound', 'supplier_outbound'];
-    const resolvedStream = validStreams.includes(requestedStreamRaw)
-      ? requestedStreamRaw
-      : (validStreams.includes(matrixConfig.stream) ? matrixConfig.stream : 'overall');
-
     const explicitZeroFlag = body.includeZeroCatalogSkus !== undefined
       ? body.includeZeroCatalogSkus
       : (req.query?.includeZeroCatalogSkus !== undefined ? req.query.includeZeroCatalogSkus === 'true' : undefined);
     const resolvedIncludeZero = explicitZeroFlag !== undefined
       ? Boolean(explicitZeroFlag)
       : Boolean(matrixConfig.includeZeroCatalogSkus);
+
+    const hasExplicitDateOverride = Boolean(requestedStartDate && requestedEndDate);
+    const explicitAllFlag = body.includeAllRecords !== undefined
+      ? Boolean(body.includeAllRecords)
+      : (req.query?.includeAllRecords !== undefined ? req.query.includeAllRecords === 'true' : undefined);
+    const useAllRecords = !hasExplicitDateOverride && (
+      explicitAllFlag !== undefined
+        ? explicitAllFlag
+        : (Number(matrixConfig.defaultPolicyVersion || 0) >= 2 ? matrixConfig.includeAllRecords !== false : true)
+    );
+
+    const validStreams = ['overall', 'customer_inbound', 'supplier_outbound'];
+    const resolvedStream = validStreams.includes(requestedStreamRaw)
+      ? requestedStreamRaw
+      : (validStreams.includes(matrixConfig.stream) ? matrixConfig.stream : 'overall');
 
     // 2. Query Live or Test records in parallel (strictly isolated via isTestRecord)
     const [reportsRes, productsRes, memosRes] = await Promise.all([
@@ -326,6 +322,28 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     const scopedReports = allReports.filter((r) => Boolean(isTestRecord(r)) === requestedTestMode);
     const scopedMemos = allMemos.filter((m) => Boolean(isTestRecord(m)) === requestedTestMode);
 
+    // Resolve date window: explicit request override -> All Records (Start to Finish) -> saved matrixConfig (custom or rollingDays)
+    let endDate = requestedEndDate;
+    let startDate = requestedStartDate;
+    if (useAllRecords) {
+      const dateCandidates = scopedReports
+        .map((r) => toManilaDateKey(r?.created_at || r?.updated_at))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort();
+      startDate = startDate || dateCandidates[0] || todayManila;
+      const latestYmd = dateCandidates[dateCandidates.length - 1] || todayManila;
+      endDate = endDate || (latestYmd > todayManila ? latestYmd : todayManila);
+    } else if (!startDate || !endDate) {
+      if (matrixConfig.rangeMode === 'custom' && sanitizeYmd(matrixConfig.startDate) && sanitizeYmd(matrixConfig.endDate)) {
+        startDate = startDate || sanitizeYmd(matrixConfig.startDate);
+        endDate = endDate || sanitizeYmd(matrixConfig.endDate);
+      } else {
+        const rollingDays = Math.max(1, Math.min(365, parseInt(body.rollingDays ?? req.query?.rollingDays ?? matrixConfig.rollingDays, 10) || 14));
+        endDate = endDate || todayManila;
+        startDate = startDate || subtractCalendarDaysYmd(endDate, rollingDays - 1);
+      }
+    }
+
     // 3. Build identical Microsoft Excel-valid OOXML .xlsx buffer used in browser download
     const { bytes, dataset } = buildRmaMatrixXlsxBytes({
       reports: scopedReports,
@@ -335,6 +353,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       endDate,
       stream: resolvedStream,
       isTestMode: requestedTestMode,
+      includeAllRecords: useAllRecords,
       includeZeroCatalogSkus: resolvedIncludeZero
     });
 
@@ -511,6 +530,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       dryRun,
       isTestMode: requestedTestMode,
       stream: resolvedStream,
+      includeAllRecords: useAllRecords,
       includeZeroCatalogSkus: resolvedIncludeZero,
       phtDate: todayManila,
       startDate,
