@@ -37,7 +37,8 @@ const EMPTY_FORM = {
 export default function SupplierDirectoryModal({
   isOpen,
   onClose,
-  onShowToast = null
+  onShowToast = null,
+  isEmbeddedPage = false
 }) {
   // Always declare ALL React hooks unconditionally before any early returns
   const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
@@ -62,7 +63,7 @@ export default function SupplierDirectoryModal({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen && !isEmbeddedPage) return;
     let active = true;
     setFeedback(null);
     setShowForm(false);
@@ -81,7 +82,7 @@ export default function SupplierDirectoryModal({
     return () => {
       active = false;
     };
-  }, [isOpen]);
+  }, [isOpen, isEmbeddedPage]);
 
   const filteredContacts = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -165,20 +166,34 @@ export default function SupplierDirectoryModal({
     }
   };
 
+  if (!isOpen && !isEmbeddedPage) return null;
+
   return (
     <div
-      className="fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in"
-      onClick={onClose}
+      className={isEmbeddedPage
+        ? 'w-full'
+        : 'fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in'
+      }
+      onClick={isEmbeddedPage ? undefined : onClose}
     >
       <div
-        className="w-full max-w-4xl max-h-[92dvh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className={isEmbeddedPage
+          ? 'w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm flex flex-col overflow-hidden'
+          : 'w-full max-w-5xl max-h-[92dvh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden'
+        }
+        onClick={isEmbeddedPage ? undefined : (e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between gap-3 border-b border-slate-800 shrink-0">
+        <div className={isEmbeddedPage
+          ? 'px-5 py-4 bg-white dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 shrink-0'
+          : 'px-5 py-4 bg-slate-900 text-white flex items-center justify-between gap-3 border-b border-slate-800 shrink-0'
+        }>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-400/40 shrink-0">
-              <BookOpen className="w-5 h-5 text-amber-300" />
+            <div className={`p-2 rounded-xl border shrink-0 ${isEmbeddedPage
+              ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800'
+              : 'bg-amber-500/20 border-amber-400/40'
+            }`}>
+              <BookOpen className={`w-5 h-5 ${isEmbeddedPage ? 'text-amber-600 dark:text-amber-400' : 'text-amber-300'}`} />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -189,20 +204,22 @@ export default function SupplierDirectoryModal({
                   {contacts.length} Saved Supplier{contacts.length === 1 ? '' : 's'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300 truncate">
+              <p className={`text-[11px] truncate ${isEmbeddedPage ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300'}`}>
                 Auto-populates To / CC emails everywhere a Supplier Name is typed or selected, and feeds automated follow-ups.
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close Supplier Emails Directory"
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!isEmbeddedPage && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close Supplier Emails Directory"
+              className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Controls Bar */}
@@ -239,7 +256,7 @@ export default function SupplierDirectoryModal({
         </div>
 
         {/* Body */}
-        <div className="p-5 flex-1 overflow-y-auto space-y-4 text-xs">
+        <div className={isEmbeddedPage ? 'p-5 space-y-4 text-xs' : 'p-5 flex-1 overflow-y-auto space-y-4 text-xs'}>
           {feedback && (
             <div className={`p-3 rounded-2xl border font-bold flex items-center gap-2 ${
               feedback.type === 'success'
@@ -368,15 +385,15 @@ export default function SupplierDirectoryModal({
               </p>
             </div>
           ) : (
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="py-2.5 px-3">Supplier / Contact</th>
-                    <th className="py-2.5 px-3">Primary Email(s) (TO)</th>
-                    <th className="py-2.5 px-3">CC Email(s)</th>
-                    <th className="py-2.5 px-3">Updated (YYYY-MM-DD HH:mm)</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
+                    <th className="py-2.5 px-3 min-w-[180px]">Supplier / Contact</th>
+                    <th className="py-2.5 px-3 min-w-[230px]">Primary Email(s) (TO)</th>
+                    <th className="py-2.5 px-3 min-w-[200px]">CC Email(s)</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap">Last Updated</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -394,10 +411,10 @@ export default function SupplierDirectoryModal({
                           <div className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">{c.notes}</div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-indigo-700 dark:text-indigo-300 align-top break-all">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-indigo-700 dark:text-indigo-300 align-top break-words">
                         {c.email_to || <span className="text-slate-400 italic">None</span>}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300 align-top break-all">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300 align-top break-words">
                         {c.email_cc || <span className="text-slate-400 italic">None</span>}
                       </td>
                       <td className="py-2.5 px-3 font-mono text-[10px] text-slate-500 align-top whitespace-nowrap">

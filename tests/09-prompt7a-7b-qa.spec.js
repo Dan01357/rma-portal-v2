@@ -16,6 +16,8 @@ import {
   isoDateDaysOffset,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
+  openSettingsSubTab,
   readSupabasePublicEnv,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -264,7 +266,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       });
       expect(adminJwt).toBeTruthy();
 
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      await navigateAdminSidebar(page, 'settings');
       await expect(page.getByText('Per-Email Recipient Manager')).toBeVisible({ timeout: 15_000 });
       await page.locator('[aria-label="Email Recipient Mode Scope"]').getByRole('button', { name: /Test Mode/i }).click();
       await page.getByRole('button', { name: /New RMA Return Report Alert/i }).first().click();
@@ -284,7 +286,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       savedCustomTestRecipients = true;
 
       // Also test RMAMatrixExportModal custom Test Mode recipient routing
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       const testRma = await seedTestModeRma(page, {
         stream: 'customer',
         photoCount: 1,
@@ -316,7 +318,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
 
       // 4. Download all UI .xlsx files inside Admin & verify Column A header === 'Serial No.'
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
 
       // Credit Memos Ledger (.xlsx): issue 1 quick Test CM against testRma so Export Excel (.xlsx) downloads genuine rows
@@ -349,7 +351,8 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       expect(cmRows.some((r) => r.A === 'Serial No.')).toBe(true);
 
       // Sandbox Customer Inbound (.xlsx), Matrix Test Mode email routing, & Full Audit Log (.xlsx)
-      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
+      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       const [custDl] = await Promise.all([
         page.waitForEvent('download', { timeout: 20_000 }),
         page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
@@ -392,7 +395,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       const sbSuppRma = await seedTestModeRma(page, { stream: 'supplier', photoCount: 1 });
       createdRmas.push(sbSuppRma);
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
       const [suppDl] = await Promise.all([
         page.waitForEvent('download', { timeout: 20_000 }),
@@ -605,7 +608,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
 
       // 2e: Full Timeline & Outcome Reset preserving Supplier Name & Emails
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(sessionRma1);
       const resetRow = page.locator('tr', { hasText: sessionRma1 }).first();

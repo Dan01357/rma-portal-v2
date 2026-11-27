@@ -440,7 +440,7 @@ export default function SavedProductsTab({
               <thead>
                 <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
                   {/* Select All Checkbox Header */}
-                  <th className="py-3.5 px-3 w-10 text-center">
+                  <th className="py-3 px-2 w-8 text-center">
                     <input
                       type="checkbox"
                       checked={isAllPageSelected}
@@ -451,7 +451,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('id')}
-                    className="py-3.5 px-4 font-black text-slate-900 dark:text-white w-16 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 font-black text-slate-900 dark:text-white w-12 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Serial Number"
                   >
                     <div className="flex items-center">
@@ -459,10 +459,10 @@ export default function SavedProductsTab({
                       {renderSortIndicator('id')}
                     </div>
                   </th>
-                  <th className="py-3.5 px-3 w-16 text-center">Photo</th>
+                  <th className="py-3 px-1.5 w-12 text-center">Photo</th>
                   <th 
                     onClick={() => handleSort('barcode')}
-                    className="py-3.5 px-4 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Barcode"
                   >
                     <div className="flex items-center">
@@ -472,7 +472,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('code')}
-                    className="py-3.5 px-4 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by SKU / Code"
                   >
                     <div className="flex items-center">
@@ -482,7 +482,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('name')}
-                    className="py-3.5 px-4 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Product Name"
                   >
                     <div className="flex items-center">
@@ -492,7 +492,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('price')}
-                    className="py-3.5 px-4 text-right font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 text-right font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group whitespace-nowrap"
                     title="Click to sort by Price"
                   >
                     <div className="flex items-center justify-end">
@@ -502,7 +502,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('supplier')}
-                    className="py-3.5 px-4 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Supplier"
                   >
                     <div className="flex items-center">
@@ -510,12 +510,12 @@ export default function SavedProductsTab({
                       {renderSortIndicator('supplier')}
                     </div>
                   </th>
-                  <th className="py-3.5 px-4 font-bold text-slate-700 dark:text-slate-300">
+                  <th className="py-3 px-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
                     Customer AE
                   </th>
                   <th 
                     onClick={() => handleSort('status')}
-                    className="py-3.5 px-3 text-center font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-3 px-2 text-center font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Status"
                   >
                     <div className="flex items-center justify-center">
@@ -523,7 +523,7 @@ export default function SavedProductsTab({
                       {renderSortIndicator('status')}
                     </div>
                   </th>
-                  <th className="py-3.5 px-4 text-right font-bold w-24">Actions</th>
+                  <th className="py-3 px-2 text-right font-bold w-20">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
@@ -543,7 +543,7 @@ export default function SavedProductsTab({
                       }`}
                     >
                       {/* Individual Row Checkbox */}
-                      <td className="py-3 px-3 text-center">
+                      <td className="py-2.5 px-2 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -553,14 +553,14 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 1. SN (SERIAL NUMBER / DATABASE ID) COLUMN - AT FAR LEFT */}
-                      <td className="py-3 px-4 font-mono">
-                        <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-2 py-0.5 rounded-lg text-xs tracking-tight shadow-xs">
+                      <td className="py-2.5 px-2 font-mono">
+                        <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-1.5 py-0.5 rounded-lg text-[11px] tracking-tight shadow-xs">
                           #{(currentPage - 1) * pageSize + idx + 1}
                         </span>
                       </td>
 
                       {/* 2. Photo thumbnail with Clickable Zoom Lightbox */}
-                      <td className="py-2.5 px-3 text-center">
+                      <td className="py-2 px-1.5 text-center">
                         {hasPhoto ? (
                           <button
                             type="button"
@@ -586,13 +586,13 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 3. Barcode with copy button */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1.5 font-mono font-bold text-slate-800 dark:text-slate-200">
+                      <td className="py-2.5 px-2">
+                        <div className="flex items-center gap-1 font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
                           <span>{product.barcode}</span>
                           <button
                             type="button"
                             onClick={() => copyToClipboard(product.barcode)}
-                            className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors"
+                            className="p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors"
                             title="Copy barcode"
                           >
                             {isCopied ? (
@@ -605,7 +605,7 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 4. SKU / Code */}
-                      <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">
+                      <td className="py-2.5 px-2 font-mono text-xs text-slate-600 dark:text-slate-400">
                         {product.code ? (
                           <span className="font-bold text-slate-700 dark:text-slate-200">
                             {product.code}
@@ -616,22 +616,22 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 5. Product Name */}
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white max-w-xs truncate" title={product.name}>
+                      <td className="py-2.5 px-2 font-bold text-slate-900 dark:text-white max-w-[165px] truncate" title={product.name}>
                         {product.name}
                       </td>
 
                       {/* 6. Price (w/ VAT) */}
-                      <td className="py-3 px-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                      <td className="py-2.5 px-2 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs whitespace-nowrap">
                         ₱{Number(product.price_with_vat || product.priceWithVat || product.price || 0).toFixed(2)}
                       </td>
 
                       {/* 7. Supplier */}
-                      <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[130px]">
+                      <td className="py-2.5 px-2 font-semibold text-xs text-slate-700 dark:text-slate-300 truncate max-w-[115px]" title={product.supplier_name || product.supplierName || 'Savemore'}>
                         {product.supplier_name || product.supplierName || 'Savemore'}
                       </td>
 
                       {/* 8. Customer AE */}
-                      <td className="py-3 px-4 text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[140px]">
+                      <td className="py-2.5 px-2 text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[125px]">
                         {product.ae_name ? (
                           <div title={`${product.ae_name} (${product.ae_email || ''})`}>
                             <div className="font-bold text-slate-800 dark:text-slate-200 truncate">{product.ae_name}</div>
@@ -645,8 +645,8 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 9. Status */}
-                      <td className="py-3 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      <td className="py-2.5 px-1.5 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider ${
                           product.is_verified !== false 
                             ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' 
                             : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
@@ -656,7 +656,7 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 10. Actions: Edit & Delete */}
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-2.5 px-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {canEdit && (
                             <button

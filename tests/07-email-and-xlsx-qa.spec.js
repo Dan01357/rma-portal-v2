@@ -20,6 +20,8 @@ import {
   setPublicPortalTestMode,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
+  openSettingsSubTab,
   readSupabasePublicEnv,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -287,7 +289,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
 
       await page.locator('input[type="date"]').first().fill('2027-03-15');
-      await expect(page.getByText(/ISO \(YYYY-MM-DD\):\s*2027-03-15/)).toBeVisible();
+      await expect(page.locator('input[type="date"]').first()).toHaveValue('2027-03-15');
+      await expect(page.getByText(/✓ Verified/i).first()).toBeVisible();
       await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
         name: 'pw-live-expiry.png',
         mimeType: 'image/png',
@@ -561,13 +564,14 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       // 3. OVERALL RMA MATRIX (.XLSX) + STRICT OOXML ZIP/XML/MERGE VALIDATION
       // =========================================================================
       await gotoAdmin(page);
-      const sandboxTabBtn = page.getByRole('button', { name: /Test Mode Sandbox \([1-9]\d*\)/i }).first();
-      await expect(sandboxTabBtn).toBeVisible({ timeout: 35_000 });
-      await sandboxTabBtn.click();
+      await expect(
+        page.locator('[data-testid="admin-sidebar-desktop"] button[data-sidebar-item="sandbox"]')
+      ).toHaveText(/[1-9]\d*/, { timeout: 35_000 });
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Overall Matrix \(\.xlsx\)/i }).first().click();
       await expect(page.getByText('Overall RMA Matrix (.xlsx)')).toBeVisible();
-      await expect(page.getByText(/Start Date \(YYYY-MM-DD\)/i)).toBeVisible();
-      await expect(page.getByText(/End Date \(YYYY-MM-DD\)/i)).toBeVisible();
+      await expect(page.getByText(/^Start Date$/i)).toBeVisible();
+      await expect(page.getByText(/^End Date$/i)).toBeVisible();
 
       // Toggle Include zero catalog SKUs checkbox and Quick Range Last 14 Days
       const zeroSkuCb = page.getByRole('checkbox', { name: /Include catalog SKUs with 0 returns/i });
@@ -1134,13 +1138,15 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           })
         });
       });
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      await navigateAdminSidebar(page, 'settings');
+      await openSettingsSubTab(page, 'Schedules & 10-Day SLA');
       await expect(page.getByText(/1:00 PM PHT/i).first()).toBeVisible();
+      await openSettingsSubTab(page, 'Test Mode, Diagnostics & Portal');
       await page.getByRole('button', { name: /Send Manual Matrix Email Now/i }).click();
       await expect(page.getByText(/Daily Matrix dispatched to/i).first()).toBeVisible({ timeout: 15_000 });
 
-      // Open Matrix Export Modal from Customer RMA Hub -> switch to Email Matrix tab & dispatch
-      await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      // Open Matrix Export Modal from Customer Returns -> switch to Email Matrix tab & dispatch
+      await navigateAdminSidebar(page, 'customer_reports');
       await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).first().click();
       const matrixModal = page.locator('div.fixed', { hasText: 'Email Dispatch Studio' });
       await expect(matrixModal).toBeVisible();
@@ -1153,7 +1159,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       // Verify Customer Hub inbound Excel export has clean workflow headers & zero raw DB snake_case status strings
       // Fall back to Sandbox Customer RMAs if Live Customer Hub currently has 0 active rows in Supabase
       if (await page.getByText('0 Returns Active').isVisible().catch(() => false)) {
-        await page.getByRole('button', { name: /Test Mode Sandbox \([1-9]\d*\)/i }).first().click();
+        await navigateAdminSidebar(page, 'sandbox');
         await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).first().click();
       }
       const [inboundDl] = await Promise.all([
@@ -1175,7 +1181,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(inboundXmlAll).not.toMatch(/pending_admin_details|under_inspection|received_at_dock/);
 
       // Verify Supplier Hub (RTV Claims) Excel export has clean workflow headers & zero raw snake_case status strings
-      await page.getByRole('button', { name: /Supplier Hub \(RTV Claims\)/i }).first().click();
+      await navigateAdminSidebar(page, 'supplier_claims');
       const [supplierDl] = await Promise.all([
         page.waitForEvent('download', { timeout: 20_000 }),
         page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).first().click()
@@ -1204,7 +1210,10 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       seededTestRmas.push(followUpRma);
 
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox \([1-9]\d*\)/i }).first().click();
+      await expect(
+        page.locator('[data-testid="admin-sidebar-desktop"] button[data-sidebar-item="sandbox"]')
+      ).toHaveText(/[1-9]\d*/, { timeout: 25_000 });
+      await navigateAdminSidebar(page, 'sandbox');
       const followUpRow = page.locator('tr').filter({ hasText: followUpRma }).first();
       await expect(followUpRow).toBeVisible({ timeout: 25_000 });
 
@@ -1325,6 +1334,27 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       const autoDisposeJson = await autoDisposeRes.json();
       expect(autoDisposeJson.summary?.autoDisposed).toBe(1);
       expect(autoDisposeJson.autoDisposed?.some((a) => a.rmaNumber === followUpRma)).toBe(true);
+
+      // Verify Sandbox Accelerated 10-Day SLA Control Bar UI + dryRun backend testStepIntervalSeconds
+      const sandboxSlaBar = page.getByTestId('sandbox-sla-control-bar');
+      await expect(sandboxSlaBar).toBeVisible();
+      await sandboxSlaBar.getByRole('button', { name: '30s/day', exact: true }).click();
+      await expect(sandboxSlaBar.getByRole('button', { name: /Auto-Tick/i })).toBeVisible();
+      await expect(sandboxSlaBar.getByRole('button', { name: /Run Test SLA Tick Now/i })).toBeVisible();
+      const accelDryRun = await request.post('/api/send-email?action=daily-followup', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: {
+          action: 'daily-followup',
+          rmaNumber: followUpRma,
+          dryRun: true,
+          isTestMode: true,
+          testStepIntervalSeconds: 30,
+          force: true
+        },
+        timeout: 60_000
+      });
+      expect(accelDryRun.status()).toBe(200);
+      await sandboxSlaBar.getByRole('button', { name: '1d (Normal)', exact: true }).click();
 
       // 5C. 2-WAY MIRROR .XLSX REPLY SYNC & INGEST API QA (Auth Guards, Live/Test Isolation, Update + Audit Trail)
       const unauthSync = await request.post('/api/send-email?action=sync-email-replies', { data: {}, timeout: 60_000 });

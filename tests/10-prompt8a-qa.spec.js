@@ -17,6 +17,8 @@ import {
   assertNoHorizontalOverflow,
   isoDateDaysOffset,
   gotoAdmin,
+  navigateAdminSidebar,
+  openSettingsSubTab,
   readSupabasePublicEnv,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -427,8 +429,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           timeout: 10_000
         })
         .catch(() => null);
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      await navigateAdminSidebar(page, 'settings');
       await settingsLoadPromise;
+      await openSettingsSubTab(page, 'Schedules & 10-Day SLA');
       await page.waitForTimeout(250);
       await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Send Follow-Up/i })).toHaveCount(0);
@@ -439,7 +442,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await followUpTimeInput.fill('13:00');
 
       // 2. Test Mode Sandbox -> Customer Hub: Zero Send Follow-Up button + Multi-Item QR Per-Item check in Admin
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(batchRmaNumber);
       const custRow = page.locator('tr', { hasText: batchRmaNumber }).first();
@@ -793,7 +796,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       // 5. Verify in Admin Test Mode Sandbox UI manifest drawer that Item 1 & Item 2 reflect independent suppliers
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 30_000 });
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(rmaNumber);
       const batchRow = page.locator('tr', { hasText: rmaNumber }).first();
@@ -1195,7 +1198,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 30_000 });
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
 
       // Verify Customer Batch RMA persisted with Qty 8 (5+3) & Multiple Suppliers (Supplier A, Suysing)

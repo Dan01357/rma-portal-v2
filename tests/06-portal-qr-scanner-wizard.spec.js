@@ -9,6 +9,7 @@ import {
   setPublicPortalTestMode,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
   readSupabasePublicEnv,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -251,7 +252,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       });
 
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
 
       // 1. Single-Supplier Guard check: select sup1A (Suy Sing Commercial Corp) + sup2Diff (Other Guard Vendor)

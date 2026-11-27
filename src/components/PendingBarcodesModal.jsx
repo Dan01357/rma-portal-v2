@@ -31,7 +31,7 @@ import CameraCaptureModal from './CameraCaptureModal';
 import { stampWatermarkOnImage } from '../utils/cameraWatermark';
 import { supabase } from '../supabaseClient';
 
-export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser }) {
+export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser, isEmbeddedPage = false }) {
   const [selectedBarcode, setSelectedBarcode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState('id');
@@ -283,13 +283,19 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   }, [processedPendingList, currentPage, pageSize]);
 
   // Early return strictly placed AFTER hooks to prevent React error #310
-  if (!isOpen) return null;
+  if (!isOpen && !isEmbeddedPage) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-xl w-full p-4 sm:p-6 space-y-4 max-h-[92dvh] sm:max-h-[92vh] overflow-y-auto overscroll-contain pb-safe my-0 sm:my-auto">
+    <div className={isEmbeddedPage
+      ? 'w-full'
+      : 'fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in'
+    }>
+      <div className={isEmbeddedPage
+        ? 'bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 w-full p-4 sm:p-6 space-y-4'
+        : 'bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-xl w-full p-4 sm:p-6 space-y-4 max-h-[92dvh] sm:max-h-[92vh] overflow-y-auto overscroll-contain pb-safe my-0 sm:my-auto'
+      }>
         {/* Mobile Drag Indicator */}
-        <div className="bottom-sheet-handle sm:hidden" />
+        {!isEmbeddedPage && <div className="bottom-sheet-handle sm:hidden" />}
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -311,12 +317,15 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!isEmbeddedPage && (
+            <button
+              onClick={onClose}
+              aria-label="Close Pending Barcodes Modal"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Status notice */}

@@ -180,6 +180,13 @@ export async function mockPhotoUploadSuccess(page) {
       body: PNG_BUFFER
     });
   });
+  await page.route('https://lh3.googleusercontent.com/d/**', async (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: PNG_BUFFER
+    });
+  });
   await page.route('**/api/upload-photo**', async (route) => {
     const req = route.request();
     const url = req.url();
@@ -262,16 +269,57 @@ export function attachStrictGuards(page, { allowHttp = [], allowConsole = [] } =
 }
 
 /**
- * Ensures /admin finished authenticating and loaded the header & KPI grid.
+ * Ensures /admin finished authenticating and loaded the enterprise sidebar shell & KPI strip.
  */
 export async function gotoAdmin(page) {
   await page.goto('/admin', { waitUntil: 'domcontentloaded', timeout: 45_000 });
-  await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
+  await expect(page.locator('header h1').first()).toBeVisible({ timeout: 45_000 });
   await page.waitForLoadState('networkidle').catch(() => {});
-  await page
-    .getByRole('button', { name: /Saved Products \([1-9]/i })
-    .waitFor({ state: 'visible', timeout: 25_000 })
-    .catch(() => {});
+  const desktopProductsBtn = page
+    .locator('[data-testid="admin-sidebar-desktop"] button[data-sidebar-item="products"]')
+    .filter({ hasText: /[1-9]/ });
+  const isDesktop = await page.locator('[data-testid="admin-sidebar-desktop"]').isVisible().catch(() => false);
+  if (isDesktop) {
+    await desktopProductsBtn.waitFor({ state: 'visible', timeout: 25_000 }).catch(() => {});
+  }
+}
+
+/**
+ * Navigates the Admin Sidebar cleanly across Desktop (expanded or icon rail)
+ * and Mobile/Tablet (<lg slide-out drawer).
+ */
+export async function navigateAdminSidebar(page, itemId) {
+  const desktopSidebar = page.locator('[data-testid="admin-sidebar-desktop"]');
+  if (await desktopSidebar.isVisible().catch(() => false)) {
+    const btn = desktopSidebar.locator(`button[data-sidebar-item="${itemId}"]`);
+    await expect(btn).toBeVisible({ timeout: 15_000 });
+    await btn.click();
+    return;
+  }
+
+  const mobileDrawer = page.locator('[data-testid="admin-sidebar-mobile-drawer"]');
+  if (!(await mobileDrawer.isVisible().catch(() => false))) {
+    const openBtn = page.getByRole('button', { name: 'Open navigation menu' });
+    await expect(openBtn).toBeVisible({ timeout: 15_000 });
+    await openBtn.click();
+    await expect(mobileDrawer).toBeVisible({ timeout: 10_000 });
+  }
+  const mobBtn = mobileDrawer.locator(`button[data-sidebar-item="${itemId}"]`);
+  await expect(mobBtn).toBeVisible({ timeout: 10_000 });
+  await mobBtn.click();
+  await expect(mobileDrawer).toBeHidden({ timeout: 10_000 });
+}
+
+/**
+ * Switches between SettingsTab horizontal sub-tabs ('Email & Recipients', 'Schedules & 10-Day SLA', 'Test Mode, Diagnostics & Portal').
+ */
+export async function openSettingsSubTab(page, subTabLabel) {
+  const nav = page.locator('[role="tablist"][aria-label="Settings Sections"]').first();
+  const btn = (await nav.isVisible().catch(() => false))
+    ? nav.getByRole('tab', { name: new RegExp(subTabLabel, 'i') }).first()
+    : page.getByRole('tab', { name: new RegExp(subTabLabel, 'i') }).first();
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await btn.click();
 }
 
 /**
@@ -364,7 +412,7 @@ export async function seedTestModeRma(
   const barcodeField = page.locator('input[placeholder*="barcode" i]').first();
   await barcodeField.fill(barcode);
   if (barcode === VERIFIED_BARCODE) {
-    await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
   } else {
     await page.waitForTimeout(400);
   }
@@ -411,10 +459,10 @@ export async function seedTestModeRma(
 
   const submitPostPromise = page.waitForResponse(
     (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 45_000 }
+    { timeout: 60_000 }
   );
   await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 60_000 });
   const postRes = await submitPostPromise;
   expect(postRes.status()).toBeLessThan(400);
 

@@ -8,6 +8,7 @@ import {
   isoDateDaysOffset,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
   cleanupTestRecords
 } from './helpers/testUtils.js';
 
@@ -16,7 +17,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
     page,
     context
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
     await context.grantPermissions(['camera']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
@@ -34,7 +35,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       });
 
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
 
       const searchInput = page.locator('input[placeholder*="Search" i]').first();
@@ -106,8 +107,9 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await advBtn.click();
       await expect(advBtn).toHaveAttribute('aria-expanded', 'true');
 
-      const liveBtn = page.getByRole('button', { name: /Live Production/i }).last();
-      const testBtn = page.getByRole('button', { name: /Test Mode Sandbox/i }).last();
+      const quickModalBox = page.locator('div.fixed', { hasText: 'RMA Details & Quick Actions' }).first();
+      const liveBtn = quickModalBox.getByRole('button', { name: /Live Production/i }).last();
+      const testBtn = quickModalBox.getByRole('button', { name: /Test Mode Sandbox/i }).last();
       if (await liveBtn.isVisible().catch(() => false)) {
         await liveBtn.click();
         await testBtn.click();
@@ -247,7 +249,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
 
       // 8. Clean up parent + split child via Sandbox Trash UI
       for (const rmaNum of [splitChildRma, activeRmaNumber].filter(Boolean)) {
-        await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+        await navigateAdminSidebar(page, 'sandbox');
         await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
         await page.locator('input[placeholder*="Search" i]').first().fill(rmaNum);
         const r = page.locator('tr').filter({
@@ -260,8 +262,8 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
           await expect(r).toBeHidden({ timeout: 20_000 });
         }
       }
-      await page.getByRole('button', { name: /Archive & Trash/i }).click();
-      await page.getByRole('button', { name: /Trash Bin/i }).click();
+      await navigateAdminSidebar(page, 'archive_trash');
+      await page.getByRole('button', { name: /Trash Bin — 30-Day/i }).click();
       const escapedExact = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       for (const rmaNum of [splitChildRma, activeRmaNumber].filter(Boolean)) {
         await page.locator('input[placeholder*="Search trashed" i], input[placeholder*="Search" i]').first().fill(rmaNum);

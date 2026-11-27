@@ -13,6 +13,7 @@ import {
   getConsolidatedPickupItems,
   getRealPhotos,
   hasAssignedSku,
+  isTestRecord,
   formatPeso
 } from './rmaHelpers.js';
 
@@ -24,8 +25,52 @@ export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '13:00';
 export const DEFAULT_FOLLOWUP_CONFIG = {
   autoEnabled: true,
   autoSendTimePht: DEFAULT_FOLLOWUP_SEND_TIME_PHT,
-  customerFollowUpDefaultEnabled: true
+  customerFollowUpDefaultEnabled: true,
+  testStepIntervalSeconds: 0, // 0 = Normal 1 Manila Calendar Day; > 0 applies STRICTLY to Test Mode Sandbox RMAs only
+  testAutoCronEnabled: false // Allows automated cron sweeps to advance Test Mode Sandbox RMAs
 };
+
+export function normalizeTestStepIntervalSeconds(raw) {
+  const n = Math.floor(Number(raw) || 0);
+  if (n <= 0) return 0;
+  return Math.max(10, Math.min(86400, n));
+}
+
+export function formatDurationCompact(totalSeconds) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  const remSec = s % 60;
+  if (mins < 60) return remSec > 0 ? `${mins}m ${remSec}s` : `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  return remMin > 0 ? `${hrs}h ${remMin}m` : `${hrs}h`;
+}
+
+export function formatManilaTimeHms(dateInput) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput || Date.now());
+  if (Number.isNaN(d.getTime())) return '00:00:00';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Manila',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+    const map = {};
+    parts.forEach((p) => {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    });
+    const hh = map.hour === '24' ? '00' : String(map.hour || '00').padStart(2, '0');
+    const mm = String(map.minute || '00').padStart(2, '0');
+    const ss = String(map.second || '00').padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  } catch {
+    const pht = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+    return `${String(pht.getUTCHours()).padStart(2, '0')}:${String(pht.getUTCMinutes()).padStart(2, '0')}:${String(pht.getUTCSeconds()).padStart(2, '0')}`;
+  }
+}
 
 export function normalizeSandboxEmail(raw) {
   const s = String(raw || '').trim().toLowerCase();
@@ -313,43 +358,97 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     report?.updated_at ||
     nowDate.toISOString();
 
-  const calendarDay = diffManilaCalendarDays(startedAtIso, nowDate);
+  // STRICT LIVE ISOLATION: Accelerated seconds/minutes interval ONLY activates if BOTH:
+  // (1) isTestRecord(report) === true, AND (2) testStepIntervalSeconds > 0.
+  // Live Production RMAs unconditionally stay on Asia/Manila 1-calendar-day logic.
+  const isReportTest = isTestRecord(report);
+  const requestedStepSeconds = normalizeTestStepIntervalSeconds(
+    options.testStepIntervalSeconds ?? options.followUpConfig?.testStepIntervalSeconds ?? 0
+  );
+  const testStepIntervalSeconds = isReportTest && requestedStepSeconds > 0 ? requestedStepSeconds : 0;
+  const isAcceleratedTestSla = testStepIntervalSeconds > 0;
+
+  const parsedStartMs = new Date(startedAtIso).getTime();
+  const startedMs = Number.isNaN(parsedStartMs) ? nowDate.getTime() : parsedStartMs;
+  const elapsedSeconds = isAcceleratedTestSla
+    ? Math.max(0, Math.floor((nowDate.getTime() - startedMs) / 1000))
+    : 0;
+
+  const calendarDay = isAcceleratedTestSla
+    ? Math.floor(elapsedSeconds / testStepIntervalSeconds)
+    : diffManilaCalendarDays(startedAtIso, nowDate);
   const isCountdownActive = !isClosed && followUpEnabled;
   const isExpiredAfter10Days = isCountdownActive && calendarDay > FOLLOW_UP_MAX_DAYS;
   const todayManila = getManilaDateYmd(nowDate);
   const lastSentPhtDate = String(followUpMeta.last_sent_pht_date || '').trim() || null;
-  const alreadySentToday = lastSentPhtDate === todayManila;
+
+  const lastSentSimDay =
+    followUpMeta.last_sent_sim_day !== undefined && followUpMeta.last_sent_sim_day !== null
+      ? Number(followUpMeta.last_sent_sim_day)
+      : null;
+  const lastSentSimInterval = Number(followUpMeta.last_sent_sim_interval_sec || 0);
+  const sameSimConfig = isAcceleratedTestSla && lastSentSimDay !== null && lastSentSimInterval === testStepIntervalSeconds;
+
+  const alreadySentToday = isAcceleratedTestSla
+    ? (sameSimConfig && lastSentSimDay >= calendarDay)
+    : (lastSentPhtDate === todayManila);
   const sentCount = Number(followUpMeta.sent_count || 0);
 
-  // Build Day 0..Day 10 timeline matrix anchored on Manila calendar dates
+  const nextStepInSeconds = isAcceleratedTestSla && isCountdownActive && !isExpiredAfter10Days
+    ? Math.max(0, (calendarDay + 1) * testStepIntervalSeconds - elapsedSeconds)
+    : 0;
+  const autoDisposeInSeconds = isAcceleratedTestSla && isCountdownActive
+    ? Math.max(0, (FOLLOW_UP_MAX_DAYS + 1) * testStepIntervalSeconds - elapsedSeconds)
+    : 0;
+
+  // Build Day 0..Day 10 timeline matrix anchored on Manila calendar dates (or exact simulated step timestamps for Test Sandbox)
   const day0Ymd = getManilaDateYmd(reportDateIso) || getManilaDateYmd(startedAtIso);
   const dispatchedPhtDates = new Set();
   const dispatchedDays = new Set();
-  if (lastSentPhtDate) dispatchedPhtDates.add(lastSentPhtDate);
-  if (followUpMeta.last_sent_day !== undefined && followUpMeta.last_sent_day !== null) {
-    dispatchedDays.add(Number(followUpMeta.last_sent_day));
-  }
-  if (Array.isArray(report?.audit_trail)) {
-    report.audit_trail.forEach((entry) => {
-      if (entry?.action === 'FOLLOWUP_EMAIL_SENT' && entry?.timestamp) {
-        const y = getManilaDateYmd(entry.timestamp);
-        if (y) dispatchedPhtDates.add(y);
-      }
-    });
+  if (!isAcceleratedTestSla) {
+    if (lastSentPhtDate) dispatchedPhtDates.add(lastSentPhtDate);
+    if (followUpMeta.last_sent_day !== undefined && followUpMeta.last_sent_day !== null) {
+      dispatchedDays.add(Number(followUpMeta.last_sent_day));
+    }
+    if (Array.isArray(report?.audit_trail)) {
+      report.audit_trail.forEach((entry) => {
+        if (entry?.action === 'FOLLOWUP_EMAIL_SENT' && entry?.timestamp) {
+          const y = getManilaDateYmd(entry.timestamp);
+          if (y) dispatchedPhtDates.add(y);
+        }
+      });
+    }
+  } else {
+    if (Array.isArray(followUpMeta.sent_sim_days)) {
+      followUpMeta.sent_sim_days.forEach((d) => {
+        const num = Number(d);
+        if (!Number.isNaN(num)) dispatchedDays.add(num);
+      });
+    }
+    if (sameSimConfig && lastSentSimDay !== null) {
+      dispatchedDays.add(lastSentSimDay);
+    }
   }
 
-  const pickedUpDayIdx = pickedUpAtIso && day0Ymd
-    ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, pickedUpAtIso)
+  const parsedPickedUpMs = pickedUpAtIso ? new Date(pickedUpAtIso).getTime() : NaN;
+  const pickedUpDayIdx = pickedUpAtIso
+    ? (isAcceleratedTestSla
+        ? (!Number.isNaN(parsedPickedUpMs)
+            ? Math.max(0, Math.floor((parsedPickedUpMs - startedMs) / (testStepIntervalSeconds * 1000)))
+            : null)
+        : (day0Ymd ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, pickedUpAtIso) : null))
     : null;
   const pickedUpDisplayHm = pickedUpAtIso ? formatMonthDayYearHm(pickedUpAtIso) : '';
-  const currentDayFromReport = day0Ymd
-    ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, nowDate)
-    : calendarDay;
+  const currentDayFromReport = isAcceleratedTestSla
+    ? calendarDay
+    : (day0Ymd ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, nowDate) : calendarDay);
   const exceededAfter10 = !isPickedUp && (isAutoDisposed || (!isClosed && calendarDay > FOLLOW_UP_MAX_DAYS));
 
   const timelineDays = [];
   if (day0Ymd) {
-    const day0Display = formatMonthDayYearHm(reportDateIso) || formatMonthDayYear(day0Ymd);
+    const day0Display = isAcceleratedTestSla
+      ? `${formatManilaTimeHms(startedMs)} (+0s)`
+      : (formatMonthDayYearHm(reportDateIso) || formatMonthDayYear(day0Ymd));
     timelineDays.push({
       day: 0,
       dateYmd: day0Ymd,
@@ -361,11 +460,16 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     });
 
     for (let d = 1; d <= FOLLOW_UP_MAX_DAYS; d++) {
-      const dYmd = addManilaCalendarDaysYmd(day0Ymd, d);
-      const dDateLabel = formatMonthDayYear(`${dYmd}T12:00:00+08:00`) || dYmd;
+      const simStepMs = startedMs + d * testStepIntervalSeconds * 1000;
+      const dYmd = isAcceleratedTestSla ? getManilaDateYmd(simStepMs) : addManilaCalendarDaysYmd(day0Ymd, d);
+      const dDateLabel = isAcceleratedTestSla
+        ? `${formatManilaTimeHms(simStepMs)} (+${formatDurationCompact(d * testStepIntervalSeconds)})`
+        : (formatMonthDayYear(`${dYmd}T12:00:00+08:00`) || dYmd);
       const wasPickedUpOnDay = Boolean(pickedUpAtIso) && pickedUpDayIdx === d;
       const wasPickedUpEarlier = Boolean(pickedUpAtIso) && pickedUpDayIdx !== null && pickedUpDayIdx < d;
-      const wasDispatched = dispatchedPhtDates.has(dYmd) || dispatchedDays.has(d);
+      const wasDispatched = isAcceleratedTestSla
+        ? dispatchedDays.has(d)
+        : (dispatchedPhtDates.has(dYmd) || dispatchedDays.has(d));
 
       let statusText = 'Upcoming';
       let state = 'upcoming';
@@ -381,7 +485,9 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
           statusText = 'Exceeded Day 10 — Auto-Scrapped & Case Closed';
           state = 'expired';
         } else {
-          statusText = wasDispatched ? 'No — Daily follow-up dispatched' : 'No — Not picked up';
+          statusText = wasDispatched
+            ? (isAcceleratedTestSla ? 'No — Simulated follow-up dispatched' : 'No — Daily follow-up dispatched')
+            : 'No — Not picked up';
           state = 'past';
         }
       } else if (isClosed) {
@@ -389,7 +495,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
         state = 'halted';
       } else if (d <= currentDayFromReport) {
         if (wasDispatched) {
-          statusText = 'No — Daily follow-up dispatched';
+          statusText = isAcceleratedTestSla ? 'No — Simulated follow-up dispatched' : 'No — Daily follow-up dispatched';
           state = 'dispatched';
         } else {
           statusText = 'No — Waiting for pickup';
@@ -416,13 +522,14 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     done: true
   };
 
+  const simSpeedTag = isAcceleratedTestSla ? ` (${formatDurationCompact(testStepIntervalSeconds)}/day)` : '';
   const step2Text = isClosed
     ? (isAutoDisposed ? 'Exceeded Day 10 — Auto-Scrapped' : isPickedUp ? 'Completed (Picked Up)' : 'Closed')
     : !followUpEnabled
       ? (isSupplierStream && !party.hasValidSupplier ? 'Waiting Supplier Info' : 'Waiting Pickup Tracking')
       : calendarDay > FOLLOW_UP_MAX_DAYS
-        ? `Exceeded Day 10 (Day ${calendarDay})`
-        : `Day ${calendarDay} of ${FOLLOW_UP_MAX_DAYS}`;
+        ? `Exceeded Day 10 (Day ${calendarDay})${simSpeedTag}`
+        : `Day ${calendarDay} of ${FOLLOW_UP_MAX_DAYS}${simSpeedTag}`;
 
   const step2 = {
     key: 'waiting_pickup',
@@ -434,7 +541,13 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     exceededAfter10,
     timelineDays,
     lastSentPhtDate,
+    lastSentSimDay,
     sentCount,
+    isAcceleratedTestSla,
+    testStepIntervalSeconds,
+    elapsedSeconds,
+    nextStepInSeconds,
+    autoDisposeInSeconds,
     done: isClosed
   };
 
@@ -497,6 +610,11 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   return {
     stream,
     isSupplierStream,
+    isAcceleratedTestSla,
+    testStepIntervalSeconds,
+    elapsedSeconds,
+    nextStepInSeconds,
+    autoDisposeInSeconds,
     party,
     startedAtIso,
     startedAtYmd: formatDateYmd(startedAtIso),
@@ -515,6 +633,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     isRejected,
     isExpiredAfter10Days,
     lastSentPhtDate,
+    lastSentSimDay,
     alreadySentToday,
     sentCount,
     pickedUpAtIso,
@@ -827,7 +946,7 @@ export function buildFollowUpEmailContent({
         <div style="padding: 24px;">
           ${isTestMode ? `
           <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700;">
-            🧪 TEST MODE ACTIVE — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
+            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
           </div>` : ''}
 
           <div style="background: #fff1f2; border: 2px solid #fda4af; color: #881337; padding: 14px 16px; border-radius: 12px; margin-bottom: 18px; font-size: 13px; line-height: 1.5;">
@@ -908,7 +1027,7 @@ export function buildAutoDisposedEmailContent({
         <div style="padding: 24px;">
           ${isTestMode ? `
           <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700;">
-            🧪 TEST MODE ACTIVE — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
+            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
           </div>` : ''}
 
           <div style="background: #fff1f2; border: 1px solid #fecdd3; color: #881337; padding: 14px 16px; border-radius: 12px; margin-bottom: 18px; font-size: 13px;">

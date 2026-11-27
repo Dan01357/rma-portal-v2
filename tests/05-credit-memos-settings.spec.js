@@ -8,6 +8,8 @@ import {
   mockPhotoUploadSuccess,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
+  openSettingsSubTab,
   assertValidXlsxFile,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -44,9 +46,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
         barcode: `NOLABEL-${String(Date.now()).slice(-6)}`
       });
 
-      // 1. Live Customer RMA Hub -> Credit Memos Ledger sub-tab renders cleanly (hiding WMS / ERP Sync bar)
+      // 1. Live Customer Returns -> Credit Memos Ledger dedicated sidebar page renders cleanly (hiding WMS / ERP Sync bar)
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Customer RMA Hub/i }).first().click();
+      await navigateAdminSidebar(page, 'customer_reports');
       await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
       await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await expect(page.getByText('Finance Credit Memorandum Section')).toBeVisible();
@@ -57,10 +59,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeHidden();
 
       // 2. Test Mode Sandbox: 2 symmetrical hub tabs (no standalone Sandbox Credit Memos tab); apply qty 350 (> P10k)
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await expect(page.getByRole('button', { name: /Sandbox Credit Memos/i })).toHaveCount(0);
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
-      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
       await page.locator('input[placeholder*="Search" i]').first().fill(rmaA);
       const rmaRowA = page.locator('tr', { hasText: rmaA }).first();
       await expect(rmaRowA).toBeVisible({ timeout: 10_000 });
@@ -82,7 +83,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       await page.getByRole('button', { name: /Issue.*Credit Memo/i }).first().click();
       await expect(page.getByRole('heading', { name: 'Issue Finance Credit Memo' })).toBeVisible();
-      await expect(page.getByText(/Pull Out Date \(YYYY-MM-DD\)/i).first()).toBeVisible();
+      await expect(page.getByText(/Pull Out Date/i).first()).toBeVisible();
       await expect(page.locator('#credit-memo-form input[placeholder*="Analiza" i]').first()).toHaveValue(/Analiza/i);
 
       const ticketSelect = page.locator('#credit-memo-form').locator('..').locator('select').first();
@@ -164,7 +165,8 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(cmRow1).toBeHidden({ timeout: 35_000 });
 
       // 4. Multi-RMA Consolidated Credit Memo flow + Financial Missing SKU Guard
-      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
+      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
       await page.locator('input[placeholder*="Search" i]').first().fill('RMA-TEST-');
 
@@ -246,8 +248,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       const cmMatch = cmText.match(/(CM-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
       if (cmMatch) createdCms.push(cmMatch[1]);
 
-      // Verify BOTH rmaA and rmaB show CM status on Customer Returns before voiding
-      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
+      // Verify BOTH rmaA and rmaB show CM status on Sandbox Customer RMAs before voiding
+      await navigateAdminSidebar(page, 'sandbox');
+      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(rmaB);
       await expect(page.locator('tr', { hasText: rmaB }).first().getByText(/Credit Memo Issued/i)).toBeVisible({
         timeout: 10_000
@@ -255,7 +258,8 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       // Void Consolidated CM -> verify BOTH RMAs revert cleanly and consolidated CM vanishes
       await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
-      await cmSearch.fill(rmaB);
+      await page.locator('input[placeholder*="Search CM" i], input[placeholder*="Search" i]').first().fill(rmaB);
+      await expect(cmRowConsol).toBeVisible({ timeout: 15_000 });
       await cmRowConsol.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
       await expect(page.getByText(/Confirm Deletion/i)).toBeHidden({ timeout: 35_000 });
@@ -289,16 +293,112 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
     try {
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
-      await expect(page.getByText('Simulation / Test Mode Toggle')).toBeVisible();
-      await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
-      await expect(page.locator('input[aria-label="Test Mode Sandbox Email Override"]')).toHaveValue(/mgan@pingconmarketing\.com/i);
+      await navigateAdminSidebar(page, 'settings');
+
+      // Sub-tab 1: Email & Recipients (default active)
+      const ccInput = page.locator('input[placeholder*="cc" i], input[placeholder*="Add CC" i]').first();
+      if (await ccInput.isVisible().catch(() => false)) {
+        await ccInput.fill('pw-temp-cc@pingcon.local');
+        await page.getByRole('button', { name: /Add CC/i }).first().click();
+        await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true }).first()).toBeVisible();
+        const tempChip = page.locator('button[title="Remove pw-temp-cc@pingcon.local"]').first();
+        if (await tempChip.isVisible().catch(() => false)) {
+          await tempChip.click();
+          await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true })).toBeHidden();
+        }
+        await page.getByRole('button', { name: /Save Recipients/i }).first().click();
+        await page.waitForTimeout(400);
+      }
+
+      // Per-Email Recipient Manager & Sync check
+      await expect(page.getByText('Per-Email Recipient Manager')).toBeVisible();
+      await page.getByRole('button', { name: /Driver Pickup — Debit Claim/i }).first().click();
+      await expect(page.locator('[data-email-recipients-editor="pickup_debit_claim"]')).toBeVisible();
+      await page.getByRole('button', { name: /Manual Overall Matrix Email/i }).first().click();
+      const manualMatrixEditor = page.locator('[data-email-recipients-editor="manual_matrix"]');
+      await expect(manualMatrixEditor).toBeVisible();
+      await manualMatrixEditor.locator('input[placeholder*="Add Primary TO email"]').fill('pw-matrix-to@pingconmarketing.com');
+      await manualMatrixEditor.getByRole('button', { name: /Add TO/i }).click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeVisible();
+      await manualMatrixEditor.locator('button[title="Remove TO pw-matrix-to@pingconmarketing.com"]').click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeHidden();
+      await manualMatrixEditor.locator('input[placeholder*="Add CC email"]').fill('pw-matrix-cc@pingconmarketing.com');
+      await manualMatrixEditor.getByRole('button', { name: /Add CC/i }).click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeVisible();
+      await manualMatrixEditor.locator('button[title="Remove pw-matrix-cc@pingconmarketing.com"]').click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeHidden();
+      await manualMatrixEditor.getByRole('button', { name: /Save Recipients/i }).click();
+      await expect(manualMatrixEditor.getByText(/Recipients saved & synced to cloud/i)).toBeVisible({ timeout: 10_000 });
+
+      await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
+      await expect(page.getByText(/Synced TO & CC recipients between Auto Daily .* Matrix and Manual Matrix/i)).toBeVisible();
+
+      // Sub-tab 2: Schedules & 10-Day SLA (including Test Mode Accelerated SLA Timer settings)
+      await openSettingsSubTab(page, 'Schedules & 10-Day SLA');
       await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
       await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
       await expect(page.locator('input[aria-label="Auto Daily Matrix Email Enabled"]')).toBeVisible();
       await expect(page.locator('input[aria-label="Include All Records (Start to Finish)"]')).toBeChecked();
       await expect(page.locator('input[aria-label="Auto Daily Follow-Up Enabled"]')).toBeVisible();
       await expect(page.locator('input[aria-label="Customer Hub Default Follow-Up Enabled"]')).toBeChecked();
+      await expect(page.locator('input[aria-label="Test Mode Simulated Day Interval Seconds"]')).toBeVisible();
+      await expect(page.locator('input[aria-label="Test Mode Automated Cron Sweep Enabled"]')).toBeVisible();
+
+      // Update Auto-Send Time (Matrix & Follow-Up) + Include All Records toggle + Custom Date Range + Test SLA speed -> reload -> restore defaults
+      const matrixTimeInput = page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]');
+      const followUpTimeInput = page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]');
+      const includeAllMatrixChk = page.locator('input[aria-label="Include All Records (Start to Finish)"]');
+      const testStepSecInput = page.locator('input[aria-label="Test Mode Simulated Day Interval Seconds"]');
+      const testAutoCronChk = page.locator('input[aria-label="Test Mode Automated Cron Sweep Enabled"]');
+      await matrixTimeInput.fill('14:30');
+      await followUpTimeInput.fill('09:15');
+      if (await includeAllMatrixChk.isChecked()) {
+        await includeAllMatrixChk.uncheck();
+      }
+      await page.getByRole('button', { name: '30 sec / day', exact: true }).click();
+      await expect(testStepSecInput).toHaveValue('30');
+      if (!(await testAutoCronChk.isChecked())) {
+        await testAutoCronChk.check();
+      }
+      await page.getByRole('button', { name: /Custom Date Range/i }).click();
+      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
+      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
+      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
+      await navigateAdminSidebar(page, 'settings');
+      await openSettingsSubTab(page, 'Schedules & 10-Day SLA');
+      await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('14:30');
+      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('09:15');
+      await expect(page.locator('input[aria-label="Include All Records (Start to Finish)"]')).not.toBeChecked();
+      await expect(page.locator('input[aria-label="Test Mode Simulated Day Interval Seconds"]')).toHaveValue('30');
+      await expect(page.locator('input[aria-label="Test Mode Automated Cron Sweep Enabled"]')).toBeChecked();
+
+      // Restore clean corporate default schedules, Normal 1-day Test SLA, Include All Records ON & Rolling Days
+      await page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
+      await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
+      await page.locator('input[aria-label="Include All Records (Start to Finish)"]').check();
+      await page.getByRole('button', { name: 'Normal (1 Manila Day)', exact: true }).click();
+      await expect(page.locator('input[aria-label="Test Mode Simulated Day Interval Seconds"]')).toHaveValue('0');
+      await page.locator('input[aria-label="Test Mode Automated Cron Sweep Enabled"]').uncheck();
+      await page.getByRole('button', { name: /Rolling Days/i }).click();
+      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
+      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
+      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
+
+      // Sub-tab 3: Test Mode, Diagnostics & Portal (Supabase, SMTP, Poster)
+      await openSettingsSubTab(page, 'Test Mode, Diagnostics & Portal');
+      await expect(page.getByText('Simulation / Test Mode Toggle')).toBeVisible();
+      await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
+      await expect(page.locator('input[aria-label="Test Mode Sandbox Email Override"]')).toHaveValue(/mgan@pingconmarketing\.com/i);
 
       const settingsTestToggle = page
         .locator('div:has(> div > h2:has-text("Simulation / Test Mode Toggle"))')
@@ -328,85 +428,11 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
         await expect(poTestBtn).toContainText(/Test Connection/i, { timeout: 15_000 });
       }
 
-      const ccInput = page.locator('input[placeholder*="cc" i], input[placeholder*="Add CC" i]').first();
-      if (await ccInput.isVisible().catch(() => false)) {
-        await ccInput.fill('pw-temp-cc@pingcon.local');
-        await page.getByRole('button', { name: /Add CC/i }).first().click();
-        await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true }).first()).toBeVisible();
-        const tempChip = page.locator('button[title="Remove pw-temp-cc@pingcon.local"]').first();
-        if (await tempChip.isVisible().catch(() => false)) {
-          await tempChip.click();
-          await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true })).toBeHidden();
-        }
-        await page.getByRole('button', { name: /Save Recipients/i }).first().click();
-        await page.waitForTimeout(400);
-      }
-
-      // Per-Email Recipient Manager & Auto Daily Overall Matrix Config + Adjustable Schedules persistence verification
-      await expect(page.getByText('Per-Email Recipient Manager')).toBeVisible();
-      await page.getByRole('button', { name: /Driver Pickup — Debit Claim/i }).first().click();
-      await expect(page.locator('[data-email-recipients-editor="pickup_debit_claim"]')).toBeVisible();
-      await page.getByRole('button', { name: /Manual Overall Matrix Email/i }).first().click();
-      const manualMatrixEditor = page.locator('[data-email-recipients-editor="manual_matrix"]');
-      await expect(manualMatrixEditor).toBeVisible();
-      await manualMatrixEditor.locator('input[placeholder*="Add Primary TO email"]').fill('pw-matrix-to@pingconmarketing.com');
-      await manualMatrixEditor.getByRole('button', { name: /Add TO/i }).click();
-      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeVisible();
-      await manualMatrixEditor.locator('button[title="Remove TO pw-matrix-to@pingconmarketing.com"]').click();
-      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeHidden();
-      await manualMatrixEditor.locator('input[placeholder*="Add CC email"]').fill('pw-matrix-cc@pingconmarketing.com');
-      await manualMatrixEditor.getByRole('button', { name: /Add CC/i }).click();
-      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeVisible();
-      await manualMatrixEditor.locator('button[title="Remove pw-matrix-cc@pingconmarketing.com"]').click();
-      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeHidden();
-      await manualMatrixEditor.getByRole('button', { name: /Save Recipients/i }).click();
-      await expect(manualMatrixEditor.getByText(/Recipients saved & synced to cloud/i)).toBeVisible({ timeout: 10_000 });
-
-      await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
-      await expect(page.getByText(/Synced TO & CC recipients between Auto Daily .* Matrix and Manual Matrix/i)).toBeVisible();
-
-      // Update Auto-Send Time (Matrix & Follow-Up) + Include All Records toggle + Custom Date Range, save, reload to assert persistence, then restore defaults
-      const matrixTimeInput = page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]');
-      const followUpTimeInput = page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]');
-      const includeAllMatrixChk = page.locator('input[aria-label="Include All Records (Start to Finish)"]');
-      await matrixTimeInput.fill('14:30');
-      await followUpTimeInput.fill('09:15');
-      if (await includeAllMatrixChk.isChecked()) {
-        await includeAllMatrixChk.uncheck();
-      }
-      await page.getByRole('button', { name: /Custom Date Range/i }).click();
-      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
-      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
-      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
-
-      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
-
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
-      await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('14:30');
-      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('09:15');
-      await expect(page.locator('input[aria-label="Include All Records (Start to Finish)"]')).not.toBeChecked();
-
-      // Restore clean corporate default schedules, Include All Records ON & Rolling Days
-      await page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
-      await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
-      await page.locator('input[aria-label="Include All Records (Start to Finish)"]').check();
-      await page.getByRole('button', { name: /Rolling Days/i }).click();
-      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
-      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
-      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
-
-      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
-
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
-      await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(page.getByText(/Generate RMA Invites/i).first()).toBeVisible({ timeout: 10_000 });
 
+      // Dedicated Sidebar Page: Warehouse Locations & GPS Anchors
+      await navigateAdminSidebar(page, 'warehouse_locations');
       await page.getByRole('button', { name: /Manage Locations/i }).click();
       const locModal = page.locator('div.fixed', { hasText: 'Warehouse Locations & Areas' });
       await expect(locModal).toBeVisible();
@@ -434,7 +460,8 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       expect(mapPinHref).toContain('google.com/maps/place/');
       expect(mapPinHref).toContain('@14.6683,121.0114,18z');
 
-      // Verify /docs link visible in API Keys Management section & API Key Generate/Rotate/Revoke
+      // Dedicated Sidebar Page: API Keys & Webhooks
+      await navigateAdminSidebar(page, 'api_keys');
       await expect(page.locator('a[href*="/docs"]').first()).toBeVisible();
       const refreshKeysBtn = page.getByRole('button', { name: 'Refresh', exact: true });
       await expect(refreshKeysBtn).toBeEnabled({ timeout: 25_000 });

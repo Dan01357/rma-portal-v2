@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   FlaskConical,
   Trash2,
@@ -8,13 +8,24 @@ import {
   Building2,
   FileSpreadsheet,
   Terminal,
-  ChevronDown
+  ChevronDown,
+  Zap,
+  Clock,
+  Play,
+  RefreshCw,
+  Sliders
 } from 'lucide-react';
 import {
   isManifestSubItem,
   isBatchManifest,
   getReportManifestItems
 } from '../utils/rmaHelpers';
+import {
+  computeFourStepWorkflow,
+  formatDurationCompact,
+  normalizeTestStepIntervalSeconds
+} from '../utils/followUpWorkflow';
+import { notificationService, SETTINGS_SYNC_EVENT } from '../services/notificationService';
 import CustomerHubTab from './CustomerHubTab';
 import SupplierClaimsTab from './SupplierClaimsTab';
 import { copyTextSafe } from '../utils/clipboard';
@@ -51,6 +62,7 @@ export default function TestModeSandboxTab({
   onAssignSku,
   onOpenCreateCreditMemo,
   onOpenCreditMemoForReport,
+  onOpenCreditMemosLedger,
   onEditCreditMemo,
   onViewCreditMemoVoucher,
   onRequestDeleteCreditMemo,
@@ -71,7 +83,126 @@ export default function TestModeSandboxTab({
   };
 
   const [copiedKey, setCopiedKey] = useState(null);
-  const [showApiGuide, setShowApiGuide] = useState(true);
+  const [showApiGuide, setShowApiGuide] = useState(false);
+
+  // Isolated Test Mode Accelerated 10-Day SLA Speed & Live Countdown Ticker
+  const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+  const [autoTickEnabled, setAutoTickEnabled] = useState(false);
+  const [isRunningTick, setIsRunningTick] = useState(false);
+  const [tickFeedback, setTickFeedback] = useState(null);
+  const [nowTick, setNowTick] = useState(() => new Date());
+  const tickInFlightRef = useRef(false);
+  const lastAutoTickAtRef = useRef(0);
+
+  useEffect(() => {
+    const syncCfg = () => setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+    window.addEventListener(SETTINGS_SYNC_EVENT, syncCfg);
+    window.addEventListener('storage', syncCfg);
+    return () => {
+      window.removeEventListener(SETTINGS_SYNC_EVENT, syncCfg);
+      window.removeEventListener('storage', syncCfg);
+    };
+  }, []);
+
+  const testStepSec = normalizeTestStepIntervalSeconds(followUpConfig?.testStepIntervalSeconds || 0);
+
+  useEffect(() => {
+    if (testStepSec <= 0) return undefined;
+    const id = setInterval(() => setNowTick(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [testStepSec]);
+
+  const activeCountdownSummary = useMemo(() => {
+    if (testStepSec <= 0) return null;
+    const openCandidates = testReportsList.filter((r) => !isManifestSubItem(r, testReportsList));
+    let activeCount = 0;
+    let soonestNextStep = null;
+    let dueStepCount = 0;
+    let dueDisposeCount = 0;
+
+    for (const r of openCandidates) {
+      const wf = computeFourStepWorkflow(r, savedProductsList, {
+        now: nowTick,
+        customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+        testStepIntervalSeconds: testStepSec
+      });
+      if (!wf.isCountdownActive || wf.isClosed) continue;
+      activeCount++;
+      if (wf.isExpiredAfter10Days) {
+        dueDisposeCount++;
+      } else if (wf.calendarDay >= 1 && !wf.alreadySentToday) {
+        dueStepCount++;
+      }
+      if (!wf.isExpiredAfter10Days) {
+        if (soonestNextStep === null || wf.nextStepInSeconds < soonestNextStep) {
+          soonestNextStep = wf.nextStepInSeconds;
+        }
+      }
+    }
+
+    return { activeCount, soonestNextStep, dueStepCount, dueDisposeCount };
+  }, [testReportsList, savedProductsList, nowTick, followUpConfig.customerFollowUpDefaultEnabled, testStepSec]);
+
+  const handleRunTestSlaTick = async (sourceLabel = 'manual') => {
+    if (tickInFlightRef.current) return;
+    tickInFlightRef.current = true;
+    setIsRunningTick(true);
+    try {
+      const res = await notificationService.runDailyFollowUpNow({
+        isTestMode: true,
+        force: false,
+        dryRun: false,
+        operation: 'run_all',
+        respectSchedule: false
+      });
+      if (res?.success) {
+        const sent = Number(res?.summary?.followUpsSent || 0);
+        const disposed = Number(res?.summary?.autoDisposed || 0);
+        const skipped = Number(res?.summary?.skippedCount || 0);
+        setTickFeedback({
+          type: 'success',
+          text: `${sourceLabel === 'auto' ? 'Auto-Tick' : 'Test SLA Tick'}: ${sent} follow-up(s) sent, ${disposed} auto-disposed (${skipped} waiting/up-to-date).`
+        });
+        if (sent > 0 || disposed > 0) {
+          onRefresh?.();
+        }
+      } else {
+        setTickFeedback({
+          type: 'error',
+          text: res?.error || 'Failed running Test SLA tick.'
+        });
+      }
+    } catch (err) {
+      setTickFeedback({ type: 'error', text: err?.message || 'Error triggering Test SLA tick.' });
+    } finally {
+      tickInFlightRef.current = false;
+      setIsRunningTick(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!autoTickEnabled || testStepSec <= 0 || !activeCountdownSummary) return;
+    if (activeCountdownSummary.dueStepCount === 0 && activeCountdownSummary.dueDisposeCount === 0) return;
+    const nowMs = Date.now();
+    if (nowMs - lastAutoTickAtRef.current < 8000) return;
+    lastAutoTickAtRef.current = nowMs;
+    handleRunTestSlaTick('auto');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTickEnabled, testStepSec, activeCountdownSummary?.dueStepCount, activeCountdownSummary?.dueDisposeCount]);
+
+  const handleQuickSelectSpeed = async (seconds) => {
+    const saved = await notificationService.saveDailyFollowUpConfig({
+      ...followUpConfig,
+      testStepIntervalSeconds: seconds
+    });
+    setFollowUpConfig(saved);
+    setTickFeedback({
+      type: 'success',
+      text: seconds > 0
+        ? `Sandbox SLA speed set to ${formatDurationCompact(seconds)} per simulated day (Live RMAs unaffected).`
+        : 'Sandbox SLA speed reset to Normal (1 Manila calendar day).'
+    });
+  };
 
   const canManage = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
@@ -188,6 +319,98 @@ export default function TestModeSandboxTab({
           </div>
         </div>
 
+        {/* Accelerated 10-Day SLA Simulation Control Bar (Strictly Test Mode Sandbox Only) */}
+        <div
+          data-testid="sandbox-sla-control-bar"
+          className="p-3.5 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-amber-300 dark:border-amber-800/80 space-y-2.5 text-xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/70 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black">
+                <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>
+                  {testStepSec > 0
+                    ? `Test SLA Speed: 1 Sim Day = ${formatDurationCompact(testStepSec)}`
+                    : 'Test SLA Speed: Normal (1 Manila Day)'}
+                </span>
+              </span>
+              {testStepSec > 0 && activeCountdownSummary && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[11px] font-bold">
+                  <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>
+                    {activeCountdownSummary.activeCount === 0
+                      ? 'No open Test SLA timers running'
+                      : activeCountdownSummary.dueDisposeCount > 0 || activeCountdownSummary.dueStepCount > 0
+                        ? `Due Now: ${activeCountdownSummary.dueStepCount} follow-up(s), ${activeCountdownSummary.dueDisposeCount} auto-dispose`
+                        : activeCountdownSummary.soonestNextStep !== null
+                          ? `Next Tick in ${formatDurationCompact(activeCountdownSummary.soonestNextStep)} (${activeCountdownSummary.activeCount} active)`
+                          : `${activeCountdownSummary.activeCount} active`}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { label: '1d (Normal)', sec: 0 },
+                { label: '2m/day', sec: 120 },
+                { label: '1m/day', sec: 60 },
+                { label: '30s/day', sec: 30 }
+              ].map((p) => (
+                <button
+                  key={p.sec}
+                  type="button"
+                  onClick={() => handleQuickSelectSpeed(p.sec)}
+                  className={`px-2 py-1 rounded-lg text-[10.5px] font-black border cursor-pointer transition-colors ${
+                    testStepSec === p.sec
+                      ? 'bg-slate-900 text-white border-slate-900 dark:bg-amber-500 dark:text-slate-950 dark:border-amber-400'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+
+              {testStepSec > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAutoTickEnabled((v) => !v)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black border flex items-center gap-1 cursor-pointer transition-all ${
+                    autoTickEnabled
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                  }`}
+                  title="Automatically trigger simulated SLA follow-up & Auto-Dispose ticks while Sandbox is open"
+                >
+                  <RefreshCw className={`w-3 h-3 ${autoTickEnabled ? 'animate-spin' : ''}`} />
+                  <span>{autoTickEnabled ? 'Auto-Tick ON' : 'Auto-Tick OFF'}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleRunTestSlaTick('manual')}
+                disabled={isRunningTick}
+                className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-2xs"
+                title="Immediately evaluate and dispatch due Test Mode Sandbox SLA follow-ups / Auto-Dispose (Live RMAs unaffected)"
+              >
+                <Play className="w-3 h-3" />
+                <span>{isRunningTick ? 'Running Tick...' : 'Run Test SLA Tick Now'}</span>
+              </button>
+            </div>
+          </div>
+
+          {tickFeedback && (
+            <div className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold ${
+              tickFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+            }`}>
+              {tickFeedback.text}
+            </div>
+          )}
+        </div>
+
         {/* cURL Quick-Copy Cards */}
         {showApiGuide && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 pt-2 border-t border-amber-200 dark:border-amber-900/60">
@@ -296,6 +519,7 @@ export default function TestModeSandboxTab({
           onEditProductFromReport={onEditProductFromReport}
           onOpenCreditMemo={onOpenCreditMemoForReport}
           onOpenCreateCreditMemo={onOpenCreateCreditMemo}
+          onOpenCreditMemosLedger={onOpenCreditMemosLedger}
           onEditCreditMemo={onEditCreditMemo}
           onViewCreditMemoVoucher={onViewCreditMemoVoucher}
           onPrintBulkCreditMemos={onViewCreditMemoVoucher}

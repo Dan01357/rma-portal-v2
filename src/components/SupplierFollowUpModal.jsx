@@ -49,7 +49,8 @@ export default function SupplierFollowUpModal({
     const party = resolveReportPartyAndEmails(report, catalogProducts);
     const defaultCfg = notificationService.getDailyFollowUpConfig();
     const wf = computeFourStepWorkflow(report, catalogProducts, {
-      customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled
+      customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled,
+      testStepIntervalSeconds: defaultCfg.testStepIntervalSeconds
     });
     const cleanSup = isPlaceholderSupplier(party.supplierName) ? '' : party.supplierName;
     const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup) : null;
@@ -98,7 +99,10 @@ export default function SupplierFollowUpModal({
         }
       },
       catalogProducts,
-      { customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled }
+      {
+        customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled,
+        testStepIntervalSeconds: defaultCfg.testStepIntervalSeconds
+      }
     );
   }, [report, supplierName, supplierEmailTo, supplierEmailCc, followUpEnabled, catalogProducts]);
 

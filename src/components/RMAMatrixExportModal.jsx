@@ -323,16 +323,12 @@ export default function RMAMatrixExportModal({
               <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
                   <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  Start Date (YYYY-MM-DD)
+                  Start Date
                 </label>
-                {startDate && (
-                  <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                    ISO (YYYY-MM-DD): {startDate}
-                  </span>
-                )}
               </div>
               <input
                 type="date"
+                aria-label="Export Start Date"
                 value={startDate}
                 max={endDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -343,16 +339,12 @@ export default function RMAMatrixExportModal({
               <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
                   <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  End Date (YYYY-MM-DD)
+                  End Date
                 </label>
-                {endDate && (
-                  <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                    ISO (YYYY-MM-DD): {endDate}
-                  </span>
-                )}
               </div>
               <input
                 type="date"
+                aria-label="Export End Date"
                 value={endDate}
                 min={startDate}
                 onChange={(e) => setEndDate(e.target.value)}

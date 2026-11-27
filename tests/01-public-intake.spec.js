@@ -9,6 +9,7 @@ import {
   isoDateDaysOffset,
   setPublicPortalTestMode,
   gotoAdmin,
+  navigateAdminSidebar,
   cleanupTestRecords
 } from './helpers/testUtils.js';
 
@@ -546,7 +547,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       // Clean up synthetic submission via Sandbox Trash -> Permanent Delete
       if (createdRmaNumber) {
         await gotoAdmin(page);
-        await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+        await navigateAdminSidebar(page, 'sandbox');
         await page.locator('input[placeholder*="Search" i]').first().fill(createdRmaNumber);
         const row = page.locator('tr', { hasText: createdRmaNumber }).first();
         if (await row.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true).catch(() => false)) {
@@ -556,9 +557,9 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
           await expect(page.getByText(/Move to Trash \(30-Day Recovery\)\?/i)).toBeHidden({
             timeout: 25_000
           });
-          await page.getByRole('button', { name: /Archive & Trash/i }).click();
+          await navigateAdminSidebar(page, 'archive_trash');
           page.once('dialog', async (d) => await d.accept());
-          await page.getByRole('button', { name: /Trash Bin/i }).click();
+          await page.getByRole('button', { name: /Trash Bin — 30-Day/i }).click();
           const trashedRow = page.locator('tr', { hasText: createdRmaNumber }).first();
           await expect(trashedRow).toBeVisible({ timeout: 10_000 });
           await trashedRow.locator('button[title="Permanently destroy this record forever"]').click();

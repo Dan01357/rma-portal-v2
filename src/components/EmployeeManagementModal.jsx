@@ -10,7 +10,7 @@ const ROLES = [
   { id: 'viewer', label: '👁️ Viewer', desc: 'Read-only access to view RMA reports' }
 ];
 
-export default function EmployeeManagementModal({ isOpen, onClose, currentUser }) {
+export default function EmployeeManagementModal({ isOpen, onClose, currentUser, isEmbeddedPage = false }) {
   const [employees, setEmployees] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,10 +32,10 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
   const [newDept, setNewDept] = useState('Operations');
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen || isEmbeddedPage) {
       loadEmployees();
     }
-  }, [isOpen]);
+  }, [isOpen, isEmbeddedPage]);
 
   const loadEmployees = async () => {
     setIsLoading(true);
@@ -156,14 +156,20 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
   }, [filteredEmployees, currentPage, pageSize]);
 
   // All hooks declared above. Early return only right before JSX render!
-  if (!isOpen) return null;
+  if (!isOpen && !isEmbeddedPage) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      {/* Outer Card: Clean rounded corners with overflow-hidden so scrollbar never overlaps borders */}
-      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full flex flex-col max-h-[92dvh] sm:max-h-[88vh] overflow-hidden my-0 sm:my-auto pb-safe">
+    <div className={isEmbeddedPage
+      ? 'w-full'
+      : 'fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in'
+    }>
+      {/* Outer Card: Native full-width page when embedded, or crisp centered modal */}
+      <div className={isEmbeddedPage
+        ? 'bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 w-full flex flex-col overflow-hidden'
+        : 'bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full flex flex-col max-h-[92dvh] sm:max-h-[88vh] overflow-hidden my-0 sm:my-auto pb-safe'
+      }>
         {/* Mobile Drag Indicator */}
-        <div className="bottom-sheet-handle sm:hidden" />
+        {!isEmbeddedPage && <div className="bottom-sheet-handle sm:hidden" />}
         
         {/* Pinned Header */}
         <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
@@ -180,12 +186,15 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!isEmbeddedPage && (
+            <button
+              onClick={onClose}
+              aria-label="Close Employee Roles Modal"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Pinned Top Controls & Search Bar */}

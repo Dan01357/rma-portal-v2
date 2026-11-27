@@ -25,7 +25,9 @@ import {
   Clock,
   FlaskConical,
   BookOpen,
-  X
+  X,
+  Zap,
+  Timer
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import {
@@ -36,7 +38,11 @@ import {
   getGpsMapUrl,
   formatDateTimeYmdHm
 } from '../utils/rmaHelpers';
-import { formatTime12hFromHhmm } from '../utils/followUpWorkflow';
+import {
+  formatTime12hFromHhmm,
+  formatDurationCompact,
+  normalizeTestStepIntervalSeconds
+} from '../utils/followUpWorkflow';
 import { notificationService, EMAIL_PROFILE_TYPES } from '../services/notificationService';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 import ApiKeysManagementSection from './ApiKeysManagementSection';
@@ -48,8 +54,15 @@ export default function SettingsTab({
   isTestMode, 
   onToggleTestMode,
   onOpenPortalQr,
-  currentUser
+  currentUser,
+  viewMode = 'settings',
+  initialSubTab = 'emails',
+  onNavigateTab = null
 }) {
+  const [activeSettingsSubTab, setActiveSettingsSubTab] = useState(initialSubTab || 'emails');
+  useEffect(() => {
+    if (initialSubTab) setActiveSettingsSubTab(initialSubTab);
+  }, [initialSubTab]);
   const [connectionStatus, setConnectionStatus] = useState({
     loading: false,
     checked: false,
@@ -575,7 +588,10 @@ export default function SettingsTab({
       const saved = await notificationService.saveDailyFollowUpConfig(followUpConfig);
       followUpDirtyRef.current = false;
       setFollowUpConfig(saved);
-      setFollowUpConfigFeedback({ type: 'success', message: `10-Day Pickup Follow-Up schedule (${formatTime12hFromHhmm(saved.autoSendTimePht)} PHT) saved to cloud!` });
+      const testSpeedMsg = saved.testStepIntervalSeconds > 0
+        ? ` • Sandbox speed: ${formatDurationCompact(saved.testStepIntervalSeconds)}/day${saved.testAutoCronEnabled ? ' (Auto-Cron ON)' : ''}`
+        : '';
+      setFollowUpConfigFeedback({ type: 'success', message: `10-Day Pickup Follow-Up schedule (${formatTime12hFromHhmm(saved.autoSendTimePht)} PHT${testSpeedMsg}) saved to cloud!` });
       setTimeout(() => setFollowUpConfigFeedback(null), 4000);
     } catch (err) {
       setFollowUpConfigFeedback({ type: 'error', message: err?.message || 'Failed to save follow-up schedule.' });
@@ -738,26 +754,112 @@ export default function SettingsTab({
   };
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const showAllSections = false;
+  const showEmailsTab = viewMode === 'settings' && (showAllSections || activeSettingsSubTab === 'emails');
+  const showSchedulesTab = viewMode === 'settings' && (showAllSections || activeSettingsSubTab === 'schedules');
+  const showConnectionsTab = viewMode === 'settings' && (showAllSections || activeSettingsSubTab === 'connections');
+  const showWarehouseLocationsView = viewMode === 'warehouse_locations';
+  const showApiKeysView = viewMode === 'api_keys';
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      
-      {/* Header Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm">
-        <div className="flex items-center space-x-2">
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-500/40">
-            System Administration
-          </span>
-        </div>
-        <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1 flex items-center gap-2">
-          <Settings className="w-6 h-6 text-brand-600 dark:text-brand-400" />
-          Settings & Environment Control
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Configure email dispatch simulations, Supabase live database connection, and routing inspection.
-        </p>
-      </div>
+    <div className="w-full max-w-6xl mx-auto space-y-5">
 
+      {viewMode === 'settings' && (
+        <>
+          {/* Header Banner + Clean 3-Subtab Navigation */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-500/40">
+                    System Administration
+                  </span>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1 flex items-center gap-2">
+                  <Settings className="w-6 h-6 text-brand-600 dark:text-brand-400" />
+                  <span>Settings &amp; Environment Control</span>
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Manage email distribution routing, 10-day pickup SLA schedules, Test Mode simulation controls, and diagnostics.
+                </p>
+              </div>
+              {onNavigateTab && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('warehouse_locations')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Warehouse Locations &amp; GPS</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('api_keys')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>API Keys &amp; Webhooks</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl overflow-x-auto no-scrollbar border border-slate-200 dark:border-slate-700" role="tablist" aria-label="Settings Sections">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSettingsSubTab === 'emails'}
+                onClick={() => setActiveSettingsSubTab('emails')}
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                  activeSettingsSubTab === 'emails'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Mail className="w-4 h-4 shrink-0" />
+                <span>Email &amp; Recipients</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSettingsSubTab === 'schedules'}
+                onClick={() => setActiveSettingsSubTab('schedules')}
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                  activeSettingsSubTab === 'schedules'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>Schedules &amp; 10-Day SLA</span>
+                {Number(followUpConfig?.testStepIntervalSeconds || 0) > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                    Test {formatDurationCompact(followUpConfig.testStepIntervalSeconds)}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSettingsSubTab === 'connections'}
+                onClick={() => setActiveSettingsSubTab('connections')}
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                  activeSettingsSubTab === 'connections'
+                    ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Database className="w-4 h-4 shrink-0" />
+                <span>Test Mode, Diagnostics &amp; Portal</span>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {showEmailsTab && (
+      <>
       {/* CARD 1: SUPER ADMIN RMA EMAIL RECIPIENTS CONFIGURATION */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-7 shadow-sm space-y-6 w-full min-w-0 box-border">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4 w-full min-w-0">
@@ -1029,7 +1131,11 @@ export default function SettingsTab({
           }
         />
       </div>
+      </>
+      )}
 
+      {showConnectionsTab && (
+      <>
       {/* CARD 2: TEST MODE SWITCH CARD */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1398,13 +1504,84 @@ export default function SettingsTab({
           <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200 font-semibold">
             <Send className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>
-              <strong>Daily Auto-Email Schedule:</strong> {formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT (<code className="font-mono">Asia/Manila</code>) {matrixConfig.autoEnabled !== false ? '— Enabled' : '— Paused'} — Sends Overall RMA Matrix (<code className="font-mono">.xlsx</code>) using configurable time, window, scope &amp; recipients below.
+              <strong>Daily Auto-Email Schedule:</strong> {formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT (<code className="font-mono">Asia/Manila</code>) {matrixConfig.autoEnabled !== false ? '— Enabled' : '— Paused'} — Sends Overall RMA Matrix (<code className="font-mono">.xlsx</code>) using configured schedules &amp; recipients.
             </span>
           </div>
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <span className="text-slate-400 text-[10px] block font-sans font-semibold">SENDER ACCOUNT (GMAIL_USER)</span>
+            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">finance2@keysysincorporated.com</span>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <span className="text-slate-400 text-[10px] block font-sans font-semibold">GMAIL APP PASSWORD STATUS</span>
+            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">
+              {smtpStatus.checked ? (smtpStatus.success ? '✓ 16-character key authenticated' : `Detected: ${smtpStatus.passLength || 0} chars`) : 'Configured in Vercel'}
+            </span>
+          </div>
+        </div>
+
+        {dailyMatrixStatus.done && (
+          <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
+            dailyMatrixStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+          }`}>
+            <div className="font-bold flex items-center gap-2">
+              {dailyMatrixStatus.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              )}
+              <span>{dailyMatrixStatus.message}</span>
+            </div>
+            {dailyMatrixStatus.detail && (
+              <div className="text-[11px] font-mono opacity-85 pl-6">{dailyMatrixStatus.detail}</div>
+            )}
+          </div>
+        )}
+
+        {smtpStatus.checked && (
+          <div className={`p-4 rounded-2xl border space-y-2 text-xs animate-in fade-in ${
+            smtpStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-500/40 text-rose-800 dark:text-rose-300'
+          }`}>
+            <div className="flex items-center space-x-2.5">
+              {smtpStatus.success ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+              )}
+              <div className="font-bold text-sm">
+                {smtpStatus.success ? 'Google SMTP Verified & Operational' : 'SMTP Authentication Error (Bad Credentials)'}
+              </div>
+            </div>
+            <div className="text-[11px] leading-relaxed font-mono">
+              {smtpStatus.message}
+            </div>
+            {smtpStatus.diagnostic && (
+              <div className="mt-2 p-2.5 bg-rose-100/80 dark:bg-rose-900/40 rounded-xl text-[11px] font-sans text-rose-900 dark:text-rose-200 border border-rose-200 dark:border-rose-800/60">
+                <strong>💡 Troubleshooting Guide:</strong> {smtpStatus.diagnostic}
+              </div>
+            )}
+            {smtpStatus.hadSpaces && (
+              <div className="text-[11px] text-amber-700 dark:text-amber-300 font-sans font-semibold">
+                ℹ️ Note: Your App Password in Vercel contained spaces. The system has automatically stripped them for pure 16-character authentication.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      </>
+      )}
+
+      {showSchedulesTab && (
+      <div className="space-y-5">
         {/* Configurable Auto Daily Matrix & Manual Matrix Schedule Controls */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5 text-xs">
+        <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
               Auto Daily ({formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT) &amp; Manual Overall Matrix Settings
@@ -1543,9 +1720,10 @@ export default function SettingsTab({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="space-y-1">
-                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Start Date (YYYY-MM-DD)</span>
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Start Date</span>
                 <input
                   type="date"
+                  aria-label="Matrix Start Date"
                   value={matrixConfig.startDate || ''}
                   max={matrixConfig.endDate || undefined}
                   onChange={(e) => setMatrixConfig((p) => ({ ...p, startDate: e.target.value }))}
@@ -1553,9 +1731,10 @@ export default function SettingsTab({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">End Date (YYYY-MM-DD)</span>
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">End Date</span>
                 <input
                   type="date"
+                  aria-label="Matrix End Date"
                   value={matrixConfig.endDate || ''}
                   min={matrixConfig.startDate || undefined}
                   onChange={(e) => setMatrixConfig((p) => ({ ...p, endDate: e.target.value }))}
@@ -1635,7 +1814,7 @@ export default function SettingsTab({
                 className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 <Save className="w-3 h-3" />
-                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Follow-Up Time'}</span>
+                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Follow-Up SLA'}</span>
               </button>
             </div>
           </div>
@@ -1701,79 +1880,111 @@ export default function SettingsTab({
             isTestMode={isTestMode}
             title="Supplier Follow-Up Extra Internal CCs"
           />
+
+          {/* TEST MODE SANDBOX ACCELERATED 10-DAY SLA TIMER (STRICTLY ISOLATED TO TEST SANDBOX) */}
+          <div
+            data-testid="test-sla-acceleration-card"
+            className="p-4 rounded-2xl bg-amber-100/60 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-700 space-y-3 text-xs"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="font-black uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Test Mode SLA Speed / Step Interval (Sandbox Only)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-amber-500 text-slate-950 uppercase">
+                    {Number(followUpConfig.testStepIntervalSeconds || 0) > 0
+                      ? `1 Day = ${formatDurationCompact(followUpConfig.testStepIntervalSeconds)}`
+                      : 'Normal (1 Day)'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900/90 dark:text-amber-300/90 mt-0.5">
+                  Accelerate simulated &ldquo;days&rdquo; into seconds/minutes so you can test Day 1 → Day 10 follow-up emails and Day 10 Auto-Dispose end-to-end in minutes. <strong>Strictly isolated to Test Mode Sandbox RMAs only — Live Production RMAs NEVER accelerate.</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveFollowUpConfig}
+                disabled={isSavingFollowUpConfig}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Test Speed'}</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-bold text-amber-950 dark:text-amber-200 mr-1">Speed Presets:</span>
+              {[
+                { label: 'Normal (1 Manila Day)', sec: 0 },
+                { label: '2 min / day', sec: 120 },
+                { label: '1 min / day', sec: 60 },
+                { label: '30 sec / day', sec: 30 }
+              ].map((preset) => {
+                const isSelected = Number(followUpConfig.testStepIntervalSeconds || 0) === preset.sec;
+                return (
+                  <button
+                    key={preset.sec}
+                    type="button"
+                    onClick={() => {
+                      followUpDirtyRef.current = true;
+                      setFollowUpConfig((p) => ({ ...p, testStepIntervalSeconds: preset.sec }));
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black border cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-slate-900 text-white border-slate-900 dark:bg-amber-500 dark:text-slate-950 dark:border-amber-400 shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-amber-950 dark:text-amber-200 ml-1">
+                <Timer className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                <span>Custom (sec):</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={86400}
+                  aria-label="Test Mode Simulated Day Interval Seconds"
+                  value={Number(followUpConfig.testStepIntervalSeconds || 0)}
+                  onChange={(e) => {
+                    followUpDirtyRef.current = true;
+                    const rawVal = parseInt(e.target.value, 10);
+                    setFollowUpConfig((p) => ({
+                      ...p,
+                      testStepIntervalSeconds: !rawVal || rawVal <= 0 ? 0 : normalizeTestStepIntervalSeconds(rawVal)
+                    }));
+                  }}
+                  className="w-20 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-mono font-bold text-center text-slate-900 dark:text-white"
+                  placeholder="0"
+                />
+              </label>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-800 flex flex-wrap items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  aria-label="Test Mode Automated Cron Sweep Enabled"
+                  checked={Boolean(followUpConfig.testAutoCronEnabled)}
+                  onChange={(e) => {
+                    followUpDirtyRef.current = true;
+                    setFollowUpConfig((p) => ({ ...p, testAutoCronEnabled: e.target.checked }));
+                  }}
+                  className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                />
+                <span>Allow Automated 1-Minute Cron to Advance Test Mode Sandbox RMAs (bypasses 1:00 PM PHT gate for Sandbox only)</span>
+              </label>
+            </div>
+          </div>
         </div>
-
-        {dailyMatrixStatus.done && (
-          <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
-            dailyMatrixStatus.success
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
-          }`}>
-            <div className="font-bold flex items-center gap-2">
-              {dailyMatrixStatus.success ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-              )}
-              <span>{dailyMatrixStatus.message}</span>
-            </div>
-            {dailyMatrixStatus.detail && (
-              <div className="text-[11px] font-mono opacity-85 pl-6">{dailyMatrixStatus.detail}</div>
-            )}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <span className="text-slate-400 text-[10px] block font-sans font-semibold">SENDER ACCOUNT (GMAIL_USER)</span>
-            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">finance2@keysysincorporated.com</span>
-          </div>
-
-          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <span className="text-slate-400 text-[10px] block font-sans font-semibold">GMAIL APP PASSWORD STATUS</span>
-            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">
-              {smtpStatus.checked ? (smtpStatus.success ? '✓ 16-character key authenticated' : `Detected: ${smtpStatus.passLength || 0} chars`) : 'Configured in Vercel'}
-            </span>
-          </div>
-        </div>
-
-        {/* SMTP Status Result Banner */}
-        {smtpStatus.checked && (
-          <div className={`p-4 rounded-2xl border space-y-2 text-xs animate-in fade-in ${
-            smtpStatus.success
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
-              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-500/40 text-rose-800 dark:text-rose-300'
-          }`}>
-            <div className="flex items-center space-x-2.5">
-              {smtpStatus.success ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
-              )}
-              <div className="font-bold text-sm">
-                {smtpStatus.success ? 'Google SMTP Verified & Operational' : 'SMTP Authentication Error (Bad Credentials)'}
-              </div>
-            </div>
-            <div className="text-[11px] leading-relaxed font-mono">
-              {smtpStatus.message}
-            </div>
-            {smtpStatus.diagnostic && (
-              <div className="mt-2 p-2.5 bg-rose-100/80 dark:bg-rose-900/40 rounded-xl text-[11px] font-sans text-rose-900 dark:text-rose-200 border border-rose-200 dark:border-rose-800/60">
-                <strong>💡 Troubleshooting Guide:</strong> {smtpStatus.diagnostic}
-              </div>
-            )}
-            {smtpStatus.hadSpaces && (
-              <div className="text-[11px] text-amber-700 dark:text-amber-300 font-sans font-semibold">
-                ℹ️ Note: Your App Password in Vercel contained spaces. The system has automatically stripped them for pure 16-character authentication.
-              </div>
-            )}
-          </div>
-        )}
 
         {/* 2-Way Email Reply Sync (IMAP) Health & Persistent Logs */}
         <div
           data-testid="reply-sync-diagnostics-panel"
-          className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3 text-xs"
+          className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 text-xs"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -1933,7 +2144,10 @@ export default function SettingsTab({
           </div>
         </div>
       </div>
+      )}
 
+      {showConnectionsTab && (
+      <>
       {/* 3. Public Reporting Portal Access QR & Dock Posters */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -1962,6 +2176,26 @@ export default function SettingsTab({
         <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
           Users who report products do not need login credentials. They simply scan the QR code posted at your receiving docks or return desks to launch the portal, scan the retail barcode, attach photos of damaged items, and print box verification stickers.
         </p>
+      </div>
+      </>
+      )}
+
+      {showApiKeysView && (
+      <>
+      {/* Standalone Enterprise Page Header: API Keys & Webhooks */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40">
+            Access &amp; Integrations
+          </span>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1 flex items-center gap-2">
+            <KeyRound className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            <span>API Keys &amp; Webhooks</span>
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Manage SHA-256 external system API keys, ERP/WMS integrations, Live Catalog API key, and OpenAPI Swagger documentation.
+          </p>
+        </div>
       </div>
 
       {/* 4. Live Product Catalog API Integration (EXTERNAL_API_KEY_DANILO) */}
@@ -2058,6 +2292,27 @@ export default function SettingsTab({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* 6. MULTI-SYSTEM REST API KEYS & INTEGRATION (SHA-256 HASHED) */}
+      <ApiKeysManagementSection />
+      </>
+      )}
+
+      {showWarehouseLocationsView && (
+      <>
+      {/* Standalone Enterprise Page Header: Warehouse Locations & GPS */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm">
+        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/40">
+          Directory &amp; Locations
+        </span>
+        <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1 flex items-center gap-2">
+          <MapPin className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          <span>Warehouse Locations &amp; GPS Anchors</span>
+        </h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          Configure standard rack/bin staging locations and verified warehouse GPS geofence anchors for accurate watermark pins.
+        </p>
       </div>
 
       {/* 5. WAREHOUSE LOCATIONS MANAGEMENT (CUSTOMIZABLE DROPDOWN) */}
@@ -2323,7 +2578,9 @@ export default function SettingsTab({
       </div>
 
       {/* 6. MULTI-SYSTEM REST API KEYS & INTEGRATION (SHA-256 HASHED) */}
-      <ApiKeysManagementSection />
+      {/* (Rendered under showApiKeysView above) */}
+      </>
+      )}
 
       {/* Warehouse Locations Modal */}
       <WarehouseLocationsModal

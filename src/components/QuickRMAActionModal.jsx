@@ -2781,7 +2781,11 @@ export default function QuickRMAActionModal({
                   )}
 
                   {(() => {
-                    const wfInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
+                    const defaultCfg = notificationService.getDailyFollowUpConfig();
+                    const wfInfo = getCleanHumanWorkflowStatus(report, savedProductsList, {
+                      customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled,
+                      testStepIntervalSeconds: defaultCfg.testStepIntervalSeconds
+                    });
                     const wf = wfInfo.workflow;
                     return (
                       <>

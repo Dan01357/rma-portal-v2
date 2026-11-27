@@ -1035,17 +1035,13 @@ export default function CreditMemoModal({
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Pull Out Date (YYYY-MM-DD) *
+                    Pull Out Date *
                   </label>
-                  {pullOutDate && (
-                    <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                      ISO (YYYY-MM-DD): {formatDateYmd(pullOutDate) || pullOutDate}
-                    </span>
-                  )}
                 </div>
                 <input
                   type="date"
                   required
+                  aria-label="Pull Out Date"
                   value={pullOutDate}
                   onChange={(e) => setPullOutDate(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"

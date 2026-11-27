@@ -100,6 +100,7 @@ export default function CustomerHubTab({
   onPrintBulkCreditMemos,
   onRequestDeleteCreditMemo,
   onRequestBulkDeleteCreditMemo,
+  onOpenCreditMemosLedger = null,
   defaultSubTab = 'returns',
   externalSubTab = null,
   onSubTabChange,
@@ -655,33 +656,6 @@ export default function CustomerHubTab({
 
   return (
   <div className="space-y-4 w-full min-w-0">
-    {/* Symmetrical Segmented Sub-Tab Switcher: Customer Returns | Credit Memos Ledger */}
-    <div className="flex items-center gap-1.5 bg-slate-200/80 dark:bg-slate-800/80 p-1 rounded-2xl w-full sm:w-fit overflow-x-auto">
-      <button
-        type="button"
-        onClick={() => setActiveSubTab('returns')}
-        className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-          activeSubTab === 'returns'
-            ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-        }`}
-      >
-        <span>📥 Customer Returns ({customerScopedTotal})</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setActiveSubTab('credit_memos')}
-        className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-          activeSubTab === 'credit_memos'
-            ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-        }`}
-      >
-        <span>💳 Credit Memos Ledger ({creditMemosList.length})</span>
-      </button>
-    </div>
-
     {activeSubTab === 'credit_memos' ? (
       <CreditMemosTab
         creditMemosList={creditMemosList}
@@ -696,9 +670,9 @@ export default function CustomerHubTab({
         isTestMode={isTestMode}
       />
     ) : (
-  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
+  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-sm space-y-4 w-full min-w-0 box-border">
     {/* Header & Responsive Action Toolbar */}
-    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
+    <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 w-full min-w-0">
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
@@ -712,20 +686,31 @@ export default function CustomerHubTab({
           <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
             {processedReports.length} Returns Active
           </span>
+          {onOpenCreditMemosLedger && (
+            <button
+              type="button"
+              onClick={onOpenCreditMemosLedger}
+              className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1 cursor-pointer transition-colors"
+              title="Switch to Credit Memos Ledger"
+            >
+              <Receipt className="w-3 h-3 shrink-0" />
+              <span>Credit Memos Ledger ({creditMemosList.length}) →</span>
+            </button>
+          )}
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-          Store & branch merchandise returns, billing document matching, and customer credit memo vouchers.
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Store &amp; branch merchandise returns, billing document matching, and customer credit memo vouchers.
         </p>
       </div>
 
       {/* Responsive Action Toolbar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 w-full lg:w-auto min-w-0">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 w-full 2xl:w-auto min-w-0">
         {/* View Switcher: Rows vs Cards */}
         <div className="flex items-center self-start sm:self-auto bg-slate-100 dark:bg-slate-800 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700 shrink-0">
           <button
             type="button"
             onClick={() => handleSetReportsViewMode('table')}
-            className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'table'
+            className={`px-2.5 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${reportsViewMode === 'table'
               ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
@@ -737,7 +722,7 @@ export default function CustomerHubTab({
           <button
             type="button"
             onClick={() => handleSetReportsViewMode('grid')}
-            className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'grid'
+            className={`px-2.5 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${reportsViewMode === 'grid'
               ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
@@ -748,37 +733,37 @@ export default function CustomerHubTab({
           </button>
         </div>
 
-        {/* Action Buttons: 2-column grid on mobile (< sm), flex on sm+ */}
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto min-w-0">
+        {/* Action Buttons: Clean vertical stack on narrow phones (<sm), wrapping flex row on sm+ */}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto min-w-0">
           <button
             type="button"
             onClick={() => onOpenReportsModal && onOpenReportsModal()}
-            className="w-full sm:w-auto justify-center px-3 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="w-full sm:w-auto justify-center px-3 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             title="Open Full Audit Log"
           >
             <FileText className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Full Audit Log</span>
+            <span>Full Audit Log</span>
             <ChevronRight className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
           </button>
 
           <button
             type="button"
             onClick={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
-            className="w-full sm:w-auto justify-center px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
+            className="w-full sm:w-auto justify-center px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
             title="Download Overall RMA Matrix (.xlsx) combining Customer Hub & Supplier RTV"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate">{isTestMode ? 'Sandbox Overall Matrix (.xlsx)' : 'Overall RMA Matrix (.xlsx)'}</span>
+            <span>{isTestMode ? 'Sandbox Overall Matrix (.xlsx)' : 'Overall RMA Matrix (.xlsx)'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => exportCustomerInboundRMAsToXlsx(processedReports, null, savedProductsList, isTestMode)}
-            className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
+            className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
             title="Export Customer Inbound RMAs to Excel (.xlsx) with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
           >
             <Download className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Export Inbound (.xlsx)</span>
+            <span>Export Inbound (.xlsx)</span>
           </button>
         </div>
       </div>
@@ -899,40 +884,32 @@ export default function CustomerHubTab({
         {/* Date Range Picker: Neatly split in 2 columns */}
         <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
           <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
-            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From (YYYY-MM-DD)</span>
+            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From Date</span>
             <input
               type="date"
+              aria-label="Customer Hub From Date"
               value={reportsDateFrom}
               onChange={(e) => {
                 setReportsDateFrom(e.target.value);
                 setReportsCurrentPage(1);
               }}
               className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-              title="Filter records from date (YYYY-MM-DD)"
+              title="Filter records from date"
             />
-            {reportsDateFrom && (
-              <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
-                ISO (YYYY-MM-DD): {reportsDateFrom}
-              </span>
-            )}
           </div>
           <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
-            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To (YYYY-MM-DD)</span>
+            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To Date</span>
             <input
               type="date"
+              aria-label="Customer Hub To Date"
               value={reportsDateTo}
               onChange={(e) => {
                 setReportsDateTo(e.target.value);
                 setReportsCurrentPage(1);
               }}
               className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-              title="Filter records to date (YYYY-MM-DD)"
+              title="Filter records to date"
             />
-            {reportsDateTo && (
-              <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
-                ISO (YYYY-MM-DD): {reportsDateTo}
-              </span>
-            )}
           </div>
         </div>
 
@@ -987,7 +964,7 @@ export default function CustomerHubTab({
             <thead>
               <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 {/* Select All Checkbox Header */}
-                <th className="py-3 px-3 w-10 text-center">
+                <th className="py-2.5 px-2 w-9 text-center">
                   <input
                     type="checkbox"
                     checked={isAllReportsPageSelected}
@@ -998,7 +975,7 @@ export default function CustomerHubTab({
                 </th>
                 <th
                   onClick={() => handleReportsSort('id')}
-                  className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
+                  className="py-2.5 px-2 font-black text-slate-900 dark:text-white w-12 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
                   title="Click to sort by Serial Number"
                 >
                   <div className="flex items-center">
@@ -1010,149 +987,79 @@ export default function CustomerHubTab({
                 </th>
                 <th
                   onClick={() => handleReportsSort('rma_number')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
                   title="Click to sort by RMA #"
                 >
                   <div className="flex items-center">
-                    <span>RMA #</span>
+                    <span>RMA # &amp; Docs</span>
                     {reportsSortField === 'rma_number' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
-                <th className="py-3 px-3 w-14 text-center select-none">Photo</th>
-                <th
-                  onClick={() => handleReportsSort('barcode')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Barcode"
-                >
-                  <div className="flex items-center">
-                    <span>Barcode</span>
-                    {reportsSortField === 'barcode' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                  </div>
-                </th>
+                <th className="py-2 px-1 w-10 text-center select-none">Photo</th>
                 <th
                   onClick={() => handleReportsSort('name')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Item Name"
+                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  title="Click to sort by Item Name / SKU"
                 >
                   <div className="flex items-center">
-                    <span>Item Name</span>
+                    <span>Item &amp; SKU/BC</span>
                     {reportsSortField === 'name' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
-                {/* Quantity & Unit Header */}
                 <th
                   onClick={() => handleReportsSort('quantity')}
-                  className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  className="py-2 px-1.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
                   title="Click to sort by Quantity & Unit"
                 >
                   <div className="flex items-center justify-center">
-                    <span>Qty & Unit</span>
+                    <span>Qty</span>
                     {reportsSortField === 'quantity' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
                 <th
-                  onClick={() => handleReportsSort('reason')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Reason"
-                >
-                  <div className="flex items-center">
-                    <span>Reason</span>
-                    {reportsSortField === 'reason' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                  </div>
-                </th>
-                {/* 7. Customer Branch Header */}
-                <th
                   onClick={() => handleReportsSort('store_branch')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Customer Branch"
+                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  title="Click to sort by Customer Branch / Defect Reason"
                 >
                   <div className="flex items-center">
-                    <span>Customer Branch</span>
-                    {reportsSortField === 'store_branch' ? (
+                    <span>Defect &amp; Branch</span>
+                    {reportsSortField === 'store_branch' || reportsSortField === 'reason' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
-
-                {/* 8. Commercial Documents (SI / DR / PO #) Header */}
-                <th
-                  onClick={() => handleReportsSort('invoice_dr_number')}
-                  className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Commercial Documents (Sales Invoice, Delivery Receipt, Purchase Order)"
-                >
-                  <div className="flex items-center">
-                    <span>Commercial Docs (SI, DR, PO)</span>
-                    {reportsSortField === 'invoice_dr_number' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                  </div>
-                </th>
-
-                {/* 8. Lifecycle Stage Header */}
-                <th
-                  onClick={() => handleReportsSort('lifecycle_stage')}
-                  className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Lifecycle Stage"
-                >
-                  <div className="flex items-center justify-center">
-                    <span>Lifecycle Stage</span>
-                    {reportsSortField === 'lifecycle_stage' || reportsSortField === 'status' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                  </div>
-                </th>
-
-                {/* 10. Disposition Header */}
                 <th
                   onClick={() => handleReportsSort('disposition')}
-                  className="py-3 px-3.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Disposition"
+                  className="py-2 px-1.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  title="Click to sort by Stage & Disposition"
                 >
                   <div className="flex items-center justify-center">
-                    <span>Disposition</span>
-                    {reportsSortField === 'disposition' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                  </div>
-                </th>
-
-                {/* 11. Warehouse Location Header */}
-                <th
-                  onClick={() => handleReportsSort('warehouse_location')}
-                  className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Warehouse Rack/Bin Location"
-                >
-                  <div className="flex items-center justify-center">
-                    <span>Location</span>
-                    {reportsSortField === 'warehouse_location' ? (
+                    <span>Stage, Disp &amp; Bin</span>
+                    {reportsSortField === 'disposition' || reportsSortField === 'lifecycle_stage' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('created_at')}
-                  className="py-3 px-3.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                  title="Click to sort by Date"
+                  className="py-2 px-1.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
+                  title="Click to sort by Reported Date"
                 >
                   <div className="flex items-center justify-end">
-                    <span>Date (YYYY-MM-DD) &amp; GPS</span>
+                    <span>Reported &amp; GPS</span>
                     {reportsSortField === 'created_at' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                   </div>
                 </th>
-                <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400">
-                  Finance & Actions
+                <th className="py-2 px-1.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -1186,7 +1093,7 @@ export default function CustomerHubTab({
                       title={`Click row to inspect & triage RMA #${item.rma_number}`}
                     >
                       {/* Row Selection Checkbox */}
-                      <td className="py-3 px-3 text-center">
+                      <td className="py-2.5 px-2 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1196,19 +1103,19 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 1. SN COLUMN AT FAR LEFT */}
-                      <td className="py-3 px-3.5 font-mono">
-                        <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
+                      <td className="py-2.5 px-2 font-mono whitespace-nowrap">
+                        <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-1.5 py-0.5 rounded-lg text-[11px]">
                           #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
                         </span>
                       </td>
 
-                      {/* 2. RMA # + QR Sticker Button */}
-                      <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
-                        <div className="flex items-center gap-1.5">
+                      {/* 2. RMA # + QR Sticker + Manifest Badge + Commercial Docs */}
+                      <td className="py-2 px-1.5 font-mono text-[11px]">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
                           <button
                             type="button"
                             onClick={() => onInspectTriage(item)}
-                            className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer"
+                            className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer whitespace-nowrap"
                             title={`Inspect, triage, and process RMA #${item.rma_number}`}
                           >
                             {item.rma_number}
@@ -1216,13 +1123,13 @@ export default function CustomerHubTab({
                           <button
                             type="button"
                             onClick={() => onViewQR && onViewQR({ ...item, name: resolvedName })}
-                            className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer shrink-0"
                             title={`View & Print Box QR Sticker for ${item.rma_number}`}
                           >
                             <QrCode className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        {/* Split and Manifest Quick Badges */}
+                        {/* Single-line Split / Manifest Pills */}
                         <div className="flex items-center gap-1 flex-wrap mt-0.5">
                           {isManifest && (
                             <button
@@ -1231,7 +1138,7 @@ export default function CustomerHubTab({
                                 e.stopPropagation();
                                 toggleManifestExpand(manifestKey);
                               }}
-                              className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer ${isManifestExpanded
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer whitespace-nowrap ${isManifestExpanded
                                   ? 'bg-purple-600 text-white border border-purple-700'
                                   : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
                                 }`}
@@ -1242,19 +1149,43 @@ export default function CustomerHubTab({
                             </button>
                           )}
                           {isSplitChildTicket(item) ? (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs whitespace-nowrap" title="Split Child Ticket (Part 2)">
                               <span>✂️ Part 2</span>
                             </span>
                           ) : isSplitParentTicket(item, reportsList) ? (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs whitespace-nowrap" title="Split Parent Ticket (Part 1)">
                               <span>✂️ Part 1</span>
                             </span>
                           ) : null}
                         </div>
+                        {/* Compact Commercial Docs Chips */}
+                        {(() => {
+                          const docs = getDocumentNumbers(item);
+                          if (docs.si === 'N/A' && docs.dr === 'N/A' && docs.po === 'N/A') return null;
+                          return (
+                            <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
+                              {docs.si !== 'N/A' && (
+                                <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold">
+                                  SI: {docs.si}
+                                </span>
+                              )}
+                              {docs.dr !== 'N/A' && (
+                                <span className="px-1.5 py-0.2 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold">
+                                  DR: {docs.dr}
+                                </span>
+                              )}
+                              {docs.po !== 'N/A' && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold">
+                                  PO: {docs.po}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* 3. Photo Thumbnail with Lightbox */}
-                      <td className="py-2.5 px-3 text-center">
+                      <td className="py-2 px-1.5 text-center">
                         {photoList.length > 0 ? (
                           <button
                             type="button"
@@ -1265,7 +1196,7 @@ export default function CustomerHubTab({
                               title: resolvedName || `Return ${item.rma_number}`,
                               subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
                             })}
-                            className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                            className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                             title="Click to view full-size proof photo"
                           >
                             <img
@@ -1275,60 +1206,43 @@ export default function CustomerHubTab({
                             />
                           </button>
                         ) : (
-                          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                             <ImageIcon className="w-4 h-4" />
                           </div>
                         )}
                       </td>
 
-                      {/* 4. Barcode */}
-                      <td className="py-3 px-3.5 font-mono">
-                        {isManifest ? (
-                          <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
-                            📦 Manifest Items
-                          </span>
-                        ) : (
-                          <>
-                            <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                            {(item.code || matchedProduct?.code) && (
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
-                            )}
-                            {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
-                              <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                                🏷️ Missing Barcode
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </td>
-
-                      {/* 5. Item Name */}
-                      <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px]" title={resolvedName}>
-                        <div className="flex items-center gap-1.5">
-                          <div className="truncate">{resolvedName}</div>
-                          {isManifest && manifestChildren.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleManifestExpand(manifestKey);
-                              }}
-                              className="p-0.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 rounded hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0"
-                              title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                            >
-                              <ChevronDown className={`w-3.5 h-3.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                            </button>
+                      {/* 4. Merged Item Name, Barcode/SKU, Vendor SLA & Lot/Exp */}
+                      <td className="py-2 px-1.5 max-w-[140px]" title={resolvedName}>
+                        <div className="font-bold text-slate-900 dark:text-white truncate">{resolvedName}</div>
+                        <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {isManifest ? (
+                            <span className="px-1.5 py-0.2 rounded bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[9.5px] border border-purple-200 dark:border-purple-800 inline-block">
+                              📦 Multi-Item Batch
+                            </span>
+                          ) : (
+                            <div className="truncate">
+                              <span>{item.barcode}</span>
+                              {(item.code || matchedProduct?.code) && (
+                                <span className="text-slate-400"> • {item.code || matchedProduct?.code}</span>
+                              )}
+                            </div>
+                          )}
+                          {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
+                            <span className="inline-flex items-center gap-0.5 mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                              🏷️ Missing Barcode
+                            </span>
                           )}
                         </div>
                         {((item.supplier_name && !isPlaceholderSupplier(item.supplier_name)) || (matchedProduct?.supplier_name && !isPlaceholderSupplier(matchedProduct.supplier_name))) ? (
-                          <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                            <span className="truncate max-w-[140px]">
-                              Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{(!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : matchedProduct?.supplier_name)}</span>
+                          <div className="flex items-center gap-1 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                            <span className="truncate max-w-[125px]">
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">{(!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : matchedProduct?.supplier_name)}</span>
                             </span>
                             <button
                               type="button"
                               onClick={() => setFollowUpModalReport(item)}
-                              className="px-1.5 py-0.2 rounded bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-bold cursor-pointer"
+                              className="px-1.5 py-0.2 rounded bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-bold cursor-pointer whitespace-nowrap"
                               title="Configure Supplier Email & 10-Day Countdown SLA"
                             >
                               📧 SLA
@@ -1339,7 +1253,7 @@ export default function CustomerHubTab({
                             <button
                               type="button"
                               onClick={() => setFollowUpModalReport(item)}
-                              className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-black cursor-pointer whitespace-nowrap"
+                              className="px-1.5 py-0.2 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9px] font-black cursor-pointer whitespace-nowrap"
                               title="Set Supplier Name, Email (TO/CC) & 10-Day Countdown SLA"
                             >
                               + Set Supplier &amp; Email
@@ -1347,24 +1261,24 @@ export default function CustomerHubTab({
                           </div>
                         )}
                         {(item.batch_lot_number || item.expiry_date) && (
-                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5 font-normal">
+                          <div className="flex items-center gap-1 flex-wrap mt-0.5 font-normal">
                             {item.batch_lot_number && (
-                              <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-200/80 dark:border-amber-800">
+                              <span className="text-[9.5px] font-mono text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-200/80 dark:border-amber-800 whitespace-nowrap">
                                 Lot: {item.batch_lot_number}
                               </span>
                             )}
                             {item.expiry_date && (
-                              <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200/80 dark:border-rose-800">
-                                Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                              <span className="text-[9.5px] font-mono font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200/80 dark:border-rose-800 whitespace-nowrap">
+                                Exp: {formatDateYmd(item.expiry_date) || item.expiry_date}
                               </span>
                             )}
                           </div>
                         )}
                       </td>
 
-                      {/* Quantity & Unit Column */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
+                      {/* 5. Quantity & Unit */}
+                      <td className="py-2 px-1.5 text-center whitespace-nowrap">
+                        <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
                           <span>
                             {isManifest
                               ? formatManifestBreakdown(manifestChildren, false)
@@ -1373,10 +1287,10 @@ export default function CustomerHubTab({
                         </span>
                       </td>
 
-                      {/* 6. Reason & Truncated Reporter Explanation */}
-                      <td className="py-3 px-3.5 max-w-[180px]">
+                      {/* 6. Defect Reason, Notes & Customer Branch / Reporter */}
+                      <td className="py-2 px-1.5 max-w-[125px]">
                         <div className="space-y-1">
-                          <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
+                          <span className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[9.5px] inline-block truncate max-w-[118px]" title={item.reason || 'Damaged'}>
                             {item.reason || 'Damaged'}
                           </span>
                           {(() => {
@@ -1389,173 +1303,131 @@ export default function CustomerHubTab({
                             const cleanNote = cleanExplanationText(rawNote);
                             if (!cleanNote) return null;
                             return (
-                              <div className="flex items-center gap-1 max-w-[165px]">
-                                <button
-                                  type="button"
-                                  onClick={() => onViewExplanation && onViewExplanation({
-                                    rmaNumber: item.rma_number,
-                                    productName: resolvedName,
-                                    reason: item.reason || 'Damaged',
-                                    explanation: cleanNote,
-                                    reporter: item.reporter_name || item.reported_by || 'Staff'
-                                  })}
-                                  className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
-                                  title="Click to read full reporter explanation"
-                                >
-                                  <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
-                                    "{cleanNote}"
-                                  </span>
-                                  <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
-                                    Read
-                                  </span>
-                                </button>
+                              <button
+                                type="button"
+                                onClick={() => onViewExplanation && onViewExplanation({
+                                  rmaNumber: item.rma_number,
+                                  productName: resolvedName,
+                                  reason: item.reason || 'Damaged',
+                                  explanation: cleanNote,
+                                  reporter: item.reporter_name || item.reported_by || 'Staff'
+                                })}
+                                className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
+                                title="Click to read full reporter explanation"
+                              >
+                                <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[100px]">
+                                  &ldquo;{cleanNote}&rdquo;
+                                </span>
+                                <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
+                                  Read
+                                </span>
+                              </button>
+                            );
+                          })()}
+                          {(() => {
+                            const displayBranch = (item.store_branch && item.store_branch !== 'Direct Return') ? item.store_branch : 'N/A';
+                            return (
+                              <div className="font-bold text-slate-900 dark:text-slate-200 text-[10.5px] flex items-center gap-1 truncate" title={displayBranch}>
+                                <span className="text-blue-600 dark:text-blue-400 shrink-0">📍</span>
+                                <span className="truncate font-extrabold text-blue-900 dark:text-blue-300">{displayBranch}</span>
                               </div>
                             );
                           })()}
+                          <div className="text-[9.5px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                            {item.reporter_name || item.reported_by || 'Staff'}
+                            {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
+                          </div>
                         </div>
                       </td>
 
-                      {/* 7. Customer Branch & Reporter */}
-                      <td className="py-3 px-3.5">
-                        {(() => {
-                          const displayBranch = (item.store_branch && item.store_branch !== 'Direct Return') ? item.store_branch : 'N/A';
-                          return (
-                            <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={displayBranch}>
-                              <span className="text-blue-600 dark:text-blue-400">📍</span>
-                              <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
-                                {displayBranch}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate max-w-[130px]">
-                          {item.reporter_name || item.reported_by || 'Staff'}
-                          {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
-                        </div>
-                      </td>
+                      {/* 7. Lifecycle Stage, 4-Choice Disposition, SLA & Bin Location */}
+                      <td className="py-2 px-1.5 text-center max-w-[148px]">
+                        <div className="inline-flex flex-col items-center gap-1">
+                          {isManifest ? (() => {
+                            const dynStage = resolveBatchManifestLifecycle(item, reportsList);
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleManifestExpand(manifestKey);
+                                }}
+                                className={`px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider border inline-flex items-center gap-1 hover:opacity-90 cursor-pointer shadow-2xs whitespace-nowrap ${dynStage.color}`}
+                                title="Dynamically resolved from child item dispositions (click to open drawer)"
+                              >
+                                <span>{dynStage.label}</span>
+                              </button>
+                            );
+                          })() : (() => {
+                            const stageInfo = formatLifecycleStage(item.status, item);
+                            const wf = computeFourStepWorkflow(item, savedProductsList, {
+                              customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+                              testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
+                            });
+                            return (
+                              <>
+                                <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-bold border uppercase tracking-wider inline-block shadow-2xs whitespace-nowrap ${stageInfo.color}`}>
+                                  {stageInfo.label}
+                                </span>
+                                {wf.isCountdownActive && !wf.isClosed && (
+                                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 inline-flex items-center gap-1 whitespace-nowrap">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    <span>{wf.step2.text}</span>
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
 
-                      {/* 8. Commercial Document (SI / DR / PO) */}
-                      <td className="py-3 px-3.5 font-mono">
-                        {(() => {
-                          const docs = getDocumentNumbers(item);
-                          return (
-                            <div className="space-y-0.5 text-[9px] font-mono leading-tight">
-                              <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.si !== 'N/A'
-                                  ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold'
-                                  : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                }`}>
-                                SI: {docs.si}
-                              </span>
-                              <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.dr !== 'N/A'
-                                  ? 'bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold'
-                                  : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                }`}>
-                                DR: {docs.dr}
-                              </span>
-                              <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.po !== 'N/A'
-                                  ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold'
-                                  : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                }`}>
-                                PO: {docs.po}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                      </td>
-
-                      {/* 8. Lifecycle Stage */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
-                        {isManifest ? (() => {
-                          const dynStage = resolveBatchManifestLifecycle(item, reportsList);
-                          return (
+                          {isManifest ? (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleManifestExpand(manifestKey);
                               }}
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 hover:opacity-90 cursor-pointer shadow-2xs ${dynStage.color}`}
-                              title="Dynamically resolved from child item dispositions (click to open drawer)"
+                              className="px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs whitespace-nowrap"
+                              title="Click to view child line items in drawer"
                             >
-                              <span>{dynStage.label}</span>
+                              <span>📦 Line Items (Drawer)</span>
                             </button>
-                          );
-                        })() : (() => {
-                          const stageInfo = formatLifecycleStage(item.status, item);
-                          const wf = computeFourStepWorkflow(item, savedProductsList, {
-                            customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled
-                          });
-                          return (
-                            <div className="flex flex-col items-center gap-1">
-                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
-                                {stageInfo.label}
+                          ) : (
+                            <>
+                              <span className={`px-2 py-0.5 rounded-lg text-[9.5px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                                {outcome.label}
                               </span>
-                              {wf.isCountdownActive && !wf.isClosed && (
-                                <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 inline-flex items-center gap-1">
-                                  <Clock className="w-2.5 h-2.5" />
-                                  <span>{wf.step2.text}</span>
-                                </span>
+                              {(() => {
+                                const reorderInfo = resolveReorderStatus(item);
+                                return (
+                                  <span
+                                    className={`px-1.5 py-0.2 rounded-md text-[9.5px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    title={reorderInfo.isReordered
+                                      ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
+                                      : 'Replacement PO not yet ordered'}
+                                  >
+                                    <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
+                                    {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
+                                  </span>
+                                );
+                              })()}
+                              {outcome.choiceKey === 'scrap' && (
+                                <div className="text-[9.5px] font-bold text-slate-600 dark:text-slate-300">
+                                  {getItemNeedsReorder(item) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                </div>
                               )}
-                            </div>
-                          );
-                        })()}
-                      </td>
+                            </>
+                          )}
 
-                      {/* 10. Disposition (Full text without truncation) */}
-                      <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                        {isManifest ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleManifestExpand(manifestKey);
-                            }}
-                            className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
-                            title="Click to view child line items in drawer"
-                          >
-                            <span>📦 Multi-Item Status (See Drawer)</span>
-                          </button>
-                        ) : (
-                          <div className="space-y-1 inline-flex flex-col items-center">
-                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
-                              {outcome.label}
+                          {item.warehouse_location && (
+                            <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[9.5px] font-mono font-bold truncate max-w-[160px]" title={normalizeWarehouseLocation(item.warehouse_location, item)}>
+                              {normalizeWarehouseLocation(item.warehouse_location, item)}
                             </span>
-                            {(() => {
-                              const reorderInfo = resolveReorderStatus(item);
-                              return (
-                                <span
-                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
-                                  title={reorderInfo.isReordered
-                                    ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
-                                    : 'Replacement PO not yet ordered'}
-                                >
-                                  <span>{reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}</span>
-                                  {reorderInfo.poNumber && <span className="font-mono">({reorderInfo.poNumber})</span>}
-                                </span>
-                              );
-                            })()}
-                            {outcome.choiceKey === 'scrap' && (
-                              <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(item) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
 
-                      {/* 11. Warehouse Rack/Bin Location */}
-                      <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
-                        {item.warehouse_location ? (
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 text-[11px] font-extrabold inline-block shadow-2xs">
-                            {normalizeWarehouseLocation(item.warehouse_location, item)}
-                          </span>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-600 text-xs font-bold">—</span>
-                        )}
-                      </td>
-
-                      {/* 9. Date & GPS */}
-                      <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      {/* 8. Date & GPS */}
+                      <td className="py-2 px-1.5 text-right font-mono text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
                         <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
                         {(() => {
                           const mapUrl = getGpsMapUrl(item);
@@ -1565,20 +1437,20 @@ export default function CustomerHubTab({
                               href={mapUrl}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold max-w-[165px]"
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[9.5px] font-bold max-w-[105px]"
                               title={gpsAddr || 'View GPS Location on Google Maps'}
                             >
-                              <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                              <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
                               <span className="truncate">{gpsAddr || 'Map'}</span>
                             </a>
                           ) : (
-                            <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
+                            <span className="text-slate-300 dark:text-slate-600 text-[9.5px]">No GPS</span>
                           );
                         })()}
                       </td>
 
-                      {/* 10. Actions: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Credit Memo & Delete */}
-                      <td className="py-2.5 px-3.5 text-center">
+                      {/* 9. Actions: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Credit Memo & Delete */}
+                      <td className="py-2 px-1.5 text-center">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           {/* 4-Choice Outcome & Pickup Verification */}
                           {onOpenSimpleWizard && (
@@ -1615,7 +1487,7 @@ export default function CustomerHubTab({
                           )}
 
                           {/* Follow-Up Case Close Quick Action */}
-                          {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
+                          {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled, testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0 }).isClosed && (
                             <button
                               type="button"
                               disabled={customerRowBusyId === (item.id || item.rma_number)}
@@ -1815,7 +1687,7 @@ export default function CustomerHubTab({
                     {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
                     {isManifest && isManifestExpanded && (
                       <tr className="bg-purple-50/40 dark:bg-slate-900/90 border-y-2 border-purple-200 dark:border-purple-900/60">
-                        <td colSpan={15} className="p-3 sm:p-4">
+                        <td colSpan={10} className="p-3 sm:p-4">
                           <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-purple-200 dark:border-purple-800/60 shadow-sm overflow-hidden">
                             {/* Manifest Header */}
                             <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 border-b border-purple-200/80 dark:border-purple-900/50 flex flex-wrap items-center justify-between gap-2">
@@ -2361,7 +2233,7 @@ export default function CustomerHubTab({
                     )}
 
                     {/* Follow-Up SLA & Case Close Controls (Card View) */}
-                    {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
+                    {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled, testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0 }).isClosed && (
                       <>
                         {isPlaceholderSupplier(item.supplier_name || matchedProduct?.supplier_name) && (
                           <button
@@ -2638,8 +2510,8 @@ export default function CustomerHubTab({
                       </span>
                     )}
                     {item.expiry_date && (
-                      <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium">
-                        Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                      <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-mono font-medium">
+                        Exp: {formatDateYmd(item.expiry_date) || item.expiry_date}
                       </span>
                     )}
                   </div>

@@ -18,6 +18,7 @@ import {
 import {
   FOLLOW_UP_MAX_DAYS,
   DEFAULT_FOLLOWUP_CONFIG,
+  normalizeTestStepIntervalSeconds,
   normalizeTimeHhmm,
   getManilaDateYmd,
   getManilaTimeHhmm,
@@ -182,6 +183,10 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   const customerFollowUpDefaultEnabled = Number(followUpConfig.defaultPolicyVersion || 0) >= 2
     ? followUpConfig.customerFollowUpDefaultEnabled !== false
     : true;
+  const testStepIntervalSeconds = normalizeTestStepIntervalSeconds(
+    followUpConfig.testStepIntervalSeconds ?? DEFAULT_FOLLOWUP_CONFIG.testStepIntervalSeconds
+  );
+  const testAutoCronEnabled = Boolean(followUpConfig.testAutoCronEnabled) && testStepIntervalSeconds > 0;
 
   let replySyncSummary = null;
   if (alsoSyncReplies && !dryRun) {
@@ -195,29 +200,35 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     }
   }
 
+  let liveSkipReason = null;
   if (respectSchedule && operation === 'run_all' && !force) {
     if (!autoEnabled) {
-      return res.status(200).json({
-        success: true,
-        skipped: true,
-        reason: 'AUTO_DISABLED',
-        phtDate: todayManila,
-        phtTime: currentHhmm,
-        targetTimePht,
-        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
-      });
+      liveSkipReason = 'AUTO_DISABLED';
+    } else if (!hasReachedManilaSchedule(targetTimePht, nowDate)) {
+      liveSkipReason = 'BEFORE_SCHEDULED_TIME';
     }
-    if (!hasReachedManilaSchedule(targetTimePht, nowDate)) {
-      return res.status(200).json({
-        success: true,
-        skipped: true,
-        reason: 'BEFORE_SCHEDULED_TIME',
-        phtDate: todayManila,
-        phtTime: currentHhmm,
-        targetTimePht,
-        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
-      });
-    }
+  }
+
+  // Cron requests skip Live Lane if before 13:00 PHT or disabled, EXCEPT when Test Sandbox Auto-Cron is enabled with an accelerated speed
+  const runLiveLane = auth.callerType === 'cron'
+    ? !liveSkipReason
+    : !isTestMode && !liveSkipReason;
+  const runTestLane = auth.callerType === 'cron'
+    ? testAutoCronEnabled
+    : isTestMode && !liveSkipReason;
+
+  if (!runLiveLane && !runTestLane && liveSkipReason) {
+    return res.status(200).json({
+      success: true,
+      skipped: true,
+      reason: liveSkipReason,
+      phtDate: todayManila,
+      phtTime: currentHhmm,
+      targetTimePht,
+      testStepIntervalSeconds,
+      testAutoCronEnabled,
+      ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
+    });
   }
 
   // 2. Resolve recipient profiles
@@ -324,243 +335,43 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   const catalogProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
 
   const activeRows = allRows.filter((r) => !isTrashedRecord(r) && !isArchivedRecord(r));
-  const candidates = activeRows.filter((r) => {
-    if (isManifestSubItem(r, activeRows)) return false;
-    if (targetRmaNumber) {
-      return String(r.rma_number || '').trim().toUpperCase() === targetRmaNumber.toUpperCase();
-    }
-    return Boolean(isTestRecord(r)) === Boolean(isTestMode);
-  });
 
   const followUpsSent = [];
   const autoDisposed = [];
   const skippedItems = [];
   const errors = [];
 
-  for (const report of candidates) {
-    const rmaNumber = report.rma_number || String(report.id);
-    const wf = computeFourStepWorkflow(report, catalogProducts, {
-      now: nowDate,
-      customerFollowUpDefaultEnabled
+  const executeFollowUpLane = async (laneIsTestMode) => {
+    const laneStepSeconds = laneIsTestMode ? testStepIntervalSeconds : 0;
+    const candidates = activeRows.filter((r) => {
+      if (isManifestSubItem(r, activeRows)) return false;
+      if (targetRmaNumber) {
+        const matchesNum = String(r.rma_number || '').trim().toUpperCase() === targetRmaNumber.toUpperCase();
+        if (!matchesNum) return false;
+        if (auth.callerType === 'cron') return Boolean(isTestRecord(r)) === Boolean(laneIsTestMode);
+        return true;
+      }
+      return Boolean(isTestRecord(r)) === Boolean(laneIsTestMode);
     });
 
-    if (wf.isClosed) {
-      if (targetRmaNumber) {
-        skippedItems.push({ rmaNumber, reason: 'CASE_ALREADY_CLOSED' });
-      }
-      continue;
-    }
-
-    // Check Auto-Dispose (> 10 calendar days) first
-    if (wf.isExpiredAfter10Days && !wf.isAutoDisposed) {
-      const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-        ? report.ai_document_metadata
-        : {};
-      const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
-        ? existingMeta.follow_up
-        : {};
-
-      const nextMeta = {
-        ...existingMeta,
-        workflow_resolution: 'scrapped_no_reorder',
-        resolved_at: nowIso,
-        simple_rtv_disposition: '5- Scrap / Dispose',
-        follow_up: {
-          ...prevFollowUp,
-          enabled: false,
-          started_at: wf.startedAtIso,
-          auto_disposed_at: nowIso,
-          case_closed_at: nowIso,
-          case_status: 'auto_disposed_after_10_days'
-        }
-      };
-
-      const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
-      const nextAudit = [
-        ...existingAudit,
-        {
-          timestamp: nowIso,
-          action: 'AUTO_DISPOSED_AFTER_10_DAYS',
-          stage: 'RESOLVED',
-          actor: auth.actor || '10-Day SLA Auto-Dispose',
-          note: `Auto-disposed on ${todayManila} after >${FOLLOW_UP_MAX_DAYS} calendar days (${wf.calendarDay} days elapsed without pickup)`
-        }
-      ];
-
-      const updatedReportPreview = {
-        ...report,
-        status: 'resolved',
-        disposition: '5- Scrap / Dispose',
-        warehouse_location: 'Disposal / Scrap Area',
-        ai_document_metadata: nextMeta,
-        updated_at: nowIso,
-        audit_trail: nextAudit
-      };
-
-      const emailPayload = buildAutoDisposedEmailContent({
-        report: updatedReportPreview,
-        allReports: activeRows,
-        catalogProducts,
-        isTestMode,
-        sandboxEmail,
-        now: nowDate
+    for (const report of candidates) {
+      const rmaNumber = report.rma_number || String(report.id);
+      const effectiveTestRecord = Boolean(laneIsTestMode || isTestRecord(report));
+      const wf = computeFourStepWorkflow(report, catalogProducts, {
+        now: nowDate,
+        customerFollowUpDefaultEnabled,
+        testStepIntervalSeconds: effectiveTestRecord ? laneStepSeconds : 0
       });
 
-      const testDisposeRec = isTestMode ? resolveTestRecipients('new_rma') : null;
-      const finalTo = isTestMode ? testDisposeRec.toList : newRmaToList;
-      const finalCc = isTestMode
-        ? testDisposeRec.ccList
-        : Array.from(new Set([...newRmaCcList, ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])]))
-            .filter((e) => !finalTo.includes(e));
-
-      try {
-        if (!dryRun) {
-          await safeUpdateRmaReport(report.id, {
-            status: 'resolved',
-            disposition: '5- Scrap / Dispose',
-            warehouse_location: 'Disposal / Scrap Area',
-            ai_document_metadata: nextMeta,
-            updated_at: nowIso,
-            audit_trail: nextAudit
-          });
-
-          try {
-            await supabase
-              .from('rma_reports')
-              .update({
-                status: 'resolved',
-                disposition: '5- Scrap / Dispose',
-                warehouse_location: 'Disposal / Scrap Area'
-              })
-              .eq('parent_rma_id', report.id);
-          } catch {}
-
-          if (finalTo.length > 0 && transporter) {
-            await transporter.sendMail({
-              from: `Pingcon Marketing RMA <${gmailUser}>`,
-              to: finalTo.join(', '),
-              ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
-              subject: emailPayload.subject,
-              html: emailPayload.html,
-              text: emailPayload.text
-            });
-          }
+      if (wf.isClosed) {
+        if (targetRmaNumber) {
+          skippedItems.push({ rmaNumber, reason: 'CASE_ALREADY_CLOSED' });
         }
-
-        autoDisposed.push({
-          rmaNumber,
-          supplierName: wf.party.supplierName,
-          calendarDay: wf.calendarDay,
-          to: finalTo,
-          cc: finalCc,
-          subject: emailPayload.subject,
-          dryRun
-        });
-      } catch (err) {
-        errors.push({ rmaNumber, step: 'auto_dispose', message: err?.message || 'Failed auto-dispose' });
+        continue;
       }
-      continue;
-    }
 
-    if (operation === 'check_dispose_only') {
-      continue;
-    }
-
-    if (!wf.isCountdownActive || wf.calendarDay > FOLLOW_UP_MAX_DAYS) {
-      if (targetRmaNumber) {
-        skippedItems.push({
-          rmaNumber,
-          reason: !wf.followUpEnabled ? 'FOLLOW_UP_DISABLED' : 'OUTSIDE_COUNTDOWN_WINDOW'
-        });
-      }
-      continue;
-    }
-
-    if (wf.alreadySentToday && !force) {
-      skippedItems.push({ rmaNumber, reason: 'ALREADY_SENT_TODAY', lastSentPhtDate: wf.lastSentPhtDate });
-      continue;
-    }
-
-    const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && directoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
-    const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
-    const itemDirTo = [];
-    const itemDirCc = [];
-    const perItemTo = [];
-    const perItemCc = [];
-    if (Array.isArray(report.items)) {
-      for (const it of report.items) {
-        splitEmailStringOrList(it?.supplier_email_to ?? it?.email_to).forEach((e) => perItemTo.push(e));
-        splitEmailStringOrList(it?.supplier_email_cc ?? it?.email_cc).forEach((e) => perItemCc.push(e));
-      }
-    }
-    for (const sup of itemSuppliers) {
-      const match = directoryMap.get(normalizeDirKey(sup));
-      if (match) {
-        match.emailToList.forEach((e) => itemDirTo.push(e));
-        match.emailCcList.forEach((e) => itemDirCc.push(e));
-      }
-    }
-    const overrideTo = splitEmailStringOrList(body.overrideToEmail);
-    const aggregatedSupplierTo = Array.from(new Set([
-      ...wf.party.toEmails,
-      ...perItemTo,
-      ...(dirContact?.emailToList || []),
-      ...itemDirTo
-    ]));
-    const liveTo = overrideTo.length > 0
-      ? overrideTo
-      : (aggregatedSupplierTo.length > 0 ? aggregatedSupplierTo : followUpProfileTo);
-
-    if (!isTestMode && liveTo.length === 0) {
-      skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
-      continue;
-    }
-
-    const testFollowUpRec = isTestMode
-      ? resolveTestRecipients('supplier_followup', {
-          overrideTo: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.toList ?? body.to) : overrideTo,
-          overrideCc: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.ccList ?? body.cc) : []
-        })
-      : null;
-
-    const finalTo = isTestMode ? testFollowUpRec.toList : liveTo;
-    const finalCc = isTestMode
-      ? testFollowUpRec.ccList
-      : Array.from(
-          new Set([
-            ...wf.party.ccEmails,
-            ...perItemCc,
-            ...(dirContact?.emailCcList || []),
-            ...itemDirCc,
-            ...followUpProfileTo,
-            ...followUpProfileCc,
-            ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
-          ])
-        ).filter((e) => !finalTo.includes(e));
-
-    const emailPayload = buildFollowUpEmailContent({
-      report,
-      allReports: activeRows,
-      catalogProducts,
-      workflow: wf,
-      isTestMode,
-      sandboxEmail,
-      now: nowDate
-    });
-
-    try {
-      if (!dryRun) {
-        if (transporter && finalTo.length > 0) {
-          await transporter.sendMail({
-            from: `Pingcon Marketing RMA <${gmailUser}>`,
-            to: finalTo.join(', '),
-            ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
-            subject: emailPayload.subject,
-            html: emailPayload.html,
-            text: emailPayload.text
-          });
-        }
-
+      // Check Auto-Dispose (> 10 days or > 10 simulated intervals in accelerated Test Mode) first
+      if (wf.isExpiredAfter10Days && !wf.isAutoDisposed) {
         const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
           ? report.ai_document_metadata
           : {};
@@ -570,63 +381,322 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
         const nextMeta = {
           ...existingMeta,
+          workflow_resolution: 'scrapped_no_reorder',
+          resolved_at: nowIso,
+          simple_rtv_disposition: '5- Scrap / Dispose',
           follow_up: {
             ...prevFollowUp,
-            enabled: true,
+            enabled: false,
             started_at: wf.startedAtIso,
-            last_sent_at: nowIso,
-            last_sent_pht_date: todayManila,
-            last_sent_day: wf.calendarDay,
-            sent_count: wf.sentCount + 1
+            auto_disposed_at: nowIso,
+            case_closed_at: nowIso,
+            case_status: 'auto_disposed_after_10_days'
           }
         };
 
+        const simDisposeSuffix = wf.isAcceleratedTestSla
+          ? ` [Simulated >10 Days @ ${wf.testStepIntervalSeconds}s/day]`
+          : '';
         const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
         const nextAudit = [
           ...existingAudit,
           {
             timestamp: nowIso,
-            action: 'FOLLOWUP_EMAIL_SENT',
-            stage: 'FOLLOW_UP',
-            actor: auth.actor || 'Daily Follow-Up Scheduler',
-            note: `Sent Day ${wf.calendarDay} of ${FOLLOW_UP_MAX_DAYS} follow-up to ${finalTo.join(', ')}${finalCc.length ? ` (CC: ${finalCc.join(', ')})` : ''}`
+            action: 'AUTO_DISPOSED_AFTER_10_DAYS',
+            stage: 'RESOLVED',
+            actor: auth.actor || '10-Day SLA Auto-Dispose',
+            note: `Auto-disposed on ${todayManila} after >${FOLLOW_UP_MAX_DAYS} ${wf.isAcceleratedTestSla ? 'simulated ' : 'calendar '}days (${wf.calendarDay} days elapsed without pickup)${simDisposeSuffix}`
           }
         ];
 
-        await safeUpdateRmaReport(report.id, {
+        const updatedReportPreview = {
+          ...report,
+          status: 'resolved',
+          disposition: '5- Scrap / Dispose',
+          warehouse_location: 'Disposal / Scrap Area',
           ai_document_metadata: nextMeta,
           updated_at: nowIso,
           audit_trail: nextAudit
+        };
+
+        const emailPayload = buildAutoDisposedEmailContent({
+          report: updatedReportPreview,
+          allReports: activeRows,
+          catalogProducts,
+          workflow: wf,
+          isTestMode: effectiveTestRecord,
+          sandboxEmail,
+          now: nowDate
         });
+
+        const testDisposeRec = effectiveTestRecord ? resolveTestRecipients('new_rma') : null;
+        const finalTo = effectiveTestRecord ? testDisposeRec.toList : newRmaToList;
+        const finalCc = effectiveTestRecord
+          ? testDisposeRec.ccList
+          : Array.from(new Set([...newRmaCcList, ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])]))
+              .filter((e) => !finalTo.includes(e));
+
+        try {
+          if (!dryRun) {
+            await safeUpdateRmaReport(report.id, {
+              status: 'resolved',
+              disposition: '5- Scrap / Dispose',
+              warehouse_location: 'Disposal / Scrap Area',
+              ai_document_metadata: nextMeta,
+              updated_at: nowIso,
+              audit_trail: nextAudit
+            });
+
+            try {
+              await supabase
+                .from('rma_reports')
+                .update({
+                  status: 'resolved',
+                  disposition: '5- Scrap / Dispose',
+                  warehouse_location: 'Disposal / Scrap Area'
+                })
+                .eq('parent_rma_id', report.id);
+            } catch {}
+
+            if (finalTo.length > 0 && transporter) {
+              await transporter.sendMail({
+                from: `Pingcon Marketing RMA <${gmailUser}>`,
+                to: finalTo.join(', '),
+                ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
+                subject: emailPayload.subject,
+                html: emailPayload.html,
+                text: emailPayload.text
+              });
+            }
+          }
+
+          autoDisposed.push({
+            rmaNumber,
+            supplierName: wf.party.supplierName,
+            calendarDay: wf.calendarDay,
+            isAcceleratedTestSla: wf.isAcceleratedTestSla,
+            testStepIntervalSeconds: wf.testStepIntervalSeconds,
+            to: finalTo,
+            cc: finalCc,
+            subject: emailPayload.subject,
+            dryRun
+          });
+        } catch (err) {
+          errors.push({ rmaNumber, step: 'auto_dispose', message: err?.message || 'Failed auto-dispose' });
+        }
+        continue;
       }
 
-      followUpsSent.push({
-        rmaNumber,
-        supplierName: wf.party.supplierName,
-        calendarDay: wf.calendarDay,
-        to: finalTo,
-        cc: finalCc,
-        subject: emailPayload.subject,
-        dryRun
+      if (operation === 'check_dispose_only') {
+        continue;
+      }
+
+      if (!wf.isCountdownActive || wf.calendarDay > FOLLOW_UP_MAX_DAYS) {
+        if (targetRmaNumber) {
+          skippedItems.push({
+            rmaNumber,
+            reason: !wf.followUpEnabled ? 'FOLLOW_UP_DISABLED' : 'OUTSIDE_COUNTDOWN_WINDOW'
+          });
+        }
+        continue;
+      }
+
+      // In Accelerated Test Mode, wait cleanly until simulated Day 1 arrives (unless force=true for single-item inspection)
+      if (wf.isAcceleratedTestSla && wf.calendarDay === 0 && !force) {
+        skippedItems.push({
+          rmaNumber,
+          reason: 'WAITING_FOR_SIMULATED_DAY_1',
+          nextStepInSeconds: wf.nextStepInSeconds
+        });
+        continue;
+      }
+
+      if (wf.alreadySentToday && !force) {
+        skippedItems.push({
+          rmaNumber,
+          reason: wf.isAcceleratedTestSla ? 'ALREADY_SENT_SIMULATED_STEP' : 'ALREADY_SENT_TODAY',
+          lastSentPhtDate: wf.lastSentPhtDate,
+          lastSentSimDay: wf.lastSentSimDay
+        });
+        continue;
+      }
+
+      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && directoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
+      const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
+      const itemDirTo = [];
+      const itemDirCc = [];
+      const perItemTo = [];
+      const perItemCc = [];
+      if (Array.isArray(report.items)) {
+        for (const it of report.items) {
+          splitEmailStringOrList(it?.supplier_email_to ?? it?.email_to).forEach((e) => perItemTo.push(e));
+          splitEmailStringOrList(it?.supplier_email_cc ?? it?.email_cc).forEach((e) => perItemCc.push(e));
+        }
+      }
+      for (const sup of itemSuppliers) {
+        const match = directoryMap.get(normalizeDirKey(sup));
+        if (match) {
+          match.emailToList.forEach((e) => itemDirTo.push(e));
+          match.emailCcList.forEach((e) => itemDirCc.push(e));
+        }
+      }
+      const overrideTo = splitEmailStringOrList(body.overrideToEmail);
+      const aggregatedSupplierTo = Array.from(new Set([
+        ...wf.party.toEmails,
+        ...perItemTo,
+        ...(dirContact?.emailToList || []),
+        ...itemDirTo
+      ]));
+      const liveTo = overrideTo.length > 0
+        ? overrideTo
+        : (aggregatedSupplierTo.length > 0 ? aggregatedSupplierTo : followUpProfileTo);
+
+      if (!effectiveTestRecord && liveTo.length === 0) {
+        skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
+        continue;
+      }
+
+      const testFollowUpRec = effectiveTestRecord
+        ? resolveTestRecipients('supplier_followup', {
+            overrideTo: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.toList ?? body.to) : overrideTo,
+            overrideCc: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.ccList ?? body.cc) : []
+          })
+        : null;
+
+      const finalTo = effectiveTestRecord ? testFollowUpRec.toList : liveTo;
+      const finalCc = effectiveTestRecord
+        ? testFollowUpRec.ccList
+        : Array.from(
+            new Set([
+              ...wf.party.ccEmails,
+              ...perItemCc,
+              ...(dirContact?.emailCcList || []),
+              ...itemDirCc,
+              ...followUpProfileTo,
+              ...followUpProfileCc,
+              ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
+            ])
+          ).filter((e) => !finalTo.includes(e));
+
+      const emailPayload = buildFollowUpEmailContent({
+        report,
+        allReports: activeRows,
+        catalogProducts,
+        workflow: wf,
+        isTestMode: effectiveTestRecord,
+        sandboxEmail,
+        now: nowDate
       });
-    } catch (err) {
-      errors.push({ rmaNumber, step: 'send_followup', message: err?.message || 'Failed sending follow-up' });
+
+      try {
+        if (!dryRun) {
+          if (transporter && finalTo.length > 0) {
+            await transporter.sendMail({
+              from: `Pingcon Marketing RMA <${gmailUser}>`,
+              to: finalTo.join(', '),
+              ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
+              subject: emailPayload.subject,
+              html: emailPayload.html,
+              text: emailPayload.text
+            });
+          }
+
+          const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+            ? report.ai_document_metadata
+            : {};
+          const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+            ? existingMeta.follow_up
+            : {};
+
+          const prevSimDays = Array.isArray(prevFollowUp.sent_sim_days) ? prevFollowUp.sent_sim_days : [];
+          const sameSimCfg = Number(prevFollowUp.last_sent_sim_interval_sec || 0) === wf.testStepIntervalSeconds;
+          const nextSimDays = wf.isAcceleratedTestSla
+            ? Array.from(new Set([...(sameSimCfg ? prevSimDays : []), wf.calendarDay])).slice(-15)
+            : prevSimDays;
+
+          const nextMeta = {
+            ...existingMeta,
+            follow_up: {
+              ...prevFollowUp,
+              enabled: true,
+              started_at: wf.startedAtIso,
+              last_sent_at: nowIso,
+              last_sent_pht_date: todayManila,
+              last_sent_day: wf.calendarDay,
+              ...(wf.isAcceleratedTestSla ? {
+                last_sent_sim_day: wf.calendarDay,
+                last_sent_sim_interval_sec: wf.testStepIntervalSeconds,
+                sent_sim_days: nextSimDays
+              } : {}),
+              sent_count: wf.sentCount + 1
+            }
+          };
+
+          const simNoteTag = wf.isAcceleratedTestSla
+            ? ` [Simulated @ ${wf.testStepIntervalSeconds}s/day]`
+            : '';
+          const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
+          const nextAudit = [
+            ...existingAudit,
+            {
+              timestamp: nowIso,
+              action: 'FOLLOWUP_EMAIL_SENT',
+              stage: 'FOLLOW_UP',
+              actor: auth.actor || 'Daily Follow-Up Scheduler',
+              note: `Sent Day ${wf.calendarDay} of ${FOLLOW_UP_MAX_DAYS} follow-up to ${finalTo.join(', ')}${finalCc.length ? ` (CC: ${finalCc.join(', ')})` : ''}${simNoteTag}`
+            }
+          ];
+
+          await safeUpdateRmaReport(report.id, {
+            ai_document_metadata: nextMeta,
+            updated_at: nowIso,
+            audit_trail: nextAudit
+          });
+        }
+
+        followUpsSent.push({
+          rmaNumber,
+          supplierName: wf.party.supplierName,
+          calendarDay: wf.calendarDay,
+          isAcceleratedTestSla: wf.isAcceleratedTestSla,
+          testStepIntervalSeconds: wf.testStepIntervalSeconds,
+          to: finalTo,
+          cc: finalCc,
+          subject: emailPayload.subject,
+          dryRun
+        });
+      } catch (err) {
+        errors.push({ rmaNumber, step: 'send_followup', message: err?.message || 'Failed sending follow-up' });
+      }
     }
+
+    return candidates.length;
+  };
+
+  let candidatesScanned = 0;
+  if (runLiveLane) {
+    candidatesScanned += await executeFollowUpLane(false);
+  }
+  if (runTestLane) {
+    candidatesScanned += await executeFollowUpLane(true);
   }
 
   return res.status(200).json({
     success: errors.length === 0,
     dryRun,
     skipped: false,
+    ...(liveSkipReason ? { liveSkipped: true, liveSkipReason } : {}),
     operation,
     phtDate: todayManila,
     phtTime: currentHhmm,
     targetTimePht,
-    isTestMode,
+    isTestMode: Boolean(isTestMode || (runTestLane && !runLiveLane)),
+    testStepIntervalSeconds,
+    testAutoCronEnabled,
     sandboxEmail,
     caller: auth.actor,
     summary: {
-      scanned: candidates.length,
+      scanned: candidatesScanned,
       followUpsSent: followUpsSent.length,
       autoDisposed: autoDisposed.length,
       skippedCount: skippedItems.length,

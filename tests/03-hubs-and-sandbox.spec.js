@@ -11,6 +11,7 @@ import {
   assertValidXlsxFile,
   seedTestModeRma,
   gotoAdmin,
+  navigateAdminSidebar,
   cleanupTestRecords
 } from './helpers/testUtils.js';
 
@@ -108,19 +109,19 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       // =========================================================================
       // PART A: LIVE CUSTOMER RMA HUB
       // =========================================================================
-      await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      await navigateAdminSidebar(page, 'customer_reports');
       await expect(page.getByRole('button', { name: /Full Audit Log/i })).toBeVisible();
       await assertZeroDeprecatedWidgets(page, 'Live Customer Hub');
 
       await page.getByRole('button', { name: /Ready to Restock/i }).click();
       await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
       await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
-      await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
+      await page.getByRole('button', { name: /Clear (?:Queue )?Filter/i }).click();
 
       await page.getByRole('button', { name: 'Cards', exact: true }).click();
       await page.getByRole('button', { name: /Rows List/i }).click();
 
-      // Full Audit Log (RMAReportsModal) -> Cards View, Rows List, Reset, Export Excel (.xlsx), Close
+      // Full Audit Log -> Embedded Native Page -> Cards View, Rows List, Export Excel (.xlsx), return to Customer Hub
       await page.getByRole('button', { name: /Full Audit Log/i }).click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeVisible();
       await page.getByRole('button', { name: /Cards View/i }).click();
@@ -130,11 +131,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         page.locator('button[title="Export filtered reports to Excel (.xlsx)"]').click()
       ]);
       assertValidXlsxFile(liveAuditXlsx, await liveAuditXlsx.path());
-      await page
-        .locator('div:has(> button[title="Export filtered reports to Excel (.xlsx)"]) > button')
-        .last()
-        .click();
-      await expect(page.getByText(/Logged RMA Return Reports/i)).toBeHidden();
+      await navigateAdminSidebar(page, 'customer_reports');
 
       // Overall RMA Matrix (.xlsx)
       await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).click();
@@ -185,14 +182,14 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       // =========================================================================
       // PART B: LIVE SUPPLIER HUB (RTV CLAIMS) — NO DEPRECATED WIDGETS
       // =========================================================================
-      await page.getByRole('button', { name: /Supplier Hub \(RTV Claims\)/i }).click();
+      await navigateAdminSidebar(page, 'supplier_claims');
       await expect(page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i })).toBeVisible();
       await assertZeroDeprecatedWidgets(page, 'Live Supplier RTV Hub');
 
       await page.getByRole('button', { name: /Ready to Restock/i }).click();
       await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
       await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
-      await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
+      await page.getByRole('button', { name: /Clear (?:Queue )?Filter/i }).click();
 
       const suppSelects = page.locator('select');
       for (let i = 0; i < (await suppSelects.count()); i++) {
@@ -244,7 +241,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       // =========================================================================
       // PART C: TEST MODE SANDBOX (cURL, Manifest Drawer, Lightbox Next/Prev, WMS Confirm & Reset, Archive)
       // =========================================================================
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await assertZeroDeprecatedWidgets(page, 'Test Mode Sandbox');
 
       const showCurlBtn = page.getByRole('button', { name: /Show cURL Guide/i });
@@ -386,7 +383,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       // =========================================================================
       // PART D: ARCHIVE VAULT RESTORE -> 30-DAY TRASH BIN -> PERMANENT DELETE
       // =========================================================================
-      await page.getByRole('button', { name: /Archive & Trash/i }).click();
+      await navigateAdminSidebar(page, 'archive_trash');
       await page.getByRole('button', { name: /Archive Vault/i }).click();
       await page.getByRole('button', { name: /Live Production/i }).click();
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).last().click();
@@ -401,7 +398,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       }
 
       // Move both restored records to 30-Day Trash & permanently destroy
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(seededManifestRma);
       const restoredCustRow = page.locator('tr', { hasText: seededManifestRma }).first();
@@ -434,8 +431,8 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
       await expect(restoredSuppRow).toBeHidden({ timeout: 15_000 });
 
-      await page.getByRole('button', { name: /Archive & Trash/i }).click();
-      await page.getByRole('button', { name: /Trash Bin/i }).click();
+      await navigateAdminSidebar(page, 'archive_trash');
+      await page.getByRole('button', { name: /Trash Bin — 30-Day/i }).click();
       await expect(page.getByRole('button', { name: /Empty Trash/i })).toBeVisible();
 
       const onConfirmDialog = async (dialog) => {

@@ -20,6 +20,7 @@ import {
   DEFAULT_FOLLOWUP_CONFIG,
   DEFAULT_MATRIX_SEND_TIME_PHT,
   normalizeSandboxEmail,
+  normalizeTestStepIntervalSeconds,
   normalizeTimeHhmm,
   computeFourStepWorkflow,
   renderWorkflowStepsHtml
@@ -111,9 +112,11 @@ function getDefaultMatrixDates(rollingDays = 14) {
   };
 }
 
+export const SETTINGS_SYNC_EVENT = 'rma-settings-changed';
+
 function broadcastSettingsSync(payload = {}) {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('rma-settings-changed', { detail: payload }));
+  window.dispatchEvent(new CustomEvent(SETTINGS_SYNC_EVENT, { detail: payload }));
   window.dispatchEvent(new Event('storage'));
   try {
     if (window.BroadcastChannel) {
@@ -666,7 +669,7 @@ export const notificationService = {
   },
 
   /**
-   * Read 10-Calendar-Day Pickup Follow-Up schedule & Customer Hub default toggle
+   * Read 10-Calendar-Day Pickup Follow-Up schedule, Customer Hub default toggle & isolated Test Mode SLA speed
    */
   getDailyFollowUpConfig() {
     let saved = null;
@@ -681,7 +684,9 @@ export const notificationService = {
       autoSendTimePht: normalizeTimeHhmm(saved?.autoSendTimePht, DEFAULT_FOLLOWUP_CONFIG.autoSendTimePht),
       customerFollowUpDefaultEnabled: Number(saved?.defaultPolicyVersion || 0) >= 2
         ? (saved?.customerFollowUpDefaultEnabled !== undefined ? Boolean(saved.customerFollowUpDefaultEnabled) : true)
-        : true
+        : true,
+      testStepIntervalSeconds: normalizeTestStepIntervalSeconds(saved?.testStepIntervalSeconds ?? DEFAULT_FOLLOWUP_CONFIG.testStepIntervalSeconds),
+      testAutoCronEnabled: Boolean(saved?.testAutoCronEnabled)
     };
   },
 
@@ -694,6 +699,12 @@ export const notificationService = {
       customerFollowUpDefaultEnabled: cfg.customerFollowUpDefaultEnabled !== undefined
         ? Boolean(cfg.customerFollowUpDefaultEnabled)
         : prev.customerFollowUpDefaultEnabled !== false,
+      testStepIntervalSeconds: normalizeTestStepIntervalSeconds(
+        cfg.testStepIntervalSeconds !== undefined ? cfg.testStepIntervalSeconds : prev.testStepIntervalSeconds
+      ),
+      testAutoCronEnabled: cfg.testAutoCronEnabled !== undefined
+        ? Boolean(cfg.testAutoCronEnabled)
+        : Boolean(prev.testAutoCronEnabled),
       updatedAt: new Date().toISOString()
     };
     if (typeof window !== 'undefined') {

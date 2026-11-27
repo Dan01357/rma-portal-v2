@@ -44,7 +44,7 @@ const PRESET_EXPIRIES = [
   { label: '7 Days (1 Week)', num: 7, unit: 'days' }
 ];
 
-export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }) {
+export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser, isEmbeddedPage = false }) {
   const [invites, setInvites] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -85,14 +85,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   });
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen || isEmbeddedPage) {
       loadInvites();
       setGeneratedInvite(null);
       setErrorMessage(null);
       const prof = notificationService.getEmailProfile('invite_email', Boolean(inviteIsTestMode));
       setInviteExtraRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
     }
-  }, [isOpen, inviteIsTestMode]);
+  }, [isOpen, isEmbeddedPage, inviteIsTestMode]);
 
   const loadInvites = async () => {
     const reqId = ++loadSeqRef.current;
@@ -128,7 +128,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     else if (unit.startsWith('day')) ms = num * 24 * 3600 * 1000;
 
     const expDate = new Date(Date.now() + ms);
-    return `Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(expDate)}`;
+    return `Expires: ${formatDateTimeYmdHm(expDate)}`;
   }, [expiryNumber, expiryUnit, noExpiry]);
 
   const handleGenerate = async (e) => {
@@ -314,11 +314,17 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     return invites.filter(i => i.stream_type === 'supplier_outbound').length;
   }, [invites]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !isEmbeddedPage) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div className={isEmbeddedPage
+      ? 'w-full'
+      : 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in'
+    }>
+      <div className={isEmbeddedPage
+        ? 'bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 w-full flex flex-col overflow-hidden'
+        : 'bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden'
+      }>
         
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
@@ -340,17 +346,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!isEmbeddedPage && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close Generate RMA Invites Modal"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Modal Scroll Body */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+        <div className={isEmbeddedPage ? 'p-5 sm:p-6 space-y-6' : 'flex-1 overflow-y-auto p-5 sm:p-6 space-y-6'}>
 
           {/* Toast Notification */}
           {toastMessage && (
@@ -742,7 +751,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 }`}>
                   {isPermanentInvite(generatedInvite)
                     ? 'Validity: No Expiry • Revocable by Admin'
-                    : `Validity: ${generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(generatedInvite.expires_at)}`}
+                    : `Validity: ${generatedInvite.duration_display || 'Custom'} • Expires: ${formatDateTimeYmdHm(generatedInvite.expires_at)}`}
                 </span>
               </div>
 
@@ -1041,18 +1050,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-900">
-          <span className="text-[11px] text-slate-400">
-            Pingcon Operations • Customer Return & Supplier RTV Governance
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-          >
-            Close
-          </button>
-        </div>
+        {!isEmbeddedPage && (
+          <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-900">
+            <span className="text-[11px] text-slate-400">
+              Pingcon Operations • Customer Return & Supplier RTV Governance
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

@@ -494,40 +494,32 @@ export default function CreditMemosTab({
               {/* Custom Date Range Filter */}
               <div className="grid grid-cols-2 gap-1 w-full sm:w-auto min-w-0">
                 <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From (YYYY-MM-DD)</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From Date</span>
                   <input
                     type="date"
+                    aria-label="Credit Memos From Date"
                     value={dateFrom}
                     onChange={(e) => {
                       setDateFrom(e.target.value);
                       setCurrentPage(1);
                     }}
                     className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                    title="Filter credit memos from date (YYYY-MM-DD)"
+                    title="Filter credit memos from date"
                   />
-                  {dateFrom && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
-                      ISO (YYYY-MM-DD): {dateFrom}
-                    </span>
-                  )}
                 </div>
                 <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To (YYYY-MM-DD)</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To Date</span>
                   <input
                     type="date"
+                    aria-label="Credit Memos To Date"
                     value={dateTo}
                     onChange={(e) => {
                       setDateTo(e.target.value);
                       setCurrentPage(1);
                     }}
                     className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                    title="Filter credit memos to date (YYYY-MM-DD)"
+                    title="Filter credit memos to date"
                   />
-                  {dateTo && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
-                      ISO (YYYY-MM-DD): {dateTo}
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -638,7 +630,7 @@ export default function CreditMemosTab({
                   <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
 
                     {/* Header Select All Checkbox */}
-                    <th className="py-3 px-3 text-center w-10">
+                    <th className="py-3 px-2.5 text-center w-9">
                       <input
                         type="checkbox"
                         checked={isAllPageSelected}
@@ -648,16 +640,16 @@ export default function CreditMemosTab({
                       />
                     </th>
 
-                    <th className="py-3 px-3 w-14 font-black text-slate-900 dark:text-white">
+                    <th className="py-3 px-2 w-12 font-black text-slate-900 dark:text-white">
                       SN
                     </th>
 
                     <th
                       onClick={() => handleSort('credit_memo_number')}
-                      className="py-3 px-3 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors whitespace-nowrap"
                     >
                       <div className="flex items-center gap-1">
-                        <span>CM # / Date (YYYY-MM-DD)</span>
+                        <span>CM # &amp; Issued</span>
                         {sortField === 'credit_memo_number' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -665,10 +657,10 @@ export default function CreditMemosTab({
                     </th>
                     <th
                       onClick={() => handleSort('rma_number')}
-                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        <span>RMA & Supplier</span>
+                        <span>RMA &amp; Supplier</span>
                         {sortField === 'rma_number' || sortField === 'supplier_name' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -676,10 +668,10 @@ export default function CreditMemosTab({
                     </th>
                     <th
                       onClick={() => handleSort('product_name')}
-                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        <span>Product & Barcode</span>
+                        <span>Product &amp; Barcode</span>
                         {sortField === 'product_name' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -687,32 +679,21 @@ export default function CreditMemosTab({
                     </th>
                     <th
                       onClick={() => handleSort('quantity')}
-                      className="py-3 px-3 font-bold text-center cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2 font-bold text-center cursor-pointer select-none hover:text-emerald-600 transition-colors whitespace-nowrap"
                     >
                       <div className="flex items-center justify-center gap-1">
-                        <span>Quantity</span>
+                        <span>Qty</span>
                         {sortField === 'quantity' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
                     <th
-                      onClick={() => handleSort('gross_amount')}
-                      className="py-3 px-3 text-right font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        <span>Gross Amount</span>
-                        {sortField === 'gross_amount' ? (
-                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
-                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
-                      </div>
-                    </th>
-                    <th
                       onClick={() => handleSort('pull_out_ref')}
-                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        <span>Pull Out Reference</span>
+                        <span>Pull-Out Ref</span>
                         {sortField === 'pull_out_ref' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -720,10 +701,10 @@ export default function CreditMemosTab({
                     </th>
                     <th
                       onClick={() => handleSort('credit_amount')}
-                      className="py-3 px-3.5 font-black text-right cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-black text-right cursor-pointer select-none hover:text-emerald-600 transition-colors whitespace-nowrap"
                     >
                       <div className="flex items-center justify-end gap-1">
-                        <span>Credit Amount (₱)</span>
+                        <span>Credit (₱)</span>
                         {sortField === 'credit_amount' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -731,16 +712,16 @@ export default function CreditMemosTab({
                     </th>
                     <th
                       onClick={() => handleSort('credit_issued_by')}
-                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-2.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        <span>Credit Issued By</span>
+                        <span>Issued By</span>
                         {sortField === 'credit_issued_by' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th className="py-3 px-3 text-center font-bold">Actions</th>
+                    <th className="py-3 px-2.5 text-center font-bold whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
@@ -752,7 +733,7 @@ export default function CreditMemosTab({
                         className={`transition-colors ${isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'}`}
                       >
                         {/* Checkbox */}
-                        <td className="py-3 px-3 text-center w-10">
+                        <td className="py-2.5 px-2.5 text-center w-9">
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -762,36 +743,30 @@ export default function CreditMemosTab({
                         </td>
 
                         {/* SN */}
-                        <td className="py-3 px-3 font-mono">
-                          <span className="font-black text-emerald-900 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-lg text-xs">
+                        <td className="py-2.5 px-2 font-mono whitespace-nowrap">
+                          <span className="font-black text-emerald-900 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 rounded-lg text-[11px]">
                             #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                         </td>
 
                         {/* CM # */}
-                        <td className="py-3 px-3">
+                        <td className="py-2.5 px-2.5 whitespace-nowrap">
                           <button
                             type="button"
                             onClick={() => onViewVoucher(memo)}
-                            className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
                             title="Click to view official printable voucher"
                           >
                             <Receipt className="w-3.5 h-3.5 shrink-0" />
                             <span>{memo.credit_memo_number}</span>
                           </button>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                              {memo.credit_issued_at ? formatDateYmd(memo.credit_issued_at) : ''}
-                            </span>
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded-full" title="Stored in Supabase database">
-                              <Database className="w-2.5 h-2.5" />
-                              <span>DB</span>
-                            </span>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
+                            {memo.credit_issued_at ? formatDateYmd(memo.credit_issued_at) : '—'}
                           </div>
                         </td>
 
                         {/* RMA # */}
-                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs max-w-[210px]">
+                        <td className="py-2.5 px-2.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs max-w-[185px]">
                           {(() => {
                             const cmRmas = getCreditMemoRmaNumbers(memo);
                             const cmItems = getCreditMemoConsolidatedItems(memo);
@@ -804,14 +779,14 @@ export default function CreditMemosTab({
                                 </div>
                                 {isMulti && (
                                   <span
-                                    className="mt-1 px-1.5 py-0.5 rounded text-[9.5px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5"
+                                    className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 whitespace-nowrap"
                                     title={`Consolidated RMA Tickets: ${cmRmas.join(', ')}`}
                                   >
                                     🔗 Consolidated ({count} RMAs)
                                   </span>
                                 )}
-                                <div className="text-[10px] text-slate-400 font-sans mt-0.5">
-                                  Supplier: {memo.supplier_name || 'Savemore'}
+                                <div className="text-[10px] text-slate-500 font-sans mt-0.5 truncate">
+                                  {memo.supplier_name || 'Savemore'}
                                 </div>
                               </>
                             );
@@ -819,53 +794,57 @@ export default function CreditMemosTab({
                         </td>
 
                         {/* Product Name & Barcode */}
-                        <td className="py-3 px-3.5 max-w-[200px]">
+                        <td className="py-2.5 px-2.5 max-w-[175px]">
                           <div className="font-bold text-slate-900 dark:text-white truncate" title={memo.product_name}>
                             {memo.product_name}
                           </div>
-                          <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                            {memo.barcode} {memo.sku ? `• SKU: ${memo.sku}` : ''}
+                          <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                            {memo.barcode} {memo.sku ? `• ${memo.sku}` : ''}
                           </div>
                         </td>
 
                         {/* Quantity */}
-                        <td className="py-3 px-3 text-center font-bold font-mono text-slate-900 dark:text-white">
+                        <td className="py-2.5 px-2 text-center font-bold font-mono text-slate-900 dark:text-white whitespace-nowrap">
                           {memo.quantity} {memo.unit_name || 'pc'}
                         </td>
 
-                        {/* Gross Amount (Strict 2 Decimals) */}
-                        <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                          ₱{Number(memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-
                         {/* Pull Out Reference */}
-                        <td className="py-3 px-3.5 max-w-[180px]">
+                        <td className="py-2.5 px-2.5 max-w-[140px]">
                           <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={memo.pull_out_ref}>
                             {memo.pull_out_ref || 'Warehouse Pull-Out'}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            Date: {memo.pull_out_date || 'N/A'}
+                          <div className="text-[10px] text-slate-400 font-mono whitespace-nowrap">
+                            {memo.pull_out_date || 'N/A'}
                           </div>
                         </td>
 
-                        {/* Credit Amount (₱) (Strict 2 Decimals) */}
-                        <td className="py-3 px-3.5 text-right font-black font-mono text-emerald-700 dark:text-emerald-400 text-sm">
-                          ₱{Number(memo.credit_amount || memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {/* Credit Amount (₱) & Gross Rate */}
+                        <td className="py-2.5 px-2.5 text-right whitespace-nowrap">
+                          <div className="font-black font-mono text-emerald-700 dark:text-emerald-400 text-xs">
+                            ₱{Number(memo.credit_amount || memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          {Number(memo.amount || 0) > 0 && (
+                            <div className="text-[10px] font-mono text-slate-400">
+                              Gross: ₱{Number(memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
                         </td>
 
                         {/* Credit Issued By */}
-                        <td className="py-3 px-3.5">
-                          <div className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[140px]" title={memo.credit_issued_by}>
+                        <td className="py-2.5 px-2.5 max-w-[120px]">
+                          <div className="font-bold text-slate-900 dark:text-white text-[11px] truncate" title={memo.credit_issued_by}>
                             {memo.credit_issued_by || 'Finance'}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
-                            {memo.credit_issued_by_email || ''}
-                          </div>
+                          {memo.credit_issued_by_email && (
+                            <div className="text-[9.5px] text-slate-400 font-mono truncate" title={memo.credit_issued_by_email}>
+                              {memo.credit_issued_by_email}
+                            </div>
+                          )}
                         </td>
 
                         {/* Actions */}
-                        <td className="py-3 px-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
+                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                          <div className="inline-flex items-center justify-center gap-1">
                             <button
                               type="button"
                               onClick={() => onViewVoucher(memo)}

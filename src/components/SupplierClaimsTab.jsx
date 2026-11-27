@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
-import { notificationService } from '../services/notificationService';
+import { notificationService, SETTINGS_SYNC_EVENT } from '../services/notificationService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierFollowUpModal from './SupplierFollowUpModal';
@@ -98,6 +98,17 @@ export default function SupplierClaimsTab({
   const [followUpModalReport, setFollowUpModalReport] = useState(null);
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
+  const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+
+  useEffect(() => {
+    const syncCfg = () => setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+    window.addEventListener(SETTINGS_SYNC_EVENT, syncCfg);
+    window.addEventListener('storage', syncCfg);
+    return () => {
+      window.removeEventListener(SETTINGS_SYNC_EVENT, syncCfg);
+      window.removeEventListener('storage', syncCfg);
+    };
+  }, []);
 
   const handleMarkReordered = async (report, nextStatus = 'reordered') => {
     if (!report || updatingQueueId) return;
@@ -1103,40 +1114,35 @@ export default function SupplierClaimsTab({
                   </th>
 
                   {/* SN Column */}
-                  <th className="p-3 w-14 font-black text-slate-900 dark:text-white">
+                  <th className="py-2.5 px-2 w-11 font-black text-slate-900 dark:text-white">
                     SN
                   </th>
 
                   {/* Photo Column */}
-                  <th className="p-3 text-center w-12" title="Proof Photo">
+                  <th className="py-2.5 px-2 text-center w-11" title="Proof Photo">
                     <ImageIcon className="w-4 h-4 mx-auto text-slate-400" />
                   </th>
 
-                  {/* RMA Identifier */}
+                  {/* RMA Identifier & Quick QR */}
                   <th 
                     onClick={() => handleSort('rma_number')}
-                    className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2.5 px-2.5 cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                   >
                     <div className="flex items-center gap-1">
-                      <span>RMA Identifier / Date (YYYY-MM-DD)</span>
+                      <span>RMA # &amp; Date</span>
                       {sortField === 'rma_number' || sortField === 'created_at' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
 
-                  {/* Quick-View Box QR Code */}
-                  <th className="p-3 text-center w-14 font-bold" title="Quick-View Box QR Sticker">
-                    <span>QR</span>
-                  </th>
-
                   {/* Vendor / Supplier */}
                   <th 
                     onClick={() => handleSort('supplier_name')}
-                    className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
                     <div className="flex items-center gap-1">
-                      <span>Vendor / Supplier</span>
+                      <span>Vendor &amp; Bin</span>
                       {sortField === 'supplier_name' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
@@ -1146,60 +1152,52 @@ export default function SupplierClaimsTab({
                   {/* Product Description & SKU */}
                   <th 
                     onClick={() => handleSort('name')}
-                    className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
                     <div className="flex items-center gap-1">
-                      <span>Product Description & SKU</span>
+                      <span>Product &amp; SKU</span>
                       {sortField === 'name' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
 
-                  {/* Triage Disposition */}
+                  {/* Disposition & 10-Day SLA */}
                   <th 
                     onClick={() => handleSort('disposition')}
-                    className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
                     <div className="flex items-center gap-1">
-                      <span>Triage Disposition</span>
+                      <span>Disposition &amp; SLA</span>
                       {sortField === 'disposition' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
 
+                  {/* Defect Reason & Reporter Notes */}
+                  <th className="py-2 px-1.5 font-bold">
+                    Defect &amp; Notes
+                  </th>
+
                   {/* Qty & Unit */}
                   <th 
                     onClick={() => handleSort('quantity')}
-                    className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1.5 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                     title="Click to sort by Quantity and Unit"
                   >
                     <div className="flex items-center justify-end gap-1">
-                      <span>Qty &amp; Unit</span>
+                      <span>Qty</span>
                       {sortField === 'quantity' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
 
-                  {/* Unit Price */}
-                  <th 
-                    onClick={() => handleSort('price')}
-                    className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>Unit Price</span>
-                      {sortField === 'price' ? (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
-                      ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
-                    </div>
-                  </th>
-
-                  {/* Total Claim */}
+                  {/* Total Claim & Unit Price */}
                   <th 
                     onClick={() => handleSort('total')}
-                    className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1.5 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>Total Claim</span>
@@ -1210,7 +1208,7 @@ export default function SupplierClaimsTab({
                   </th>
 
                   {/* Actions Column */}
-                  <th className="p-3 text-center font-bold">
+                  <th className="py-2 px-1.5 text-center font-bold whitespace-nowrap">
                     Actions
                   </th>
                 </tr>
@@ -1223,7 +1221,10 @@ export default function SupplierClaimsTab({
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
                   const outcome = formatFourChoiceOutcome(r);
-                  const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList);
+                  const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList, {
+                    customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+                    testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
+                  });
                   const wf = statusInfo.workflow;
                   const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
@@ -1244,7 +1245,7 @@ export default function SupplierClaimsTab({
                         }`}
                       >
                         {/* Checkbox */}
-                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2.5 px-2 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -1254,14 +1255,14 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* SN Column */}
-                        <td className="p-3 font-mono">
-                          <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-lg text-xs">
+                        <td className="py-2.5 px-2 font-mono whitespace-nowrap">
+                          <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-lg text-[11px]">
                             #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                         </td>
 
                         {/* Photo Thumbnail */}
-                        <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           {photos.length > 0 ? (
                             <button
                               type="button"
@@ -1287,13 +1288,34 @@ export default function SupplierClaimsTab({
                           )}
                         </td>
 
-                        {/* RMA Identifier */}
-                        <td className="p-3">
-                          <div className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
-                            {r.rma_number}
+                        {/* RMA Identifier & Inline Quick QR Button */}
+                        <td className="py-2.5 px-2.5">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <span className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
+                              {r.rma_number}
+                            </span>
+                            {onViewQR && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onViewQR({
+                                    ...r,
+                                    name: res.name,
+                                    supplier_name: res.supplier,
+                                    code: res.code || r.code,
+                                    price: res.price || r.price
+                                  });
+                                }}
+                                className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/60 rounded-md transition-colors cursor-pointer shrink-0"
+                                title={`Quick-View & Print Box QR Sticker for ${r.rma_number}`}
+                              >
+                                <QrCode className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
-                            <span>{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
+                            <span className="whitespace-nowrap">{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
                             {(() => {
                               const mapUrl = getGpsMapUrl(r);
                               const gpsAddr = getGpsAddressDisplay(r);
@@ -1303,7 +1325,7 @@ export default function SupplierClaimsTab({
                                   target="_blank"
                                   rel="noreferrer"
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold max-w-[160px]"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold max-w-[125px]"
                                   title={gpsAddr || 'View GPS Location on Google Maps'}
                                 >
                                   <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
@@ -1338,7 +1360,7 @@ export default function SupplierClaimsTab({
                           )}
                           {r.is_unpacked_manifest_item && (
                             <div className="mt-1">
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-0.5 shadow-2xs">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-0.5 shadow-2xs whitespace-nowrap">
                                 <span>📦 Manifest Line #{(r.manifest_line_index || 0) + 1}{r.manifest_total_lines ? ` of ${r.manifest_total_lines}` : ''}</span>
                               </span>
                             </div>
@@ -1351,7 +1373,7 @@ export default function SupplierClaimsTab({
                                   e.stopPropagation();
                                   toggleManifestExpand(manifestKey);
                                 }}
-                                className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${
+                                className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer whitespace-nowrap ${
                                   isManifestExpanded
                                     ? 'bg-purple-600 text-white border border-purple-700'
                                     : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
@@ -1392,39 +1414,17 @@ export default function SupplierClaimsTab({
                           })()}
                         </td>
 
-                        {/* Quick-View RMA Box QR Code Button */}
-                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                          {onViewQR ? (
-                            <button
-                              type="button"
-                              onClick={() => onViewQR({
-                                ...r,
-                                name: res.name,
-                                supplier_name: res.supplier,
-                                code: res.code || r.code,
-                                price: res.price || r.price
-                              })}
-                              className="p-1.5 text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/60 rounded-lg border border-transparent hover:border-amber-200 dark:hover:border-amber-800 transition-colors cursor-pointer inline-flex items-center justify-center"
-                              title={`Quick-View & Print Box QR Sticker for ${r.rma_number}`}
-                            >
-                              <QrCode className="w-4 h-4" />
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-slate-300 dark:text-slate-600">—</span>
-                          )}
-                        </td>
-
                         {/* Vendor / Supplier & Warehouse Bin */}
-                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`font-bold ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                        <td className="py-2 px-1.5 max-w-[130px]" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={`font-bold truncate max-w-[118px] ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`} title={res.supplier}>
                               {res.supplier}
                             </span>
                             {(isPlaceholderSupplier(res.supplier) || wf.party.toEmails.length === 0) ? (
                               <button
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
-                                className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[10px] font-black cursor-pointer whitespace-nowrap"
+                                className="px-1.5 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-black cursor-pointer whitespace-nowrap"
                                 title="Set Supplier Name and Follow-Up Emails (TO/CC)"
                               >
                                 + Set Supplier &amp; Email
@@ -1433,55 +1433,54 @@ export default function SupplierClaimsTab({
                               <button
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
-                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9.5px] font-mono cursor-pointer truncate max-w-[155px]"
-                                title="Edit Supplier Name and Follow-Up Emails (TO/CC)"
+                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-mono cursor-pointer truncate max-w-[120px]"
+                                title={`Edit Supplier Email (${wf.party.toEmails[0]})`}
                               >
                                 📧 {wf.party.toEmails[0]}
                               </button>
                             )}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                            Bin: <strong className="text-slate-600 dark:text-slate-300">{normalizeWarehouseLocation(r.warehouse_location, r)}</strong>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate" title={normalizeWarehouseLocation(r.warehouse_location, r)}>
+                            <span className="text-slate-600 dark:text-slate-300 font-semibold">{normalizeWarehouseLocation(r.warehouse_location, r)}</span>
                             {r.batch_lot_number && (
                               <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
                             )}
                           </div>
                         </td>
 
-                        {/* Product Description & SKU */}
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={res.name}>
+                        {/* Product Description & SKU (Clean: No duplicate Qty info) */}
+                        <td className="py-2 px-1.5 max-w-[150px]">
+                          <div className="font-bold text-slate-900 dark:text-white truncate" title={res.name}>
                             {res.name}
                           </div>
                           <div className="text-[10px] font-mono text-slate-400 mt-0.5">
                             {isManifest ? (
-                              <span className="inline-flex items-center gap-1.5 flex-wrap">
-                                <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
-                                  📦 Manifest Items
-                                </span>
-                                <span className="text-slate-600 dark:text-slate-300 font-bold">
-                                  {formatManifestBreakdown(manifestChildren, true)}
+                              <span className="inline-flex items-center gap-1 flex-wrap">
+                                <span className="px-1.5 py-0.2 rounded bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[9.5px] border border-purple-200 dark:border-purple-800">
+                                  📦 Manifest ({manifestChildren.length})
                                 </span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 flex-wrap">
-                                <span>Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • </span>
+                              <div className="flex flex-col gap-0.5">
+                                <span>
+                                  SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong>
+                                </span>
                                 {(isUnlabeledBarcode(r.barcode) || r.ai_document_metadata?.is_unlabeled) ? (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold text-[9px] border border-amber-300 dark:border-amber-700">
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold text-[9px] border border-amber-300 dark:border-amber-700 w-fit">
                                     🏷️ Missing Barcode
                                   </span>
                                 ) : (
-                                  <span>BC: {r.barcode}</span>
+                                  <span className="truncate">BC: {r.barcode}</span>
                                 )}
-                              </span>
+                              </div>
                             )}
                           </div>
                         </td>
 
-                        {/* Single Clean Triage Status Badge + Reorder Status Pill + Reporter Explanation */}
-                        <td className="p-3 max-w-[240px]">
+                        {/* Disposition, Reorder Status & SLA Countdown */}
+                        <td className="py-2 px-1.5 max-w-[138px]">
                           <div className="space-y-1">
-                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
                             {(() => {
@@ -1489,7 +1488,7 @@ export default function SupplierClaimsTab({
                               return (
                                 <div>
                                   <span
-                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
                                     title={reorderInfo.isReordered
                                       ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
                                       : 'Replacement PO not yet ordered'}
@@ -1506,14 +1505,23 @@ export default function SupplierClaimsTab({
                               </div>
                             )}
                             {outcome.choiceKey === 'scrap' && (
-                              <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                {getItemNeedsReorder(r) ? '🛒 Re-Order Needed: YES' : '❌ No Re-Order'}
+                              <div className="text-[9.5px] font-bold text-slate-600 dark:text-slate-300">
+                                {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
                               </div>
                             )}
+                          </div>
+                        </td>
+
+                        {/* Dedicated Defect Reason & Reporter Note Column */}
+                        <td className="py-2 px-1.5 max-w-[125px]">
+                          <div className="space-y-1">
                             {r.reason && (
-                              <div className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold truncate max-w-[175px]" title={r.reason}>
+                              <span
+                                className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9.5px] font-bold inline-block truncate max-w-[118px]"
+                                title={r.reason}
+                              >
                                 {r.reason}
-                              </div>
+                              </span>
                             )}
                             {(() => {
                               const rawNote = String(
@@ -1525,7 +1533,7 @@ export default function SupplierClaimsTab({
                               const cleanNote = cleanExplanationText(rawNote);
                               if (!cleanNote) return null;
                               return (
-                                <div className="flex items-center gap-1 max-w-[175px]" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-1 max-w-[118px]" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={() => onViewExplanation && onViewExplanation({
@@ -1538,8 +1546,8 @@ export default function SupplierClaimsTab({
                                     className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-amber-950/60 border border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors cursor-pointer max-w-full"
                                     title="Click to read full reporter explanation"
                                   >
-                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[120px]">
-                                      "{cleanNote}"
+                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[72px]">
+                                      &ldquo;{cleanNote}&rdquo;
                                     </span>
                                     <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 shrink-0 group-hover:underline">
                                       Read
@@ -1552,8 +1560,8 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Qty & Unit */}
-                        <td className="p-3 text-right whitespace-nowrap font-mono">
-                          <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-mono">
+                          <span className="px-1.5 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
                             <span>
                               {isManifest
                                 ? formatManifestBreakdown(manifestChildren, false)
@@ -1562,26 +1570,20 @@ export default function SupplierClaimsTab({
                           </span>
                         </td>
 
-                        {/* Unit Price */}
-                        <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                          {isManifest ? (
-                            <span className="text-slate-400 italic text-[11px]">—</span>
-                          ) : (
-                            <span className={res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
-                              ₱{res.price.toFixed(2)}
-                            </span>
+                        {/* Total Claim + Subtle Unit Price */}
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-mono">
+                          <div className={`font-black text-amber-700 dark:text-amber-400 ${res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                            ₱{res.total.toFixed(2)}
+                          </div>
+                          {!isManifest && (
+                            <div className={`text-[10px] ${res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-400'}`}>
+                              @ ₱{res.price.toFixed(2)}
+                            </div>
                           )}
                         </td>
 
-                        {/* Total Claim */}
-                        <td className="p-3 text-right font-mono font-black text-amber-700 dark:text-amber-400">
-                          <span className={res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}>
-                            ₱{res.total.toFixed(2)}
-                          </span>
-                        </td>
-
                         {/* Actions Column: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Coworker Queue, Archive, Delete */}
-                        <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
 
                             {/* 1. Simple 4-Choice Supplier RTV & Pickup Verification Wizard */}
@@ -1782,7 +1784,7 @@ export default function SupplierClaimsTab({
                       {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
                       {isManifest && isManifestExpanded && (
                         <tr className="bg-amber-50/40 dark:bg-slate-900/90 border-y-2 border-amber-200 dark:border-amber-900/60">
-                          <td colSpan={12} className="p-3 sm:p-4">
+                          <td colSpan={11} className="p-3 sm:p-4">
                             <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm overflow-hidden">
                               {/* Manifest Header */}
                               <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border-b border-amber-200/80 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2">

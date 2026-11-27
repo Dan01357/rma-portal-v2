@@ -62,8 +62,12 @@ import {
   Clock,
   Archive,
   FileSpreadsheet,
-  FileCheck2
+  FileCheck2,
+  Menu
 } from 'lucide-react';
+import AdminSidebar from './components/AdminSidebar';
+import CreditMemosTab from './components/CreditMemosTab';
+import SupplierDirectoryModal from './components/SupplierDirectoryModal';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { downloadCustomSizedStickerPng } from './utils/customStickerCanvas';
 import { catalogService } from './services/catalogService';
@@ -102,7 +106,7 @@ import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import SupplierInput from './components/SupplierInput';
 import CameraCaptureModal from './components/CameraCaptureModal';
 import { stampWatermarkOnFiles } from './utils/cameraWatermark';
-import { getGpsAddressDisplay, getGpsMapUrl } from './utils/rmaHelpers';
+import { getGpsAddressDisplay, getGpsMapUrl, getWarehouseLocations } from './utils/rmaHelpers';
 import { inviteService, formatRemainingCountdown, isPermanentInvite, getInviteAllowedEmails } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
@@ -294,8 +298,28 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
 
-  // Admin Dashboard Active Tab: 'products' | 'customer_reports' | 'supplier_claims' | 'sandbox' | 'archive_trash' | 'settings'
+  // Admin Dashboard Active Route (14 sidebar destinations across 5 enterprise groups)
   const [adminActiveTab, setAdminActiveTab] = useState('products');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('rma_admin_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [creditMemoScopeIsTest, setCreditMemoScopeIsTest] = useState(false);
+
+  const toggleSidebarCollapse = React.useCallback(() => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('rma_admin_sidebar_collapsed', next ? 'true' : 'false');
+      } catch {}
+      return next;
+    });
+  }, []);
+
   const [testModeStreamType, setTestModeStreamType] = useState('customer_inbound');
   const [sandboxSubTab, setSandboxSubTab] = useState('customer');
   const [customerHubSubTab, setCustomerHubSubTab] = useState('returns');
@@ -316,18 +340,15 @@ export default function App() {
   }, []);
 
   const openLiveCustomerHub = React.useCallback((subTab = 'returns') => {
-    const normalizedSub = subTab === 'credit_memos' ? 'credit_memos' : 'returns';
-    setAdminActiveTab('customer_reports');
-    setCustomerHubSubTab(normalizedSub);
-    setCustomerHubExternalSubTab({ value: normalizedSub, tick: Date.now() });
-  }, []);
-
-  // Redirect legacy 'credit_memos' top-level tab cleanly into Customer RMA Hub -> Credit Memos Ledger
-  useEffect(() => {
-    if (adminActiveTab === 'credit_memos') {
-      openLiveCustomerHub('credit_memos');
+    if (subTab === 'credit_memos') {
+      setCreditMemoScopeIsTest(false);
+      setAdminActiveTab('credit_memos');
+      return;
     }
-  }, [adminActiveTab, openLiveCustomerHub]);
+    setAdminActiveTab('customer_reports');
+    setCustomerHubSubTab('returns');
+    setCustomerHubExternalSubTab({ value: 'returns', tick: Date.now() });
+  }, []);
 
   // Redirect legacy 'memos' sandbox tab cleanly into Sandbox Customer RMAs -> Credit Memos Ledger
   useEffect(() => {
@@ -338,9 +359,9 @@ export default function App() {
     }
   }, [sandboxSubTab]);
 
-  // Strict role gate: Only Super Admin can view Settings & SMTP
+  // Strict role gate: Super Admin exclusive admin pages
   useEffect(() => {
-    if (adminActiveTab === 'settings' && currentUser?.role !== 'super_admin') {
+    if (['settings', 'warehouse_locations', 'api_keys', 'roles_access'].includes(adminActiveTab) && currentUser?.role !== 'super_admin') {
       setAdminActiveTab('products');
     }
   }, [adminActiveTab, currentUser]);
@@ -3464,9 +3485,15 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border">
-      {/* Dynamic container width: spacious layout for public reporter (max-w-2xl) and SaaS dashboard for admin */}
-      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`}>
+    <div className={isAdminView && currentUser
+      ? 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 overflow-x-hidden box-border'
+      : 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border'
+    }>
+      {/* Dynamic container width: spacious centered card for public reporter (max-w-2xl) and full-width enterprise workspace for admin */}
+      <div id="app-main-view-container" className={isAdminView && currentUser
+        ? 'w-full min-w-0 box-border'
+        : `${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`
+      }>
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL / SCOPED EMAIL RMA EDITOR               */}
@@ -5005,542 +5032,611 @@ export default function App() {
         )}
 
         {/* ================================================================= */}
-        {/* 2. STAFF ADMIN PORTAL (Accessible at '/admin' with OTP Auth)      */}
+        {/* 2. STAFF ADMIN PORTAL (Enterprise Collapsible Sidebar Shell)       */}
         {/* ================================================================= */}
-        {isAdminView && currentUser && (
-          <div className="space-y-5 animate-in fade-in duration-200">
+        {isAdminView && currentUser && (() => {
+          const activeRouteTitle = {
+            products: 'Saved Products Catalog',
+            customer_reports: 'Customer Returns Hub',
+            reports: 'Customer Returns Hub',
+            supplier_claims: 'Supplier Claims (RTV)',
+            credit_memos: 'Credit Memos Ledger',
+            pending_barcodes: 'Awaiting SKU Queue',
+            rma_reports: 'Full Audit & Reports',
+            archive_trash: 'Archive & 30-Day Trash Bin',
+            supplier_directory: 'Supplier Emails Directory',
+            warehouse_locations: 'Warehouse Locations & GPS',
+            rma_invites: 'Customer & RMA Invites',
+            roles_access: 'Roles & Team Access',
+            api_keys: 'API Keys & Webhooks',
+            sandbox: 'Test Mode Sandbox',
+            settings: 'System Settings'
+          }[adminActiveTab] || 'Operations Dashboard';
 
-            {/* Production-Level SaaS Header */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 w-full min-w-0 box-border">
-              <div className="space-y-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                    <span>🏢 Pingcon RMA Operations</span>
-                  </h1>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Live Auto-Sync
-                  </span>
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shrink-0">
-                    {currentUser?.role === 'super_admin' ? '👑 Super Admin' : (currentUser?.role || 'Staff')}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                  Logged in as <strong className="text-slate-800 dark:text-slate-200">{currentUser?.name || 'Authorized Staff'}</strong> • {currentUser?.email || 'Portal Access'}
-                </p>
-              </div>
+          const normalizedTab = adminActiveTab === 'reports' ? 'customer_reports' : adminActiveTab;
 
-              <div className="flex items-center gap-2 self-start md:self-auto flex-wrap w-full md:w-auto justify-start md:justify-end min-w-0">
-                {/* NOTIFICATION BELL */}
-                <NotificationBell
-                  notifications={notifications}
-                  onMarkAsRead={handleMarkAsRead}
-                  onMarkAllAsRead={handleMarkAllAsRead}
-                  onClearAll={handleClearAllNotifications}
-                  onSelectNotification={handleSelectNotification}
-                />
-
-                <button
-                  type="button"
-                  onClick={toggleTheme}
-                  className="p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center transition-colors shadow-sm"
-                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                  aria-label="Toggle Theme"
-                >
-                  {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsCustomerInvitesModalOpen(true)}
-                  className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Generate & Manage Google Identity Locked RMA Return Links (Warehouse or Customer)"
-                >
-                  <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>🎫 Generate RMA Invites</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigateTo('/')}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-                >
-                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
-                  <span>Public Reporter</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Logout</span>
-                </button>
-              </div>
-            </div>
-
-            {/* SaaS KPI Overview Strip: Symmetrical 5-column Logistics & Finance Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
-              {/* Metric 1: Saved Products */}
-              <div
-                onClick={() => setAdminActiveTab('products')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-              >
-                <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-1.5 sm:mb-2">
-                  <Package className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Catalog</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {savedProductsList.length}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Saved Products</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Catalog items</div>
-              </div>
-
-              {/* Metric 2: Customer Returns + Integrated Credit Memos Ledger Link */}
-              <div
-                onClick={() => openLiveCustomerHub('returns')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-              >
-                <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1.5 sm:mb-2">
-                  <FileText className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Inbound</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {customerInboundReports.length}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => doesCreditMemoLinkReport(m, r))).length} pending • ₱{liveCreditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openLiveCustomerHub('credit_memos');
-                  }}
-                  className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer"
-                  title="Open Credit Memos Ledger inside Customer RMA Hub"
-                >
-                  <Receipt className="w-3 h-3 shrink-0" />
-                  <span>Credit Memos ({liveCreditMemosList.length}) →</span>
-                </button>
-              </div>
-
-              {/* Metric 3: Supplier RTVs (Outbound Logistics) */}
-              <div
-                onClick={() => setAdminActiveTab('supplier_claims')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'supplier_claims' ? 'border-purple-500 ring-2 ring-purple-100 dark:ring-purple-900/40' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-              >
-                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
-                  <Building2 className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Outbound</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {supplierOutboundReports.length}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Supplier RTVs</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Vendor claims queued</div>
-              </div>
-
-              {/* Metric 4: Awaiting SKU */}
-              <div
-                onClick={() => {
-                  setIsPendingModalOpen(true);
+          return (
+            <div className="min-h-dvh w-full flex bg-slate-100 dark:bg-slate-950 animate-in fade-in duration-200">
+              <AdminSidebar
+                activeTab={normalizedTab}
+                onSelectTab={(nextTab) => setAdminActiveTab(nextTab)}
+                isCollapsed={isSidebarCollapsed}
+                onToggleCollapse={toggleSidebarCollapse}
+                isMobileOpen={isMobileSidebarOpen}
+                onCloseMobile={() => setIsMobileSidebarOpen(false)}
+                isSuperAdmin={currentUser?.role === 'super_admin'}
+                isTestMode={Boolean(isTestMode || normalizedTab === 'sandbox' || (normalizedTab === 'credit_memos' && creditMemoScopeIsTest))}
+                counts={{
+                  customerInbound: customerInboundReports.length,
+                  supplierClaims: supplierOutboundReports.length,
+                  creditMemos: liveCreditMemosList.length,
+                  pendingBarcodes: pendingBarcodesList.length,
+                  products: savedProductsList.length,
+                  allLiveReports: liveReportsList.length,
+                  archiveTrash: archivedReportsList.length + trashedReportsList.length,
+                  supplierContacts: supplierDirectoryService.getCachedDirectory().length,
+                  locations: getWarehouseLocations().length,
+                  staff: staffList.length || 25,
+                  sandbox: testReportsList.length
                 }}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-              >
-                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-1.5 sm:mb-2">
-                  <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">Action</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {pendingBarcodesList.length}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Awaiting SKU</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs SKU assignment</div>
-              </div>
-
-              {/* Metric 5: Staff Directory */}
-              <div
-                onClick={() => {
-                  if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
-                }}
-                className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm ${currentUser?.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
-                  } border-slate-200 dark:border-slate-800`}
-              >
-                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
-                  <Users className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Team</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {staffList.length || 25}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Staff Directory</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Company staff</div>
-              </div>
-            </div>
-
-            {/* Production-Level Tab Segmented Switcher: Horizontally scrollable on mobile, wrapping on desktop */}
-            <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl overflow-x-auto no-scrollbar sm:flex-wrap">
-              {/* Tab 1: Saved Products */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('products')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'products'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Saved Products ({savedProductsList.length})</span>
-              </button>
-
-              {/* Tab 2: Customer RMA Hub (Inbound + Integrated Credit Memos Ledger) */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('customer_reports')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
-                  ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>Customer RMA Hub ({customerInboundReports.length})</span>
-              </button>
-
-              {/* Tab 3: Supplier Hub (RTV Claims) */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('supplier_claims')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
-                  ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                <span>Supplier Hub (RTV Claims) ({supplierOutboundReports.length})</span>
-              </button>
-
-              {/* Tab 4: Dedicated Test Mode Sandbox */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('sandbox')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'sandbox'
-                  ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm ring-1 ring-amber-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <FlaskConical className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>🧪 Test Mode Sandbox ({testReportsList.length})</span>
-              </button>
-
-              {/* Tab 5: Enterprise Archive & 30-Day Trash Bin */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('archive_trash')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'archive_trash'
-                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-sm ring-1 ring-slate-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Archive className="w-4 h-4 text-slate-600 dark:text-slate-400 shrink-0" />
-                <span>🗄️ Archive & Trash ({archivedReportsList.length + trashedReportsList.length})</span>
-              </button>
-
-              {/* Tab 6: Settings & SMTP (Super Admin Only) */}
-              {currentUser?.role === 'super_admin' && (
-                <button
-                  type="button"
-                  onClick={() => setAdminActiveTab('settings')}
-                  className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'settings'
-                    ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                >
-                  <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>Settings & SMTP</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsPendingModalOpen(true);
-                }}
-                className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 sm:ml-auto transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>Awaiting SKU ({pendingBarcodesList.length})</span>
-              </button>
-
-              {currentUser?.role === 'super_admin' && (
-                <button
-                  type="button"
-                  onClick={() => setIsEmployeeModalOpen(true)}
-                  className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 dark:text-purple-400 hover:bg-purple-100/60 dark:hover:bg-purple-950/40 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <Users className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
-                  <span>Roles & Access</span>
-                </button>
-              )}
-            </div>
-
-            {/* TAB 1: SAVED PRODUCTS CATALOG DASHBOARD */}
-            {adminActiveTab === 'products' && (
-              <SavedProductsTab
-                products={savedProductsList}
-                isLoading={isSavedProductsLoading}
-                onAddProduct={() => {
-                  setEditingProduct(null);
-                  setIsProductEditOpen(true);
-                }}
-                onEditProduct={(prod) => {
-                  setEditingProduct(prod);
-                  setIsProductEditOpen(true);
-                }}
-                onDeleteProduct={requestDeleteProduct}
-                onBulkDeleteProduct={requestBulkDeleteProducts}
-                currentUser={currentUser}
               />
-            )}
 
-            {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS (hidden on Credit Memos Ledger sub-tab) */}
-            {(
-              ((adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && customerHubSubTab !== 'credit_memos') ||
-              adminActiveTab === 'supplier_claims' ||
-              (adminActiveTab === 'sandbox' && (sandboxSubTab === 'supplier' || (sandboxSubTab === 'customer' && sandboxCustomerSubTab !== 'credit_memos')))
-            ) && (
-              <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl p-3 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
-                    WMS / ERP Sync
-                  </span>
-                  <div className="min-w-0">
-                    <h4 className="text-xs font-black text-white tracking-tight">
-                      Coworker Inventory & Procurement Queues {adminActiveTab === 'sandbox' ? '(Sandbox)' : ''}
-                    </h4>
-                    <p className="text-[11px] text-slate-400 truncate">
-                      {adminActiveTab === 'sandbox'
-                        ? 'Simulated sandbox queues for Warehouse WMS restocking and Purchasing supplier re-orders.'
-                        : 'Live workstation queues for Warehouse WMS restocking and Purchasing supplier re-orders.'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'restock'
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
-                      : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
-                      }`}
-                    title="Filter table to items triaged as Restock to Inventory or Replacement Received"
-                  >
-                    <span>📦 Ready to Restock ({hubReadyToRestockCount})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCoworkerQueueFilter(coworkerQueueFilter === 'reorder' ? 'all' : 'reorder');
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'reorder'
-                      ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                      : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
-                      }`}
-                    title="Filter table to items flagged for Supplier Replacement PO re-order"
-                  >
-                    <span>🔄 Supplier Re-Order ({hubReorderNeededCount})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'scrap_no_reorder'
-                      ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
-                      : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
-                      }`}
-                    title="Filter table to items marked as Scrap / Write-Off without supplier re-order"
-                  >
-                    <span>🚫 No Re-Order / Write-Off ({hubScrappedNoReorderCount})</span>
-                  </button>
-
-                  {coworkerQueueFilter !== 'all' && (
+              <div className="flex-1 min-w-0 flex flex-col">
+                {/* Slim Enterprise Sticky Top Utility Bar */}
+                <header className="sticky top-0 z-20 h-14 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <button
                       type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter('all');
-                      }}
-                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+                      onClick={() => setIsMobileSidebarOpen(true)}
+                      aria-label="Open navigation menu"
+                      className="lg:hidden touch-target p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
                     >
-                      Clear Queue Filter
+                      <Menu className="w-5 h-5" />
                     </button>
+
+                    <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                      <span className="hidden sm:inline text-xs font-black tracking-tight text-slate-500 dark:text-slate-400 shrink-0">
+                        Pingcon RMA Operations
+                      </span>
+                      <span className="hidden sm:inline text-slate-300 dark:text-slate-700">/</span>
+                      <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
+                        {activeRouteTitle}
+                      </h1>
+                      <span className="hidden md:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Live Auto-Sync</span>
+                      </span>
+                      {normalizedTab === 'sandbox' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shrink-0">
+                          🧪 Sandbox Isolated
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    <span className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                      <span className="truncate max-w-[140px]">{currentUser?.name || 'Authorized Staff'}</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300">
+                        {currentUser?.role === 'super_admin' ? 'Super Admin' : (currentUser?.role || 'Staff')}
+                      </span>
+                    </span>
+
+                    <NotificationBell
+                      notifications={notifications}
+                      onMarkAsRead={handleMarkAsRead}
+                      onMarkAllAsRead={handleMarkAllAsRead}
+                      onClearAll={handleClearAllNotifications}
+                      onSelectNotification={handleSelectNotification}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
+                      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                      aria-label="Toggle Theme"
+                    >
+                      {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('/')}
+                      className="hidden sm:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                      <span className="hidden md:inline">Public Reporter</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Logout</span>
+                    </button>
+                  </div>
+                </header>
+
+                {/* Fluid Full-Width Admin Main Workspace */}
+                <main className="flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6 space-y-4">
+
+                  {/* Compact 5-Card Enterprise KPI Strip (clickable shortcuts into key operational routes) */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
+                    {/* KPI 1: Saved Products */}
+                    <div
+                      onClick={() => setAdminActiveTab('products')}
+                      className={`bg-white dark:bg-slate-900 border rounded-2xl px-3.5 py-2.5 shadow-2xs cursor-pointer transition-all hover:shadow-sm flex items-center justify-between gap-2 ${normalizedTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Saved Products</div>
+                        <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{savedProductsList.length}</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">Verified SKUs</div>
+                      </div>
+                      <Package className="w-5 h-5 text-indigo-500/80 shrink-0" />
+                    </div>
+
+                    {/* KPI 2: Customer Inbound + Quick Jump to Credit Memos Ledger */}
+                    <div
+                      onClick={() => openLiveCustomerHub('returns')}
+                      className={`bg-white dark:bg-slate-900 border rounded-2xl px-3.5 py-2.5 shadow-2xs cursor-pointer transition-all hover:shadow-sm flex items-center justify-between gap-2 ${normalizedTab === 'customer_reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Customer Inbound</div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{customerInboundReports.length}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCreditMemoScopeIsTest(false);
+                              setAdminActiveTab('credit_memos');
+                            }}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9.5px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 cursor-pointer"
+                            title="Open Credit Memos Ledger"
+                          >
+                            <span>CM ({liveCreditMemosList.length}) →</span>
+                          </button>
+                        </div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                          ₱{liveCreditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited
+                        </div>
+                      </div>
+                      <FileText className="w-5 h-5 text-blue-500/80 shrink-0" />
+                    </div>
+
+                    {/* KPI 3: Supplier RTVs */}
+                    <div
+                      onClick={() => setAdminActiveTab('supplier_claims')}
+                      className={`bg-white dark:bg-slate-900 border rounded-2xl px-3.5 py-2.5 shadow-2xs cursor-pointer transition-all hover:shadow-sm flex items-center justify-between gap-2 ${normalizedTab === 'supplier_claims' ? 'border-purple-500 ring-2 ring-purple-100 dark:ring-purple-900/40' : 'border-slate-200 dark:border-slate-800'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400">Supplier RTVs</div>
+                        <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{supplierOutboundReports.length}</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">Vendor claims queued</div>
+                      </div>
+                      <Building2 className="w-5 h-5 text-purple-500/80 shrink-0" />
+                    </div>
+
+                    {/* KPI 4: Awaiting SKU */}
+                    <div
+                      onClick={() => setAdminActiveTab('pending_barcodes')}
+                      className={`bg-white dark:bg-slate-900 border rounded-2xl px-3.5 py-2.5 shadow-2xs cursor-pointer transition-all hover:shadow-sm flex items-center justify-between gap-2 ${normalizedTab === 'pending_barcodes' ? 'border-amber-500 ring-2 ring-amber-100 dark:ring-amber-900/40' : pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/30 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Awaiting SKU</div>
+                        <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{pendingBarcodesList.length}</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">Needs SKU assignment</div>
+                      </div>
+                      <AlertTriangle className="w-5 h-5 text-amber-500/80 shrink-0" />
+                    </div>
+
+                    {/* KPI 5: Staff Directory */}
+                    <div
+                      onClick={() => {
+                        if (currentUser?.role === 'super_admin') setAdminActiveTab('roles_access');
+                      }}
+                      className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-2xl px-3.5 py-2.5 shadow-2xs flex items-center justify-between gap-2 ${currentUser?.role === 'super_admin' ? 'cursor-pointer hover:shadow-sm hover:border-purple-300 dark:hover:border-purple-700' : ''} ${normalizedTab === 'roles_access' ? 'border-purple-500 ring-2 ring-purple-100 dark:ring-purple-900/40' : 'border-slate-200 dark:border-slate-800'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400">Staff Directory</div>
+                        <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{staffList.length || 25}</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">Authorized team</div>
+                      </div>
+                      <Users className="w-5 h-5 text-purple-500/80 shrink-0" />
+                    </div>
+                  </div>
+
+                  {/* TAB 1: SAVED PRODUCTS CATALOG DASHBOARD */}
+                  {normalizedTab === 'products' && (
+                    <SavedProductsTab
+                      products={savedProductsList}
+                      isLoading={isSavedProductsLoading}
+                      onAddProduct={() => {
+                        setEditingProduct(null);
+                        setIsProductEditOpen(true);
+                      }}
+                      onEditProduct={(prod) => {
+                        setEditingProduct(prod);
+                        setIsProductEditOpen(true);
+                      }}
+                      onDeleteProduct={requestDeleteProduct}
+                      onBulkDeleteProduct={requestBulkDeleteProducts}
+                      currentUser={currentUser}
+                    />
                   )}
-                </div>
+
+                  {/* COMPACT COWORKER INVENTORY & PROCUREMENT QUEUES STRIP (Returns & Supplier Claims only) */}
+                  {(
+                    normalizedTab === 'customer_reports' ||
+                    normalizedTab === 'supplier_claims' ||
+                    normalizedTab === 'sandbox'
+                  ) && (
+                    <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
+                          WMS / ERP Sync
+                        </span>
+                        <span className="text-xs font-black text-white truncate">
+                          Coworker Inventory &amp; Procurement Queues {normalizedTab === 'sandbox' ? '(Sandbox)' : ''}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer border ${coworkerQueueFilter === 'restock'
+                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                            : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
+                            }`}
+                          title="Filter table to items triaged as Restock to Inventory or Replacement Received"
+                        >
+                          <span>📦 Ready to Restock ({hubReadyToRestockCount})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCoworkerQueueFilter(coworkerQueueFilter === 'reorder' ? 'all' : 'reorder')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer border ${coworkerQueueFilter === 'reorder'
+                            ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                            : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+                            }`}
+                          title="Filter table to items flagged for Supplier Replacement PO re-order"
+                        >
+                          <span>🔄 Supplier Re-Order ({hubReorderNeededCount})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer border ${coworkerQueueFilter === 'scrap_no_reorder'
+                            ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
+                            : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                            }`}
+                          title="Filter table to items marked as Scrap / Write-Off without supplier re-order"
+                        >
+                          <span>🚫 No Re-Order / Write-Off ({hubScrappedNoReorderCount})</span>
+                        </button>
+
+                        {coworkerQueueFilter !== 'all' && (
+                          <button
+                            type="button"
+                            onClick={() => setCoworkerQueueFilter('all')}
+                            className="px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+                          >
+                            Clear Filter
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* OPERATIONS: CUSTOMER RETURNS HUB */}
+                  {normalizedTab === 'customer_reports' && (
+                    <CustomerHubTab
+                      reportsList={liveReportsList}
+                      creditMemosList={liveCreditMemosList}
+                      savedProductsList={savedProductsList}
+                      currentUser={currentUser}
+                      coworkerQueueFilter={coworkerQueueFilter}
+                      onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
+                      updatingQueueId={updatingQueueId}
+                      isTestMode={false}
+                      onOpenReportsModal={() => setAdminActiveTab('rma_reports')}
+                      onOpenCreditMemosLedger={() => {
+                        setCreditMemoScopeIsTest(false);
+                        setAdminActiveTab('credit_memos');
+                      }}
+                      onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
+                      onInspectTriage={handleInspectTriageForReport}
+                      onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                      onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
+                      onViewQR={(reportOrList) => openQrModal(reportOrList)}
+                      onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                      onViewExplanation={(info) => setViewingExplanationModal(info)}
+                      onEditProductFromReport={handleEditProductFromReport}
+                      onOpenCreditMemo={handleOpenCreditMemoForReport}
+                      onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
+                      onEditCreditMemo={handleEditCreditMemo}
+                      onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
+                      onPrintBulkCreditMemos={handleViewCreditMemoVoucher}
+                      onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                      onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
+                      defaultSubTab={customerHubSubTab}
+                      externalSubTab={customerHubExternalSubTab}
+                      onSubTabChange={handleCustomerHubSubTabChange}
+                      onConfirmCoworkerAction={handleConfirmCoworkerAction}
+                      onResetToPending={handleResetReportToPending}
+                      onArchiveReport={handleArchiveReport}
+                      onBulkArchiveReports={handleBulkArchiveReports}
+                      onRequestDeleteReport={requestDeleteReport}
+                      onRequestBulkDeleteReports={requestBulkDeleteReports}
+                      selectionResetTick={customerHubResetTick}
+                      externalStatusFilter={customerHubExternalStatus}
+                    />
+                  )}
+
+                  {/* OPERATIONS: SUPPLIER CLAIMS (RTV) */}
+                  {normalizedTab === 'supplier_claims' && (
+                    <SupplierClaimsTab
+                      reportsList={liveReportsList}
+                      currentUser={currentUser}
+                      onRefresh={refreshAllData}
+                      onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                      onRequestDeleteReport={requestDeleteReport}
+                      onRequestBulkDeleteReports={requestBulkDeleteReports}
+                      onRequestArchiveReport={handleArchiveReport}
+                      onRequestBulkArchiveReports={handleBulkArchiveReports}
+                      onArchiveReport={handleArchiveReport}
+                      onBulkArchiveReports={handleBulkArchiveReports}
+                      onAssignSku={(report) => handleEditProductFromReport(report)}
+                      onEditProductFromReport={handleEditProductFromReport}
+                      onOpenQuickAction={(rmaNumber) => {
+                        setQuickRmaNumber(rmaNumber);
+                        setIsQuickRmaModalOpen(true);
+                      }}
+                      onViewQR={(reportOrList) => openQrModal(reportOrList)}
+                      onViewExplanation={(info) => setViewingExplanationModal(info)}
+                      onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                      onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
+                      onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
+                      onResetToPending={handleResetReportToPending}
+                      savedProductsList={savedProductsList}
+                      coworkerQueueFilter={coworkerQueueFilter}
+                      isTestMode={false}
+                    />
+                  )}
+
+                  {/* OPERATIONS: DEDICATED CREDIT MEMOS LEDGER */}
+                  {normalizedTab === 'credit_memos' && (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-2.5 shadow-2xs">
+                        <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                          Ledger Environment Scope:
+                        </div>
+                        <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700" role="group" aria-label="Credit Memos Environment Scope">
+                          <button
+                            type="button"
+                            onClick={() => setCreditMemoScopeIsTest(false)}
+                            className={`px-3 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                              !creditMemoScopeIsTest
+                                ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                                : 'text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            🟢 Live Credit Memos ({liveCreditMemosList.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCreditMemoScopeIsTest(true)}
+                            className={`px-3 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                              creditMemoScopeIsTest
+                                ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                                : 'text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            🧪 Sandbox Credit Memos ({testCreditMemosList.length})
+                          </button>
+                        </div>
+                      </div>
+                      <CreditMemosTab
+                        creditMemosList={creditMemoScopeIsTest ? testCreditMemosList : liveCreditMemosList}
+                        onOpenCreateModal={handleOpenCreateCreditMemo}
+                        onEditCreditMemo={handleEditCreditMemo}
+                        onViewVoucher={handleViewCreditMemoVoucher}
+                        onPrintBulk={handleViewCreditMemoVoucher}
+                        onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                        onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
+                        recentReportsList={creditMemoScopeIsTest ? testReportsList : liveReportsList}
+                        currentUser={currentUser}
+                        isTestMode={creditMemoScopeIsTest}
+                      />
+                    </div>
+                  )}
+
+                  {/* OPERATIONS: AWAITING SKU QUEUE (EMBEDDED NATIVE PAGE) */}
+                  {normalizedTab === 'pending_barcodes' && (
+                    <PendingBarcodesModal
+                      isOpen={true}
+                      isEmbeddedPage={true}
+                      onClose={() => setAdminActiveTab('customer_reports')}
+                      pendingList={pendingBarcodesList}
+                      currentUser={currentUser}
+                      onUpdated={() => {
+                        refreshAllData();
+                        showToast('Barcode details and reference photo updated!', 'success');
+                      }}
+                    />
+                  )}
+
+                  {/* CATALOG & RECORDS: FULL AUDIT & REPORTS (EMBEDDED NATIVE PAGE) */}
+                  {normalizedTab === 'rma_reports' && (
+                    <RMAReportsModal
+                      isOpen={true}
+                      isEmbeddedPage={true}
+                      onClose={() => setAdminActiveTab('customer_reports')}
+                      reports={liveReportsList}
+                      liveReportsList={liveReportsList}
+                      testReportsList={testReportsList}
+                      liveCreditMemosList={liveCreditMemosList}
+                      testCreditMemosList={testCreditMemosList}
+                      currentUser={currentUser}
+                      onDeleteReport={requestDeleteReport}
+                      onBulkDeleteReport={requestBulkDeleteReports}
+                      creditMemosList={liveCreditMemosList}
+                      savedProductsList={savedProductsList}
+                      isTestMode={false}
+                      onEditProductFromReport={handleEditProductFromReport}
+                      onViewReportQR={(repOrList) => openQrModal(repOrList)}
+                      onOpenCreditMemo={(rep) => handleOpenCreditMemoForReport(rep)}
+                      onViewCreditMemoVoucher={(memo) => handleViewCreditMemoVoucher(memo)}
+                    />
+                  )}
+
+                  {/* CATALOG & RECORDS: ARCHIVE & 30-DAY TRASH BIN */}
+                  {normalizedTab === 'archive_trash' && (
+                    <ArchiveAndTrashTab
+                      archivedReports={archivedReportsList}
+                      trashedReports={trashedReportsList}
+                      archivedReportsList={archivedReportsList}
+                      trashedReportsList={trashedReportsList}
+                      currentUser={currentUser}
+                      onRefresh={refreshAllData}
+                      onRestore={handleRestoreFromTrashOrArchive}
+                      onPermanentlyDelete={handlePermanentlyDeleteReport}
+                      onEmptyTrash={handleEmptyTrash}
+                      onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                      savedProductsList={savedProductsList}
+                    />
+                  )}
+
+                  {/* DIRECTORY & LOCATIONS: SUPPLIER DIRECTORY (EMBEDDED NATIVE PAGE) */}
+                  {normalizedTab === 'supplier_directory' && (
+                    <SupplierDirectoryModal
+                      isOpen={true}
+                      isEmbeddedPage={true}
+                      onClose={() => setAdminActiveTab('supplier_claims')}
+                      onShowToast={showToast}
+                    />
+                  )}
+
+                  {/* DIRECTORY & LOCATIONS: WAREHOUSE LOCATIONS & GPS ANCHORS */}
+                  {normalizedTab === 'warehouse_locations' && currentUser?.role === 'super_admin' && (
+                    <SettingsTab
+                      viewMode="warehouse_locations"
+                      isTestMode={isTestMode}
+                      onToggleTestMode={toggleTestMode}
+                      onOpenPortalQr={() => setAdminActiveTab('rma_invites')}
+                      currentUser={currentUser}
+                      onNavigateTab={setAdminActiveTab}
+                    />
+                  )}
+
+                  {/* ACCESS & INTEGRATIONS: CUSTOMER & RMA INVITES (EMBEDDED NATIVE PAGE) */}
+                  {normalizedTab === 'rma_invites' && (
+                    <CustomerRMAInvitesModal
+                      isOpen={true}
+                      isEmbeddedPage={true}
+                      onClose={() => setAdminActiveTab('customer_reports')}
+                      currentUser={currentUser}
+                    />
+                  )}
+
+                  {/* ACCESS & INTEGRATIONS: ROLES & TEAM ACCESS (EMBEDDED NATIVE PAGE) */}
+                  {normalizedTab === 'roles_access' && currentUser?.role === 'super_admin' && (
+                    <EmployeeManagementModal
+                      isOpen={true}
+                      isEmbeddedPage={true}
+                      onClose={() => setAdminActiveTab('products')}
+                      currentUser={currentUser}
+                    />
+                  )}
+
+                  {/* ACCESS & INTEGRATIONS: API KEYS & WEBHOOKS */}
+                  {normalizedTab === 'api_keys' && currentUser?.role === 'super_admin' && (
+                    <SettingsTab
+                      viewMode="api_keys"
+                      isTestMode={isTestMode}
+                      onToggleTestMode={toggleTestMode}
+                      onOpenPortalQr={() => setAdminActiveTab('rma_invites')}
+                      currentUser={currentUser}
+                      onNavigateTab={setAdminActiveTab}
+                    />
+                  )}
+
+                  {/* QA & SYSTEM: TEST MODE SANDBOX */}
+                  {normalizedTab === 'sandbox' && (
+                    <TestModeSandboxTab
+                      testReportsList={testReportsList}
+                      testCreditMemosList={testCreditMemosList}
+                      savedProductsList={savedProductsList}
+                      currentUser={currentUser}
+                      coworkerQueueFilter={coworkerQueueFilter}
+                      onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
+                      updatingQueueId={updatingQueueId}
+                      activeSubTab={sandboxSubTab}
+                      onSubTabChange={setSandboxSubTab}
+                      customerHubSubTab={sandboxCustomerSubTab}
+                      externalCustomerSubTab={sandboxExternalSubTab}
+                      onCustomerHubSubTabChange={handleSandboxCustomerSubTabChange}
+                      onRefresh={refreshAllData}
+                      onInspectTriage={handleInspectTriageForReport}
+                      onViewQR={(reportOrList) => openQrModal(reportOrList)}
+                      onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                      onRequestDeleteReport={requestDeleteReport}
+                      onRequestBulkDeleteReports={requestBulkDeleteReports}
+                      onArchiveReport={handleArchiveReport}
+                      onBulkArchiveReports={handleBulkArchiveReports}
+                      onClearAllSandbox={requestClearAllSandbox}
+                      onAssignSku={(report) => handleEditProductFromReport(report)}
+                      onEditProductFromReport={handleEditProductFromReport}
+                      onResetToPending={handleResetReportToPending}
+                      onConfirmCoworkerAction={handleConfirmCoworkerAction}
+                      onOpenReportsModal={() => setIsReportsModalOpen(true)}
+                      onOpenCreditMemosLedger={() => {
+                        setCreditMemoScopeIsTest(true);
+                        setAdminActiveTab('credit_memos');
+                      }}
+                      onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
+                      onOpenCreditMemoForReport={handleOpenCreditMemoForReport}
+                      onEditCreditMemo={handleEditCreditMemo}
+                      onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
+                      onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                      onRequestBulkDeleteCreditMemos={requestBulkDeleteCreditMemos}
+                      onOpenQuickAction={(rmaNumber) => {
+                        setQuickRmaNumber(rmaNumber);
+                        setIsQuickRmaModalOpen(true);
+                      }}
+                      onViewExplanation={(info) => setViewingExplanationModal(info)}
+                      onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                      onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
+                      onOpenMatrixExport={() => setMatrixExportModal({
+                        isOpen: true,
+                        stream: 'overall',
+                        isTestMode: true
+                      })}
+                    />
+                  )}
+
+                  {/* QA & SYSTEM: SYSTEM SETTINGS */}
+                  {normalizedTab === 'settings' && currentUser?.role === 'super_admin' && (
+                    <SettingsTab
+                      viewMode="settings"
+                      isTestMode={isTestMode}
+                      onToggleTestMode={toggleTestMode}
+                      onOpenPortalQr={() => setAdminActiveTab('rma_invites')}
+                      currentUser={currentUser}
+                      onNavigateTab={setAdminActiveTab}
+                    />
+                  )}
+
+                </main>
               </div>
-            )}
-
-            {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS + INTEGRATED CREDIT MEMOS LEDGER) */}
-            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
-              <CustomerHubTab
-                reportsList={liveReportsList}
-                creditMemosList={liveCreditMemosList}
-                savedProductsList={savedProductsList}
-                currentUser={currentUser}
-                coworkerQueueFilter={coworkerQueueFilter}
-                onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
-                updatingQueueId={updatingQueueId}
-                isTestMode={false}
-                onOpenReportsModal={() => setIsReportsModalOpen(true)}
-                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
-                onInspectTriage={handleInspectTriageForReport}
-                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
-                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
-                onViewQR={(reportOrList) => openQrModal(reportOrList)}
-                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
-                onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onEditProductFromReport={handleEditProductFromReport}
-                onOpenCreditMemo={handleOpenCreditMemoForReport}
-                onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
-                onEditCreditMemo={handleEditCreditMemo}
-                onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
-                onPrintBulkCreditMemos={handleViewCreditMemoVoucher}
-                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
-                onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
-                defaultSubTab={customerHubSubTab}
-                externalSubTab={customerHubExternalSubTab}
-                onSubTabChange={handleCustomerHubSubTabChange}
-                onConfirmCoworkerAction={handleConfirmCoworkerAction}
-                onResetToPending={handleResetReportToPending}
-                onArchiveReport={handleArchiveReport}
-                onBulkArchiveReports={handleBulkArchiveReports}
-                onRequestDeleteReport={requestDeleteReport}
-                onRequestBulkDeleteReports={requestBulkDeleteReports}
-                selectionResetTick={customerHubResetTick}
-                externalStatusFilter={customerHubExternalStatus}
-              />
-            )}
-
-            {/* TAB 3: SUPPLIER RECOVERY / CHARGEBACK BATCHING (RTV CLAIMS) */}
-            {adminActiveTab === 'supplier_claims' && (
-              <SupplierClaimsTab
-                reportsList={liveReportsList}
-                currentUser={currentUser}
-                onRefresh={refreshAllData}
-                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
-                onRequestDeleteReport={requestDeleteReport}
-                onRequestBulkDeleteReports={requestBulkDeleteReports}
-                onRequestArchiveReport={handleArchiveReport}
-                onRequestBulkArchiveReports={handleBulkArchiveReports}
-                onArchiveReport={handleArchiveReport}
-                onBulkArchiveReports={handleBulkArchiveReports}
-                onAssignSku={(report) => handleEditProductFromReport(report)}
-                onEditProductFromReport={handleEditProductFromReport}
-                onOpenQuickAction={(rmaNumber) => {
-                  setQuickRmaNumber(rmaNumber);
-                  setIsQuickRmaModalOpen(true);
-                }}
-                onViewQR={(reportOrList) => openQrModal(reportOrList)}
-                onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
-                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
-                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
-                onResetToPending={handleResetReportToPending}
-                savedProductsList={savedProductsList}
-                coworkerQueueFilter={coworkerQueueFilter}
-                isTestMode={false}
-              />
-            )}
-
-            {/* TAB 4: DEDICATED TEST MODE SANDBOX */}
-            {adminActiveTab === 'sandbox' && (
-              <TestModeSandboxTab
-                testReportsList={testReportsList}
-                testCreditMemosList={testCreditMemosList}
-                savedProductsList={savedProductsList}
-                currentUser={currentUser}
-                coworkerQueueFilter={coworkerQueueFilter}
-                onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
-                updatingQueueId={updatingQueueId}
-                activeSubTab={sandboxSubTab}
-                onSubTabChange={setSandboxSubTab}
-                customerHubSubTab={sandboxCustomerSubTab}
-                externalCustomerSubTab={sandboxExternalSubTab}
-                onCustomerHubSubTabChange={handleSandboxCustomerSubTabChange}
-                onRefresh={refreshAllData}
-                onInspectTriage={handleInspectTriageForReport}
-                onViewQR={(reportOrList) => openQrModal(reportOrList)}
-                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
-                onRequestDeleteReport={requestDeleteReport}
-                onRequestBulkDeleteReports={requestBulkDeleteReports}
-                onArchiveReport={handleArchiveReport}
-                onBulkArchiveReports={handleBulkArchiveReports}
-                onClearAllSandbox={requestClearAllSandbox}
-                onAssignSku={(report) => handleEditProductFromReport(report)}
-                onEditProductFromReport={handleEditProductFromReport}
-                onResetToPending={handleResetReportToPending}
-                onConfirmCoworkerAction={handleConfirmCoworkerAction}
-                onOpenReportsModal={() => setIsReportsModalOpen(true)}
-                onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
-                onOpenCreditMemoForReport={handleOpenCreditMemoForReport}
-                onEditCreditMemo={handleEditCreditMemo}
-                onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
-                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
-                onRequestBulkDeleteCreditMemos={requestBulkDeleteCreditMemos}
-                onOpenQuickAction={(rmaNumber) => {
-                  setQuickRmaNumber(rmaNumber);
-                  setIsQuickRmaModalOpen(true);
-                }}
-                onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
-                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
-                onOpenMatrixExport={() => setMatrixExportModal({
-                  isOpen: true,
-                  stream: 'overall',
-                  isTestMode: true
-                })}
-              />
-            )}
-
-            {/* TAB 6: ENTERPRISE ARCHIVE & 30-DAY TRASH BIN */}
-            {adminActiveTab === 'archive_trash' && (
-              <ArchiveAndTrashTab
-                archivedReports={archivedReportsList}
-                trashedReports={trashedReportsList}
-                archivedReportsList={archivedReportsList}
-                trashedReportsList={trashedReportsList}
-                currentUser={currentUser}
-                onRefresh={refreshAllData}
-                onRestore={handleRestoreFromTrashOrArchive}
-                onPermanentlyDelete={handlePermanentlyDeleteReport}
-                onEmptyTrash={handleEmptyTrash}
-                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
-                savedProductsList={savedProductsList}
-              />
-            )}
-
-            {/* TAB 7: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
-            {adminActiveTab === 'settings' && currentUser?.role === 'super_admin' && (
-              <SettingsTab
-                isTestMode={isTestMode}
-                onToggleTestMode={toggleTestMode}
-                onOpenPortalQr={() => setIsCustomerInvitesModalOpen(true)}
-                currentUser={currentUser}
-              />
-            )}
-
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
       </div>
 
@@ -5870,6 +5966,7 @@ export default function App() {
         currentUser={currentUser}
         isTestMode={Boolean(
           adminActiveTab === 'sandbox' ||
+          (adminActiveTab === 'credit_memos' && creditMemoScopeIsTest) ||
           isTestRecord(editingCreditMemo) ||
           isTestRecord(selectedCreditMemoReport) ||
           selectedCreditMemoReports.some(r => isTestRecord(r))
@@ -5877,6 +5974,7 @@ export default function App() {
         reportsList={
           Boolean(
             adminActiveTab === 'sandbox' ||
+            (adminActiveTab === 'credit_memos' && creditMemoScopeIsTest) ||
             isTestRecord(editingCreditMemo) ||
             isTestRecord(selectedCreditMemoReport) ||
             selectedCreditMemoReports.some(r => isTestRecord(r))
@@ -5888,6 +5986,7 @@ export default function App() {
         creditMemosCount={
           Boolean(
             adminActiveTab === 'sandbox' ||
+            (adminActiveTab === 'credit_memos' && creditMemoScopeIsTest) ||
             isTestRecord(editingCreditMemo) ||
             isTestRecord(selectedCreditMemoReport) ||
             selectedCreditMemoReports.some(r => isTestRecord(r))

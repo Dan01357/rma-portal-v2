@@ -4,6 +4,7 @@ import {
   attachStrictGuards,
   installPrintStubs,
   gotoAdmin,
+  navigateAdminSidebar,
   assertNoHorizontalOverflow,
   cleanupTestRecords
 } from './helpers/testUtils.js';
@@ -239,39 +240,41 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
         });
         await assertNoHorizontalOverflow(page, `${vp.name} Public Intake`);
 
-        // 2. Admin Dashboard all 6 top-level tabs + Customer Hub Credit Memos Ledger sub-tab responsive check
+        // 2. Admin Dashboard all 5 Sidebar Groups (14 routes) on Desktop (1440x900) & Mobile Slide-Out Drawer (390x844)
         await gotoAdmin(page);
-        for (const tabLabel of [
-          'Saved Products',
-          'Customer RMA Hub',
-          'Supplier Hub',
-          'Test Mode Sandbox',
-          'Archive & Trash',
-          'Settings & SMTP'
+        for (const tabId of [
+          'products',
+          'customer_reports',
+          'supplier_claims',
+          'credit_memos',
+          'pending_barcodes',
+          'rma_reports',
+          'archive_trash',
+          'supplier_directory',
+          'warehouse_locations',
+          'rma_invites',
+          'roles_access',
+          'api_keys',
+          'sandbox',
+          'settings'
         ]) {
-          await page.getByRole('button', { name: new RegExp(tabLabel, 'i') }).first().click();
+          await navigateAdminSidebar(page, tabId);
           await page.waitForTimeout(250);
-          await assertNoHorizontalOverflow(page, `${vp.name} Admin Tab: ${tabLabel}`);
-          if (tabLabel === 'Customer RMA Hub') {
-            await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
-            await page.waitForTimeout(200);
-            await assertNoHorizontalOverflow(page, `${vp.name} Customer Hub Sub-Tab: Credit Memos Ledger`);
-          }
+          await assertNoHorizontalOverflow(page, `${vp.name} Admin Route: ${tabId}`);
         }
       }
 
       // Global Date Format Audit on Admin Tables: ensure zero locale-ambiguous MM/DD/YYYY in rendered table headers/badges
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
-      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
+      await navigateAdminSidebar(page, 'customer_reports');
       const custText = await page.locator('table').first().innerText().catch(() => '');
       if (custText) {
         expect(custText).not.toMatch(/\b(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/\d{4}\b/);
       }
 
-      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
-      await expect(page.getByText(/From \(YYYY-MM-DD\)/i).first()).toBeVisible();
-      await expect(page.getByText(/To \(YYYY-MM-DD\)/i).first()).toBeVisible();
+      await navigateAdminSidebar(page, 'credit_memos');
+      await expect(page.getByText(/^From Date$/i).first()).toBeVisible();
+      await expect(page.getByText(/^To Date$/i).first()).toBeVisible();
 
       guard.assertClean('suite 08 responsive viewports & global date format audit');
     } finally {

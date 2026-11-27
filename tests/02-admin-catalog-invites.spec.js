@@ -5,7 +5,9 @@ import {
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
-  gotoAdmin
+  gotoAdmin,
+  navigateAdminSidebar,
+  openSettingsSubTab
 } from './helpers/testUtils.js';
 
 test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites & Saved Products Catalog CRUD', () => {
@@ -22,34 +24,46 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
     const testInviteEmail = `pw-invite-${uniqueSuffix}@pingcon-test.local`;
 
     try {
-      // 1. Main Admin session: Click all 5 Symmetrical KPI Cards & all Top-Level Tabs
+      // 1. Main Admin session: Verify 5-group Enterprise Sidebar, collapse/expand rail, & 5 KPI Strip shortcuts
       await gotoAdmin(page);
 
-      // Assert standalone top-level Credit Memos tab button is removed
-      await expect(page.getByRole('button', { name: /^Credit Memos \(\d+\)$/i })).toHaveCount(0);
+      const desktopSidebar = page.locator('[data-testid="admin-sidebar-desktop"]');
+      await expect(desktopSidebar).toBeVisible();
+      for (const groupLabel of [
+        'Operations',
+        'Catalog & Records',
+        'Directory & Locations',
+        'Access & Integrations',
+        'QA & System'
+      ]) {
+        await expect(desktopSidebar.getByText(groupLabel, { exact: true })).toBeVisible();
+      }
+      await desktopSidebar.getByRole('button', { name: 'Collapse sidebar' }).click();
+      await expect(desktopSidebar.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+      await desktopSidebar.getByRole('button', { name: 'Expand sidebar' }).click();
 
       // Card 1: Saved Products
-      await page.locator('div.cursor-pointer', { hasText: 'Catalog items' }).first().click();
+      await page.locator('div.cursor-pointer', { hasText: 'Verified SKUs' }).first().click();
       await expect(page.getByText('Verified Products Catalog')).toBeVisible();
 
-      // Card 2: Customer Inbound (Returns + clickable Credit Memos (N) -> pill)
+      // Card 2: Customer Inbound (Returns + clickable Credit Memos (N) -> pill -> Dedicated Credit Memos Ledger)
       const inboundCard = page.locator('div.cursor-pointer', { hasText: 'Customer Inbound' }).first();
       await inboundCard.click();
       await expect(page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i })).toBeVisible();
       await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
 
-      // Click Credit Memos (N) -> pill inside Customer Inbound KPI card
-      await inboundCard.getByRole('button', { name: /Credit Memos \(\d+\)/i }).click();
+      // Click CM (N) -> pill inside Customer Inbound KPI card
+      await inboundCard.getByRole('button', { name: /(?:Credit Memos|CM) \(\d+\)/i }).click();
       await expect(page.getByRole('button', { name: /Issue Credit Memo/i })).toBeVisible();
       await expect(page.getByText('WMS / ERP Sync')).toHaveCount(0);
-      await page.getByRole('button', { name: /Customer Returns \(/i }).click();
+      await navigateAdminSidebar(page, 'customer_reports');
       await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
 
       // Card 3: Supplier RTVs
       await page.locator('div.cursor-pointer', { hasText: 'Vendor claims queued' }).first().click();
       await expect(page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i })).toBeVisible();
 
-      // Card 4: Awaiting SKU -> Pending Unknown Barcodes modal
+      // Card 4: Awaiting SKU -> Embedded Pending Unknown Barcodes page
       await page.locator('div.cursor-pointer', { hasText: 'Needs SKU assignment' }).first().click();
       await expect(page.getByText('Pending Unknown Barcodes')).toBeVisible();
       const pendingFilter = page.locator('input[placeholder="Filter pending by barcode or SN..."]');
@@ -69,41 +83,33 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
           await page.getByRole('button', { name: /Back to List/i }).click();
         }
       }
-      await page
-        .locator('div.fixed', { hasText: 'Pending Unknown Barcodes' })
-        .locator('button')
-        .first()
-        .click();
-      await expect(page.getByText('Pending Unknown Barcodes')).toBeHidden();
 
-      // Card 6: Staff Directory -> EmployeeManagementModal (Search, Role/Status/Sort filters, Reset, Add Employee, HR Center API Sync)
-      await page.locator('div.cursor-pointer', { hasText: 'Company staff' }).first().click();
-      const empModal = page.locator('div.fixed', { hasText: 'Employee Access & Roles Management' });
-      await expect(empModal).toBeVisible();
-      await empModal.locator('input[placeholder*="Search by employee name" i]').fill('Danilo');
-      await empModal.locator('select').nth(0).selectOption('super_admin');
-      await empModal.locator('select').nth(1).selectOption('active');
-      await empModal.locator('select').nth(2).selectOption('name_desc');
-      await empModal.getByRole('button', { name: 'Reset', exact: true }).click();
-      await expect(empModal.locator('input[placeholder*="Search by employee name" i]')).toHaveValue('');
+      // Card 5: Staff Directory -> Embedded Employee Access & Roles Management page
+      await page.locator('div.cursor-pointer', { hasText: 'Authorized team' }).first().click();
+      const empPanel = page.locator('main');
+      await expect(empPanel.getByText('Employee Access & Roles Management')).toBeVisible();
+      await empPanel.locator('input[placeholder*="Search by employee name" i]').fill('Danilo');
+      await empPanel.locator('select').nth(0).selectOption('super_admin');
+      await empPanel.locator('select').nth(1).selectOption('active');
+      await empPanel.locator('select').nth(2).selectOption('name_desc');
+      await empPanel.getByRole('button', { name: 'Reset', exact: true }).click();
+      await expect(empPanel.locator('input[placeholder*="Search by employee name" i]')).toHaveValue('');
 
-      await empModal.getByRole('button', { name: /HR Center API Sync/i }).click();
-      await expect(empModal.getByText(/Sync Active Staff/i)).toBeVisible();
-      await empModal.getByRole('button', { name: /HR Center API Sync/i }).click();
+      await empPanel.getByRole('button', { name: /HR Center API Sync/i }).click();
+      await expect(empPanel.getByText(/Sync Active Staff/i)).toBeVisible();
+      await empPanel.getByRole('button', { name: /HR Center API Sync/i }).click();
 
-      await empModal.getByRole('button', { name: /Add Employee/i }).click();
-      await expect(empModal.getByText('Add Authorized Company Staff')).toBeVisible();
-      await empModal.getByRole('button', { name: 'Cancel', exact: true }).last().click();
+      await empPanel.getByRole('button', { name: /Add Employee/i }).click();
+      await expect(empPanel.getByText('Add Authorized Company Staff')).toBeVisible();
+      await empPanel.getByRole('button', { name: 'Cancel', exact: true }).last().click();
 
-      await empModal.locator('div.border-b button').first().click();
-      await expect(page.getByText('Employee Access & Roles Management')).toBeHidden();
-
-      // Click top navigation tabs & header Awaiting SKU / Roles buttons
-      await page.getByRole('button', { name: /Archive & Trash/i }).click();
-      await expect(page.getByRole('button', { name: /Trash Bin/i })).toBeVisible();
-      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      // Navigate via Enterprise Sidebar routes
+      await navigateAdminSidebar(page, 'archive_trash');
+      await expect(page.getByRole('button', { name: /Trash Bin — 30-Day/i })).toBeVisible();
+      await navigateAdminSidebar(page, 'settings');
+      await openSettingsSubTab(page, 'Test Mode, Diagnostics & Portal');
       await expect(page.getByText('Simulation / Test Mode Toggle')).toBeVisible();
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await navigateAdminSidebar(page, 'sandbox');
       await expect(page.getByRole('button', { name: /Sandbox Customer RMAs/i })).toBeVisible();
 
       // 3. NotificationBell (Open, All/Unread toggle, Mark all read, Close)
@@ -120,10 +126,10 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       }
       await page.keyboard.press('Escape');
 
-      // 4. Generate RMA Invites Modal (Customer vs Supplier, Live vs Test, Custom expiry, Send Email, Table filter, Refresh, Revoke, Delete)
-      await page.getByRole('button', { name: /Generate RMA Invites/i }).click();
-      const invitesModal = page.locator('div.fixed', { hasText: 'Google Identity Lock' });
-      await expect(invitesModal).toBeVisible();
+      // 4. Customer & RMA Invites Embedded Page (Customer vs Supplier, Live vs Test, Custom expiry, Send Email, Table filter, Refresh, Revoke, Delete)
+      await navigateAdminSidebar(page, 'rma_invites');
+      const invitesModal = page.locator('main');
+      await expect(invitesModal.getByText('Google Identity Lock')).toBeVisible();
 
       // Verify RMA Details Editor multi-recipient & Never Expires mode, then switch back to Customer Return
       await invitesModal.getByRole('button', { name: /RMA Details Editor/i }).first().click();
@@ -182,8 +188,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await inviteRow.locator('button[title="Delete Invite Record"]').click();
       await expect(inviteRow).toBeHidden({ timeout: 25_000 });
 
-      await invitesModal.getByRole('button', { name: 'Close', exact: true }).click();
-      await expect(invitesModal).toBeHidden();
+      await navigateAdminSidebar(page, 'products');
 
       // Isolated Logout check so shared admin refresh token is never revoked
       const isoCtx = await browser.newContext({
@@ -231,10 +236,8 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
 
     try {
       await gotoAdmin(page);
-      const savedProductsTab = page.getByRole('button', { name: /Saved Products \([1-9]/i });
-      await expect(savedProductsTab).toBeVisible({ timeout: 25_000 });
-      await savedProductsTab.click();
-      await expect(page.getByText('Verified Products Catalog')).toBeVisible();
+      await navigateAdminSidebar(page, 'products');
+      await expect(page.getByText('Verified Products Catalog')).toBeVisible({ timeout: 25_000 });
 
       // View switcher, search, filters, Reset, sortable column headers
       await page.getByRole('button', { name: /Grid Cards/i }).click();
