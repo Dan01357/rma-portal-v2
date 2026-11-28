@@ -637,7 +637,7 @@ export default function RmaEmailEditorView({
                 </div>
               )}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Expiry Date (YYYY-MM-DD)</label>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Expiry Date</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="date"
@@ -735,7 +735,7 @@ export default function RmaEmailEditorView({
                       />
                     </div>
                     <div>
-                      <label className="text-[9.5px] font-bold text-slate-400 block">Expiry (YYYY-MM-DD)</label>
+                      <label className="text-[9.5px] font-bold text-slate-400 block">Expiry Date</label>
                       <input
                         type="date"
                         value={it.expiry_date || ''}

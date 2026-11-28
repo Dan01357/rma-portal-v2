@@ -23,6 +23,7 @@ import {
   isManifestSubItem
 } from '../utils/rmaHelpers';
 import TablePagination from './TablePagination';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function ArchiveAndTrashTab({
   archivedReports = [],
@@ -37,6 +38,7 @@ export default function ArchiveAndTrashTab({
   onViewPhoto,
   savedProductsList = []
 }) {
+  const isDesktopMd = useIsDesktopMd();
   const [activeView, setActiveView] = useState('trash'); // 'archive' | 'trash'
   const [envFilter, setEnvFilter] = useState('all'); // 'all' | 'live' | 'test'
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,36 +148,36 @@ export default function ArchiveAndTrashTab({
 
         {/* View Toggle Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl">
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl w-full sm:w-auto">
             <button
               type="button"
               onClick={() => { setActiveView('trash'); setCurrentPage(1); }}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeView === 'trash'
                   ? 'bg-rose-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
               }`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>🗑️ Trash Bin — 30-Day Auto-Delete ({effectiveTrashed.length})</span>
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              <span>Trash Bin — 30-Day Auto-Delete ({effectiveTrashed.length})</span>
             </button>
 
             <button
               type="button"
               onClick={() => { setActiveView('archive'); setCurrentPage(1); }}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeView === 'archive'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
               }`}
             >
-              <Archive className="w-3.5 h-3.5" />
-              <span>🗄️ Archive Vault ({effectiveArchived.length})</span>
+              <Archive className="w-3.5 h-3.5 shrink-0" />
+              <span>Archive Vault ({effectiveArchived.length})</span>
             </button>
           </div>
 
           {/* Environment Filter */}
-          <div className="flex items-center gap-1.5 text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
             <span className="text-slate-400 text-[11px] uppercase mr-1">Scope:</span>
             <button
               type="button"
@@ -241,22 +243,23 @@ export default function ArchiveAndTrashTab({
             </p>
           </div>
         ) : (
+          isDesktopMd ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black uppercase text-slate-500 tracking-wider">
-                  <th className="py-3 px-3.5 text-center">SN</th>
-                  <th className="py-3 px-3.5">RMA Identifier</th>
-                  <th className="py-3 px-3.5">Scope</th>
-                  <th className="py-3 px-3.5">Product Description & SKU</th>
-                  <th className="py-3 px-3.5 text-right">Qty</th>
-                  <th className="py-3 px-3.5">Location</th>
+                  <th className="py-2.5 px-1.5 text-center">SN</th>
+                  <th className="py-2.5 px-1.5">RMA Identifier</th>
+                  <th className="py-2.5 px-1.5">Scope</th>
+                  <th className="py-2.5 px-1.5">Product Description &amp; SKU</th>
+                  <th className="py-2.5 px-1.5 text-right whitespace-nowrap">Qty</th>
+                  <th className="py-2.5 px-1.5">Location</th>
                   {activeView === 'trash' ? (
-                    <th className="py-3 px-3.5">Retention / Auto-Purge</th>
+                    <th className="py-2.5 px-1.5">Retention / Auto-Purge</th>
                   ) : (
-                    <th className="py-3 px-3.5">Archived Details</th>
+                    <th className="py-2.5 px-1.5">Archived Details</th>
                   )}
-                  <th className="py-3 px-3.5 text-center">Actions</th>
+                  <th className="py-2.5 px-1.5 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -272,15 +275,15 @@ export default function ArchiveAndTrashTab({
                       key={item.id || item.rma_number}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                     >
-                      <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-400">
+                      <td className="py-2 px-1.5 text-center font-mono font-bold text-slate-400">
                         #{(currentPage - 1) * pageSize + idx + 1}
                       </td>
 
-                      <td className="py-3 px-3.5 font-mono">
-                        <div className="font-bold text-slate-900 dark:text-white">
+                      <td className="py-2 px-1.5 font-mono">
+                        <div className="font-bold text-slate-900 dark:text-white whitespace-nowrap">
                           {item.rma_number}
                         </div>
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5 whitespace-nowrap">
                           {isSupplier ? (
                             <span className="text-purple-600 dark:text-purple-400 font-bold">📤 Supplier RTV</span>
                           ) : (
@@ -289,63 +292,63 @@ export default function ArchiveAndTrashTab({
                         </div>
                       </td>
 
-                      <td className="py-3 px-3.5">
+                      <td className="py-2 px-1.5 whitespace-nowrap">
                         {isTest ? (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700 inline-block whitespace-nowrap">
                             🧪 Sandbox
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-block whitespace-nowrap">
                             🟢 Live
                           </span>
                         )}
                       </td>
 
-                      <td className="py-3 px-3.5">
-                        <div className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-xs" title={item.name}>
+                      <td className="py-2 px-1.5 max-w-[155px]">
+                        <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={item.name}>
                           {item.name}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
                           BC: {item.barcode} {item.code || item.sku ? `• SKU: ${item.code || item.sku}` : ''}
                         </div>
                       </td>
 
-                      <td className="py-3 px-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
+                      <td className="py-2 px-1.5 text-right font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
                         {formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case)}
                       </td>
 
-                      <td className="py-3 px-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300 max-w-[110px] truncate" title={loc}>
                         {loc}
                       </td>
 
                       {activeView === 'trash' ? (
-                        <td className="py-3 px-3.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1 border ${
+                        <td className="py-2 px-1.5">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1 border whitespace-nowrap ${
                               daysRemaining <= 7
                                 ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300 dark:border-rose-700 animate-pulse'
                                 : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                             }`}>
-                              <Clock className="w-3 h-3" />
-                              <span>⏳ {daysRemaining} days remaining</span>
+                              <Clock className="w-3 h-3 shrink-0" />
+                              <span>{daysRemaining} days left</span>
                             </span>
                           </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            By {meta.trashed_by || 'Staff'} on {meta.trashed_at ? formatDateYmd(meta.trashed_at) : 'N/A'}
+                          <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                            By {meta.trashed_by || 'Staff'} • <span className="font-mono">{meta.trashed_at ? formatDateYmd(meta.trashed_at) : 'N/A'}</span>
                           </div>
                         </td>
                       ) : (
-                        <td className="py-3 px-3.5">
+                        <td className="py-2 px-1.5">
                           <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
                             Archived Vault
                           </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            By {meta.archived_by || 'Staff'} on {meta.archived_at ? formatDateYmd(meta.archived_at) : 'N/A'}
+                          <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                            By {meta.archived_by || 'Staff'} • <span className="font-mono">{meta.archived_at ? formatDateYmd(meta.archived_at) : 'N/A'}</span>
                           </div>
                         </td>
                       )}
 
-                      <td className="py-3 px-3.5 text-center">
+                      <td className="py-2 px-1.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           {canManage && (
                             <button
@@ -356,7 +359,7 @@ export default function ArchiveAndTrashTab({
                               title="Restore item back to active hub"
                             >
                               <RotateCcw className="w-3 h-3 text-blue-600" />
-                              <span>↩️ Restore</span>
+                              <span>Restore</span>
                             </button>
                           )}
 
@@ -379,6 +382,92 @@ export default function ArchiveAndTrashTab({
               </tbody>
             </table>
           </div>
+          ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {paginatedList.map((item, idx) => {
+              const isTest = isTestRecord(item);
+              const daysRemaining = getTrashDaysRemaining(item);
+              const isSupplier = item.rma_type === 'supplier_outbound';
+              const loc = normalizeWarehouseLocation(item.warehouse_location, item);
+              const meta = item.ai_document_metadata || {};
+
+              return (
+                <div key={`mob-${item.id || item.rma_number}`} className="p-3.5 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center flex-wrap gap-1.5 min-w-0">
+                      <span className="font-mono font-bold text-xs text-slate-400">#{(currentPage - 1) * pageSize + idx + 1}</span>
+                      <span className="font-mono font-black text-xs text-slate-900 dark:text-white">{item.rma_number}</span>
+                      {isTest ? (
+                        <span className="px-1.5 py-0.5 rounded text-[9.5px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">🧪 Sandbox</span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9.5px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">🟢 Live</span>
+                      )}
+                    </div>
+                    <span className="font-mono font-black text-xs text-slate-900 dark:text-white whitespace-nowrap">
+                      {formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-xs text-slate-900 dark:text-white break-words">{item.name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      BC: {item.barcode} {item.code || item.sku ? `• SKU: ${item.code || item.sku}` : ''}
+                    </div>
+                    <div className="text-[10px] text-slate-500 flex items-center flex-wrap gap-x-2">
+                      <span className={isSupplier ? 'text-purple-600 dark:text-purple-400 font-bold' : 'text-blue-600 dark:text-blue-400 font-bold'}>
+                        {isSupplier ? '📤 Supplier RTV' : '📥 Customer Inbound'}
+                      </span>
+                      <span className="font-mono">{loc}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                    {activeView === 'trash' ? (
+                      <div className="text-[10px] text-slate-500 flex items-center flex-wrap gap-1.5">
+                        <span className={`px-2 py-0.5 rounded-md font-black border inline-flex items-center gap-1 ${
+                          daysRemaining <= 7
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300 dark:border-rose-700'
+                            : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                        }`}>
+                          <Clock className="w-3 h-3" />
+                          <span>{daysRemaining} days left</span>
+                        </span>
+                        <span className="font-mono">{meta.trashed_at ? formatDateYmd(meta.trashed_at) : 'N/A'}</span>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-bold">
+                        Archived by {meta.archived_by || 'Staff'} • <span className="font-mono">{meta.archived_at ? formatDateYmd(meta.archived_at) : 'N/A'}</span>
+                      </div>
+                    )}
+
+                    {canManage && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={actionInProgressId === (item.id || item.rma_number)}
+                          onClick={() => handleRestoreItem(item)}
+                          className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3 text-blue-600" />
+                          <span>Restore</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionInProgressId === (item.id || item.rma_number)}
+                          onClick={() => handleDeleteItemForever(item)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg"
+                          title="Permanently destroy this record forever"
+                        >
+                          <Flame className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          )
         )}
 
         {filteredList.length > 0 && (

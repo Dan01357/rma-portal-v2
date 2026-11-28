@@ -30,6 +30,7 @@ import {
   getCreditMemoConsolidatedItems,
   getCreditMemoRmaNumbers
 } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -44,6 +45,7 @@ export default function CreditMemosTab({
   isTestMode = false
 }) {
   const canManageCreditMemos = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const isDesktopMd = useIsDesktopMd();
   const [searchQuery, setSearchQuery] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
@@ -406,7 +408,7 @@ export default function CreditMemosTab({
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               Manage approved customer deductions, pull-out receipts, credit amounts, and printable accounting vouchers.
             </p>
           </div>
@@ -538,7 +540,7 @@ export default function CreditMemosTab({
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
+          <div className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
             <span>
               Showing <strong className="text-slate-900 dark:text-white font-bold">{processedMemos.length}</strong> of {creditMemosList.length} credit memos
               {(searchQuery || dateFrom || dateTo) && (
@@ -546,7 +548,17 @@ export default function CreditMemosTab({
               )}
             </span>
             <span className="text-slate-400">
-              Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{sortField}</strong> {sortDirection === 'asc' ? '▲' : '▼'})
+              Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300">{{
+                credit_issued_at: 'Issued Date',
+                credit_memo_number: 'CM #',
+                rma_number: 'RMA #',
+                supplier_name: 'Supplier',
+                product_name: 'Product',
+                quantity: 'Qty',
+                pull_out_ref: 'Pull-Out Ref',
+                credit_amount: 'Credit Amount',
+                credit_issued_by: 'Issued By'
+              }[sortField] || sortField}</strong> {sortDirection === 'asc' ? '▲' : '▼'})
             </span>
           </div>
         </div>
@@ -624,6 +636,7 @@ export default function CreditMemosTab({
           </div>
         ) : (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs">
+            {isDesktopMd ? (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
@@ -883,6 +896,106 @@ export default function CreditMemosTab({
                 </tbody>
               </table>
             </div>
+            ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {paginatedMemos.map((memo, idx) => {
+                const isSelected = selectedMemoNumbers.has(memo.credit_memo_number);
+                const cmRmas = getCreditMemoRmaNumbers(memo);
+                const cmItems = getCreditMemoConsolidatedItems(memo);
+                const count = Math.max(cmRmas.length, cmItems.length);
+                const isMulti = count > 1;
+                return (
+                  <div
+                    key={`mob-${memo.credit_memo_number}`}
+                    className={`p-3.5 space-y-2 transition-colors ${isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center flex-wrap gap-1.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(memo.credit_memo_number)}
+                          className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <span className="font-mono font-black text-emerald-900 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 rounded-lg text-[10.5px]">
+                          #{(currentPage - 1) * pageSize + idx + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onViewVoucher(memo)}
+                          className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Receipt className="w-3.5 h-3.5 shrink-0" />
+                          <span>{memo.credit_memo_number}</span>
+                        </button>
+                      </div>
+                      <div className="text-right font-mono shrink-0">
+                        <div className="font-black text-emerald-700 dark:text-emerald-400 text-xs">
+                          ₱{Number(memo.credit_amount || memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        {Number(memo.amount || 0) > 0 && (
+                          <div className="text-[10px] text-slate-400">
+                            Gross: ₱{Number(memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 text-xs">
+                      <div className="font-bold text-slate-900 dark:text-white break-words">{memo.product_name}</div>
+                      <div className="font-mono text-[10.5px] text-slate-500 flex items-center flex-wrap gap-x-2 gap-y-0.5">
+                        <span className="font-bold text-blue-700 dark:text-blue-400">
+                          {isMulti ? `${cmRmas[0] || memo.rma_number} (+${count - 1})` : (memo.rma_number || 'N/A')}
+                        </span>
+                        <span>• {memo.supplier_name || 'Savemore'}</span>
+                        <span>• {memo.quantity} {memo.unit_name || 'pc'}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 flex items-center flex-wrap gap-x-2 gap-y-0.5">
+                        <span>Pull-out: <strong className="text-slate-700 dark:text-slate-300">{memo.pull_out_ref || 'Warehouse Pull-Out'}</strong> ({memo.pull_out_date || 'N/A'})</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] text-slate-500 min-w-0">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{memo.credit_issued_by || 'Finance'}</span>
+                        <span className="font-mono ml-1.5">{memo.credit_issued_at ? formatDateYmd(memo.credit_issued_at) : '—'}</span>
+                      </div>
+                      <div className="inline-flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onViewVoucher(memo)}
+                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                          title="Print Official Credit Voucher"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+                        {canManageCreditMemos && (
+                          <button
+                            type="button"
+                            onClick={() => onEditCreditMemo(memo)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                            title="Edit Credit Memo"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canManageCreditMemos && onRequestDeleteCreditMemo && (
+                          <button
+                            type="button"
+                            onClick={() => onRequestDeleteCreditMemo(memo)}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                            title="Void / Delete Credit Memo"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            )}
 
             {/* Pagination */}
             <TablePagination

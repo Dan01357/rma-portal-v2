@@ -135,8 +135,8 @@ export default function FollowUpTimelineCard({
       )}
 
       {/* Summary 4 Steps Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 ${compact ? 'gap-1.5' : 'gap-2'}`}>
+        <div className={`${compact ? 'p-2' : 'p-2.5'} rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800`}>
           <div className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
             Step 1: Report Date
           </div>
@@ -145,7 +145,7 @@ export default function FollowUpTimelineCard({
           </div>
         </div>
 
-        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+        <div className={`${compact ? 'p-2' : 'p-2.5'} rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800`}>
           <div className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
             Step 2: Waiting For Pickup
           </div>
@@ -154,7 +154,7 @@ export default function FollowUpTimelineCard({
           </div>
         </div>
 
-        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+        <div className={`${compact ? 'p-2' : 'p-2.5'} rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800`}>
           <div className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
             Step 3: Driver Picked Up Date
           </div>
@@ -165,7 +165,7 @@ export default function FollowUpTimelineCard({
           </div>
         </div>
 
-        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+        <div className={`${compact ? 'p-2' : 'p-2.5'} rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800`}>
           <div className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
             Step 4: Case Close
           </div>
@@ -184,15 +184,15 @@ export default function FollowUpTimelineCard({
             type="button"
             onClick={() => setIsDaysExpanded((v) => !v)}
             aria-expanded={isDaysExpanded}
-            className="w-full px-3 py-2 bg-slate-100/80 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+            className="w-full px-3 py-2 bg-slate-100/80 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 flex items-center justify-between flex-wrap gap-x-2 gap-y-1 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
           >
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-left min-w-0">
               <span>{isDaysExpanded ? 'Hide' : 'Show'} Day 0 – Day 10 Schedule ({days.length} steps)</span>
-              <span className="font-mono text-[9.5px] font-bold text-slate-500 dark:text-slate-400 normal-case">
+              <span className="font-mono text-[9.5px] font-bold text-slate-500 dark:text-slate-400 normal-case whitespace-nowrap shrink-0">
                 • Sent: {wf.sentCount}
               </span>
             </span>
-            <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+            <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 shrink-0 whitespace-nowrap">
               <span>{isDaysExpanded ? 'Collapse' : 'Expand'}</span>
               {isDaysExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </span>

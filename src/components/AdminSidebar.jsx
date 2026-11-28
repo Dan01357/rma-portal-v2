@@ -289,21 +289,21 @@ export default function AdminSidebar({
                     onCloseMobile?.();
                   }}
                   className={`relative w-full touch-target rounded-xl transition-all flex items-center cursor-pointer ${
-                    compactMode ? 'justify-center px-2 py-2.5' : 'justify-between gap-2 px-2.5 py-2'
+                    compactMode ? 'justify-center px-2 py-2.5' : 'justify-between gap-1.5 px-2.5 py-2'
                   } ${
                     isActive
                       ? 'bg-slate-900 text-white dark:bg-blue-600 dark:text-white shadow-sm font-black'
                       : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 font-bold'
                   }`}
                 >
-                  <span className={`flex items-center ${compactMode ? 'justify-center' : 'gap-2.5 min-w-0'}`}>
+                  <span className={`flex items-center ${compactMode ? 'justify-center' : 'gap-1.5 min-w-0'}`}>
                     <Icon
                       className={`w-4 h-4 shrink-0 ${
                         isActive ? 'text-white' : item.accent
                       }`}
                     />
                     {!compactMode && (
-                      <span className="text-xs truncate">{item.label}</span>
+                      <span className="text-[11px] leading-tight truncate">{item.label}</span>
                     )}
                   </span>
 
@@ -350,7 +350,7 @@ export default function AdminSidebar({
       <aside
         data-testid="admin-sidebar-desktop"
         className={`hidden lg:block sticky top-0 h-dvh shrink-0 transition-all duration-200 z-30 ${
-          isCollapsed ? 'w-[72px]' : 'w-64'
+          isCollapsed ? 'w-[72px]' : 'w-[236px] 2xl:w-64'
         }`}
       >
         {renderSidebarBody(isCollapsed)}

@@ -695,7 +695,7 @@ export default function CreditMemoModal({
                     />
                   </div>
 
-                  <div className="max-h-40 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900">
+                  <div className="divide-y divide-slate-200 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900">
                     {filteredConsolidatedOptions.map((r) => {
                       const k = getReportKey(r);
                       const checked = selectedConsolidatedKeys.includes(k);
@@ -1051,7 +1051,7 @@ export default function CreditMemoModal({
 
             {/* ROW 3: FINAL APPROVED CREDIT AMOUNT (Highlighted Card) */}
             <div className="p-4 bg-emerald-50/80 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800/80 rounded-2xl space-y-2.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <label className="block text-xs font-black uppercase text-emerald-950 dark:text-emerald-300 tracking-wider">
                     Total Credit Amount (₱) *
@@ -1062,11 +1062,11 @@ export default function CreditMemoModal({
                 </div>
 
                 {/* Quick adjustment buttons */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => applyCreditPercentage(1.0)}
-                    className="px-2 py-1 bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-slate-700 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer"
+                    className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-slate-700 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     title="Grant 100% full credit"
                   >
                     100% Full
@@ -1074,7 +1074,7 @@ export default function CreditMemoModal({
                   <button
                     type="button"
                     onClick={() => applyCreditPercentage(0.9)}
-                    className="px-2 py-1 bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-slate-700 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer"
+                    className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-slate-700 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     title="Apply 10% handling fee deduction"
                   >
                     90% (-10%)
@@ -1144,48 +1144,46 @@ export default function CreditMemoModal({
         </div>
 
         {/* Pinned Footer with Actions */}
-        <div className="p-4 sm:px-6 pb-safe bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+        <div className="p-4 sm:px-6 pb-safe bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="touch-target px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white text-xs font-bold cursor-pointer"
+            className="touch-target px-3 sm:px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white bg-white sm:bg-transparent border border-slate-200 sm:border-transparent dark:bg-slate-800 sm:dark:bg-transparent dark:border-slate-700 rounded-xl text-xs font-bold cursor-pointer text-center"
           >
             Cancel
           </button>
 
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-            <button
-              type="button"
-              onClick={(e) => handleSubmit(e, true)}
-              disabled={isLoading || hasValidationBlocker}
-              className="touch-target px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-              title={hasValidationBlocker ? "Assign SKU to all selected RMAs first" : "Save Credit Memo and open printable official voucher"}
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 shrink-0" />
-              <span className="truncate">Save &amp; View Voucher</span>
-            </button>
+          <button
+            type="button"
+            onClick={(e) => handleSubmit(e, true)}
+            disabled={isLoading || hasValidationBlocker}
+            className="touch-target px-3 sm:px-3.5 py-2 sm:py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 sm:ml-auto"
+            title={hasValidationBlocker ? "Assign SKU to all selected RMAs first" : "Save Credit Memo and open printable official voucher"}
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 shrink-0" />
+            <span className="truncate">Save &amp; View Voucher</span>
+          </button>
 
-            <button
-              type="submit"
-              form="credit-memo-form"
-              disabled={isLoading || hasValidationBlocker}
-              className="touch-target px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
-              title={hasValidationBlocker ? "Assign SKU to all selected RMAs first" : "Issue Credit Memo"}
-            >
-              {isLoading ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <CheckCircle className="w-3.5 h-3.5" />
-              )}
-              <span className="truncate">
-                {isEditing
-                  ? 'Update Credit Memo'
-                  : isConsolidatedActive
-                    ? `Issue Consolidated CM (${selectedConsolidatedReports.length} RMAs)`
-                    : 'Issue Credit Memo'}
-              </span>
-            </button>
-          </div>
+          <button
+            type="submit"
+            form="credit-memo-form"
+            disabled={isLoading || hasValidationBlocker}
+            className="col-span-2 sm:col-span-1 touch-target px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
+            title={hasValidationBlocker ? "Assign SKU to all selected RMAs first" : "Issue Credit Memo"}
+          >
+            {isLoading ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <CheckCircle className="w-3.5 h-3.5" />
+            )}
+            <span className="truncate">
+              {isEditing
+                ? 'Update Credit Memo'
+                : isConsolidatedActive
+                  ? `Issue Consolidated CM (${selectedConsolidatedReports.length} RMAs)`
+                  : 'Issue Credit Memo'}
+            </span>
+          </button>
         </div>
 
       </div>

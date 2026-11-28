@@ -304,11 +304,11 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center flex-wrap gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                   Pending Unknown Barcodes
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 whitespace-nowrap shrink-0">
                   {processedPendingList.length} Pending
                 </span>
               </div>
@@ -414,7 +414,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       return (
                         <div 
                           key={item.id || item.barcode}
-                          className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
+                          className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 transition-colors"
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             {photoList.length > 0 ? (
@@ -430,17 +430,27 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                                 className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 shrink-0 hover:scale-105 transition-transform cursor-zoom-in shadow-xs"
                                 title="Click to view full photo proof"
                               >
-                                <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
+                                <img
+                                  src={photoList[0]}
+                                  alt="Proof"
+                                  onError={(e) => {
+                                    if (!e.currentTarget.dataset.err) {
+                                      e.currentTarget.dataset.err = '1';
+                                      e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                    }
+                                  }}
+                                  className="w-full h-full object-cover"
+                                />
                               </button>
                             ) : (
                               <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
                             )}
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
                                   #{(currentPage - 1) * pageSize + idx + 1}
                                 </span>
-                                <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-xs break-all">
                                   {item.barcode}
                                 </span>
                                 {isUnlabeled && (
@@ -449,14 +459,14 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 break-words mt-0.5">
                                 {item.name || 'Unidentified item scanned by staff'}
                               </div>
                             </div>
                           </div>
 
                           {canVerify ? (
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
                               <button
                                 type="button"
                                 onClick={() => handleSelect(item)}

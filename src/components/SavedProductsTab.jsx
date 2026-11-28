@@ -23,6 +23,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { copyTextSafe } from '../utils/clipboard';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function SavedProductsTab({ 
   products = [], 
@@ -55,6 +56,7 @@ export default function SavedProductsTab({
   }, [products]);
   
   // File Explorer view type toggle: default to 'table' (rows list) as requested
+  const isDesktopMd = useIsDesktopMd();
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem('rma_saved_products_view_mode') || 'table';
   });
@@ -257,7 +259,7 @@ export default function SavedProductsTab({
                 {products.length} Items in DB
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               Custom catalog items saved with verified barcodes & reference photos.
             </p>
           </div>
@@ -430,7 +432,9 @@ export default function SavedProductsTab({
             </button>
           )}
         </div>
-      ) : viewMode === 'table' ? (
+      ) : (
+        <>
+        {viewMode === 'table' && isDesktopMd && (
         /* ============================================================ */
         /* VIEW 1: PRODUCTION-LEVEL ROW LIST / TABLE VIEW WITH SORTABLE HEADERS */
         /* ============================================================ */
@@ -438,9 +442,9 @@ export default function SavedProductsTab({
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
+                <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[10.5px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
                   {/* Select All Checkbox Header */}
-                  <th className="py-3 px-2 w-8 text-center">
+                  <th className="py-2.5 px-1.5 w-7 text-center">
                     <input
                       type="checkbox"
                       checked={isAllPageSelected}
@@ -451,7 +455,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('id')}
-                    className="py-3 px-2 font-black text-slate-900 dark:text-white w-12 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1.5 font-black text-slate-900 dark:text-white w-10 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Serial Number"
                   >
                     <div className="flex items-center">
@@ -459,10 +463,10 @@ export default function SavedProductsTab({
                       {renderSortIndicator('id')}
                     </div>
                   </th>
-                  <th className="py-3 px-1.5 w-12 text-center">Photo</th>
+                  <th className="py-2.5 px-1 w-10 text-center">Photo</th>
                   <th 
                     onClick={() => handleSort('barcode')}
-                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1.5 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Barcode"
                   >
                     <div className="flex items-center">
@@ -472,7 +476,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('code')}
-                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1.5 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by SKU / Code"
                   >
                     <div className="flex items-center">
@@ -482,7 +486,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('name')}
-                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1.5 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Product Name"
                   >
                     <div className="flex items-center">
@@ -492,7 +496,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('price')}
-                    className="py-3 px-2 text-right font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group whitespace-nowrap"
+                    className="py-2.5 px-1.5 text-right font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group whitespace-nowrap"
                     title="Click to sort by Price"
                   >
                     <div className="flex items-center justify-end">
@@ -502,7 +506,7 @@ export default function SavedProductsTab({
                   </th>
                   <th 
                     onClick={() => handleSort('supplier')}
-                    className="py-3 px-2 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1.5 font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Supplier"
                   >
                     <div className="flex items-center">
@@ -510,12 +514,12 @@ export default function SavedProductsTab({
                       {renderSortIndicator('supplier')}
                     </div>
                   </th>
-                  <th className="py-3 px-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                  <th className="py-2.5 px-1.5 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
                     Customer AE
                   </th>
                   <th 
                     onClick={() => handleSort('status')}
-                    className="py-3 px-2 text-center font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
+                    className="py-2.5 px-1 text-center font-bold cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
                     title="Click to sort by Status"
                   >
                     <div className="flex items-center justify-center">
@@ -523,7 +527,7 @@ export default function SavedProductsTab({
                       {renderSortIndicator('status')}
                     </div>
                   </th>
-                  <th className="py-3 px-2 text-right font-bold w-20">Actions</th>
+                  <th className="py-2.5 px-1.5 text-right font-bold w-16 whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
@@ -543,7 +547,7 @@ export default function SavedProductsTab({
                       }`}
                     >
                       {/* Individual Row Checkbox */}
-                      <td className="py-2.5 px-2 text-center">
+                      <td className="py-2 px-1.5 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -553,14 +557,14 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 1. SN (SERIAL NUMBER / DATABASE ID) COLUMN - AT FAR LEFT */}
-                      <td className="py-2.5 px-2 font-mono">
-                        <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-1.5 py-0.5 rounded-lg text-[11px] tracking-tight shadow-xs">
+                      <td className="py-2 px-1.5 font-mono">
+                        <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-1.5 py-0.5 rounded-lg text-[10.5px] tracking-tight shadow-xs">
                           #{(currentPage - 1) * pageSize + idx + 1}
                         </span>
                       </td>
 
                       {/* 2. Photo thumbnail with Clickable Zoom Lightbox */}
-                      <td className="py-2 px-1.5 text-center">
+                      <td className="py-2 px-1 text-center">
                         {hasPhoto ? (
                           <button
                             type="button"
@@ -569,43 +573,49 @@ export default function SavedProductsTab({
                               title: product.name,
                               subtitle: `Barcode: ${product.barcode} • SN #${product.id} • ${product.supplier_name || 'Savemore'}`
                             })}
-                            className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                            className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                             title="Click to zoom reference photo in fullscreen"
                           >
                             <img 
                               src={photoSrc} 
                               alt={product.name} 
+                              onError={(e) => {
+                                if (!e.currentTarget.dataset.err) {
+                                  e.currentTarget.dataset.err = '1';
+                                  e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                }
+                              }}
                               className="w-full h-full object-cover" 
                             />
                           </button>
                         ) : (
-                          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto border border-slate-200/80 dark:border-slate-700">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto border border-slate-200/80 dark:border-slate-700">
                             <ImageIcon className="w-4 h-4" />
                           </div>
                         )}
                       </td>
 
                       {/* 3. Barcode with copy button */}
-                      <td className="py-2.5 px-2">
-                        <div className="flex items-center gap-1 font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
+                      <td className="py-2 px-1.5">
+                        <div className="flex items-center gap-1 font-mono font-bold text-slate-800 dark:text-slate-200 text-[11px]">
                           <span>{product.barcode}</span>
                           <button
                             type="button"
                             onClick={() => copyToClipboard(product.barcode)}
-                            className="p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors"
+                            className="p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors shrink-0"
                             title="Copy barcode"
                           >
                             {isCopied ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              <Check className="w-3 h-3 text-emerald-600" />
                             ) : (
-                              <Copy className="w-3.5 h-3.5" />
+                              <Copy className="w-3 h-3" />
                             )}
                           </button>
                         </div>
                       </td>
 
                       {/* 4. SKU / Code */}
-                      <td className="py-2.5 px-2 font-mono text-xs text-slate-600 dark:text-slate-400">
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-400">
                         {product.code ? (
                           <span className="font-bold text-slate-700 dark:text-slate-200">
                             {product.code}
@@ -616,22 +626,22 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 5. Product Name */}
-                      <td className="py-2.5 px-2 font-bold text-slate-900 dark:text-white max-w-[165px] truncate" title={product.name}>
+                      <td className="py-2 px-1.5 font-bold text-slate-900 dark:text-white max-w-[140px] truncate" title={product.name}>
                         {product.name}
                       </td>
 
                       {/* 6. Price (w/ VAT) */}
-                      <td className="py-2.5 px-2 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs whitespace-nowrap">
+                      <td className="py-2 px-1.5 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs whitespace-nowrap">
                         ₱{Number(product.price_with_vat || product.priceWithVat || product.price || 0).toFixed(2)}
                       </td>
 
                       {/* 7. Supplier */}
-                      <td className="py-2.5 px-2 font-semibold text-xs text-slate-700 dark:text-slate-300 truncate max-w-[115px]" title={product.supplier_name || product.supplierName || 'Savemore'}>
+                      <td className="py-2 px-1.5 font-semibold text-xs text-slate-700 dark:text-slate-300 truncate max-w-[100px]" title={product.supplier_name || product.supplierName || 'Savemore'}>
                         {product.supplier_name || product.supplierName || 'Savemore'}
                       </td>
 
                       {/* 8. Customer AE */}
-                      <td className="py-2.5 px-2 text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[125px]">
+                      <td className="py-2 px-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[105px]">
                         {product.ae_name ? (
                           <div title={`${product.ae_name} (${product.ae_email || ''})`}>
                             <div className="font-bold text-slate-800 dark:text-slate-200 truncate">{product.ae_name}</div>
@@ -645,8 +655,8 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 9. Status */}
-                      <td className="py-2.5 px-1.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider ${
+                      <td className="py-2 px-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
                           product.is_verified !== false 
                             ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' 
                             : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
@@ -656,26 +666,26 @@ export default function SavedProductsTab({
                       </td>
 
                       {/* 10. Actions: Edit & Delete */}
-                      <td className="py-2.5 px-2 text-right">
+                      <td className="py-2 px-1.5 text-right w-16">
                         <div className="flex items-center justify-end gap-1">
                           {canEdit && (
                             <button
                               type="button"
                               onClick={() => onEditProduct(product)}
-                              className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors"
+                              className="p-1 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors"
                               title="Edit product"
                             >
-                              <Edit3 className="w-4 h-4" />
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
                           )}
                           {canDelete && (
                             <button
                               type="button"
                               onClick={() => onDeleteProduct(product)}
-                              className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
+                              className="p-1 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
                               title="Delete product"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
@@ -740,10 +750,12 @@ export default function SavedProductsTab({
             itemLabel="verified products"
           />
         </div>
-      ) : (
-        /* ============================================================ */
-        /* VIEW 2: FILE EXPLORER STYLE GRID CARDS VIEW                  */
-        /* ============================================================ */
+        )}
+
+        {/* ============================================================ */}
+        {/* VIEW 2: FILE EXPLORER STYLE GRID CARDS (Auto on <md)         */}
+        {/* ============================================================ */}
+        {(!isDesktopMd || viewMode !== 'table') && (
         <div className="space-y-3.5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5">
             {paginatedProducts.map((product, idx) => {
@@ -928,6 +940,8 @@ export default function SavedProductsTab({
           itemLabel="verified products"
         />
       </div>
+      )}
+      </>
       )}
 
       {/* Fullscreen Image Lightbox Modal */}

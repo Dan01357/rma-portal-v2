@@ -1677,7 +1677,7 @@ export default function QuickRMAActionModal({
                     }`}
                   >
                     <Package className="w-3.5 h-3.5 shrink-0" />
-                    <span>📥 Customer Hub</span>
+                    <span>Customer Hub</span>
                   </button>
                   <button
                     type="button"
@@ -1690,7 +1690,7 @@ export default function QuickRMAActionModal({
                     }`}
                   >
                     <Building2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>📤 Supplier RTV</span>
+                    <span>Supplier RTV</span>
                   </button>
                 </div>
               </div>
@@ -1854,7 +1854,17 @@ export default function QuickRMAActionModal({
                           className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-600 hover:scale-105 shadow-xs transition-transform cursor-zoom-in inline-block"
                           title="Click to zoom proof photo"
                         >
-                          <img src={url} alt={`Proof ${idx + 1}`} className="w-full h-full object-cover" />
+                          <img
+                            src={url}
+                            alt={`Proof ${idx + 1}`}
+                            onError={(e) => {
+                              if (!e.currentTarget.dataset.err) {
+                                e.currentTarget.dataset.err = '1';
+                                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                              }
+                            }}
+                            className="w-full h-full object-cover"
+                          />
                         </button>
                       ))}
                     </div>
@@ -1926,7 +1936,17 @@ export default function QuickRMAActionModal({
                           className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0 relative"
                           title={`Click to view paperwork photo ${pIdx + 1}`}
                         >
-                          <img src={photoUrl} alt={`Paperwork ${pIdx + 1}`} className="w-full h-full object-cover" />
+                          <img
+                            src={photoUrl}
+                            alt={`Paperwork ${pIdx + 1}`}
+                            onError={(e) => {
+                              if (!e.currentTarget.dataset.err) {
+                                e.currentTarget.dataset.err = '1';
+                                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                              }
+                            }}
+                            className="w-full h-full object-cover"
+                          />
                           <span className="absolute bottom-0 right-0 px-1 text-[8px] bg-slate-900/80 text-white font-mono">P{pIdx + 1}</span>
                         </button>
                       ))}
@@ -2487,14 +2507,14 @@ export default function QuickRMAActionModal({
                           type="button"
                           onClick={() => setIsAdvancedEditOpen((v) => !v)}
                           aria-expanded={isAdvancedEditOpen}
-                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between gap-2 text-xs font-black text-slate-700 dark:text-slate-200 cursor-pointer transition-colors"
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between flex-wrap gap-2 text-xs font-black text-slate-700 dark:text-slate-200 cursor-pointer transition-colors"
                         >
-                          <span className="flex items-center gap-1.5">
+                          <span className="flex items-center gap-1.5 shrink-0">
                             <Shield className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                             <span>Advanced / Danger Zone</span>
                           </span>
-                          <span className="flex items-center gap-2 text-[10px] font-bold text-slate-500 truncate">
-                            <span className="truncate">{adminIsTest ? 'Test Sandbox' : 'Live Production'} • {adminRmaNumber || report?.rma_number}</span>
+                          <span className="flex items-center gap-2 text-[10px] font-bold text-slate-500 min-w-0">
+                            <span className="truncate max-w-[200px] sm:max-w-none">{adminIsTest ? 'Test Sandbox' : 'Live Production'} • {adminRmaNumber || report?.rma_number}</span>
                             {isAdvancedEditOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
                           </span>
                         </button>
@@ -2504,7 +2524,7 @@ export default function QuickRMAActionModal({
                               <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
                                 Record Environment &amp; Destination Hub
                               </label>
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <button
                                   type="button"
                                   onClick={() => setAdminIsTest(true)}

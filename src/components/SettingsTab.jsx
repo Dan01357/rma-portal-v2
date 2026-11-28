@@ -27,7 +27,9 @@ import {
   BookOpen,
   X,
   Zap,
-  Timer
+  Timer,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import {
@@ -49,6 +51,7 @@ import ApiKeysManagementSection from './ApiKeysManagementSection';
 import WarehouseLocationsModal from './WarehouseLocationsModal';
 import EmailRecipientsEditor from './EmailRecipientsEditor';
 import SupplierDirectoryModal from './SupplierDirectoryModal';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -59,6 +62,7 @@ export default function SettingsTab({
   initialSubTab = 'emails',
   onNavigateTab = null
 }) {
+  const isDesktopMd = useIsDesktopMd();
   const [activeSettingsSubTab, setActiveSettingsSubTab] = useState(initialSubTab || 'emails');
   useEffect(() => {
     if (initialSubTab) setActiveSettingsSubTab(initialSubTab);
@@ -147,6 +151,7 @@ export default function SettingsTab({
 
   // Live Product Catalog API State
   const [poApiKey, setPoApiKey] = useState(() => purchaseOrdersApi.getApiKey() || '');
+  const [showPoApiKey, setShowPoApiKey] = useState(false);
   const [poApiStatus, setPoApiStatus] = useState({
     loading: false,
     checked: false,
@@ -805,13 +810,13 @@ export default function SettingsTab({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl overflow-x-auto no-scrollbar border border-slate-200 dark:border-slate-700" role="tablist" aria-label="Settings Sections">
+            <div className="grid grid-cols-1 sm:inline-flex items-stretch sm:items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 w-full sm:w-auto" role="tablist" aria-label="Settings Sections">
               <button
                 type="button"
                 role="tab"
                 aria-selected={activeSettingsSubTab === 'emails'}
                 onClick={() => setActiveSettingsSubTab('emails')}
-                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center sm:justify-start gap-2 transition-all whitespace-nowrap cursor-pointer shrink-0 ${
                   activeSettingsSubTab === 'emails'
                     ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -825,7 +830,7 @@ export default function SettingsTab({
                 role="tab"
                 aria-selected={activeSettingsSubTab === 'schedules'}
                 onClick={() => setActiveSettingsSubTab('schedules')}
-                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center sm:justify-start gap-2 transition-all whitespace-nowrap cursor-pointer shrink-0 ${
                   activeSettingsSubTab === 'schedules'
                     ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -834,7 +839,7 @@ export default function SettingsTab({
                 <Clock className="w-4 h-4 shrink-0" />
                 <span>Schedules &amp; 10-Day SLA</span>
                 {Number(followUpConfig?.testStepIntervalSeconds || 0) > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shrink-0">
                     Test {formatDurationCompact(followUpConfig.testStepIntervalSeconds)}
                   </span>
                 )}
@@ -844,7 +849,7 @@ export default function SettingsTab({
                 role="tab"
                 aria-selected={activeSettingsSubTab === 'connections'}
                 onClick={() => setActiveSettingsSubTab('connections')}
-                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+                className={`touch-target px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center sm:justify-start gap-2 transition-all whitespace-nowrap cursor-pointer shrink-0 ${
                   activeSettingsSubTab === 'connections'
                     ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -964,7 +969,7 @@ export default function SettingsTab({
                     key={email}
                     className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono shadow-2xs group max-w-full"
                   >
-                    <span className="truncate max-w-[200px] sm:max-w-xs">{email}</span>
+                    <span className="break-all sm:break-normal">{email}</span>
                     <button
                       type="button"
                       onClick={() => handleRemoveCcEmail(email)}
@@ -1065,7 +1070,7 @@ export default function SettingsTab({
               title="Open Persistent Supplier Emails Directory (Add, Edit, Search, Delete contacts)"
             >
               <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-              <span>📒 Supplier Emails Directory</span>
+              <span>Supplier Emails Directory</span>
             </button>
 
             {(activeEmailProfileType === 'daily_matrix_auto' || activeEmailProfileType === 'manual_matrix') && (
@@ -1424,19 +1429,24 @@ export default function SettingsTab({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <span className="text-slate-400 text-[10px] block font-sans">ENDPOINT (VITE_SUPABASE_URL)</span>
-            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5">{supabaseUrl}</span>
-          </div>
+        <details className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/70">
+          <summary className="px-3.5 py-2.5 text-[11px] font-bold text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+            Advanced / Connection Diagnostics (Endpoint &amp; Public Anon Key)
+          </summary>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 pt-1 text-xs font-mono">
+            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+              <span className="text-slate-400 text-[10px] block font-sans">ENDPOINT (VITE_SUPABASE_URL)</span>
+              <span className="text-slate-800 dark:text-slate-200 break-all block mt-0.5">{supabaseUrl}</span>
+            </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <span className="text-slate-400 text-[10px] block font-sans">ANON KEY (VITE_SUPABASE_ANON_KEY)</span>
-            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5">
-              {supabaseKey.slice(0, 14)}...{supabaseKey.slice(-6)}
-            </span>
+            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+              <span className="text-slate-400 text-[10px] block font-sans">ANON KEY (VITE_SUPABASE_ANON_KEY)</span>
+              <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5">
+                {supabaseKey.slice(0, 14)}...{supabaseKey.slice(-6)}
+              </span>
+            </div>
           </div>
-        </div>
+        </details>
 
         {/* Connection Result Badge */}
         <div className={`p-4 rounded-2xl border flex items-center space-x-3 text-xs ${
@@ -1805,7 +1815,7 @@ export default function SettingsTab({
                 className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer"
               >
                 <BookOpen className="w-3 h-3 text-amber-400" />
-                <span>📒 Supplier Emails Directory</span>
+                <span>Supplier Emails Directory</span>
               </button>
               <button
                 type="button"
@@ -2096,50 +2106,87 @@ export default function SettingsTab({
                 No notable sync events recorded yet (updated replies, unauthorized skips, and errors are logged here automatically).
               </div>
             ) : (
-              <table className="w-full text-left border-collapse text-[11px]">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800/70 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
-                    <th className="px-2.5 py-1.5">Time (PHT)</th>
-                    <th className="px-2.5 py-1.5">Trigger</th>
-                    <th className="px-2.5 py-1.5">Status</th>
-                    <th className="px-2.5 py-1.5">Details / Errors</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {replySyncDiagnostics.logs.slice(0, 25).map((entry) => {
-                    const detailSummary = Array.isArray(entry.details) && entry.details.length > 0
-                      ? entry.details.map((d) => `${d.rmaNumber || d.filename || 'item'} (${d.from || 'unknown'}: ${d.status}${d.changedFields?.length ? ` [${d.changedFields.join(', ')}]` : ''}${d.reason ? ` - ${d.reason}` : ''}${d.error ? ` - ${d.error}` : ''})`).join('; ')
-                      : (entry.error || `${entry.scannedRecentMessages || 0} recent messages scanned`);
-                    return (
-                      <tr key={entry.id || entry.timestamp} className="align-top">
-                        <td className="px-2.5 py-1.5 font-mono whitespace-nowrap text-slate-700 dark:text-slate-300">
+              isDesktopMd ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800/70 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                      <th className="px-2.5 py-1.5">Time (PHT)</th>
+                      <th className="px-2.5 py-1.5">Trigger</th>
+                      <th className="px-2.5 py-1.5">Status</th>
+                      <th className="px-2.5 py-1.5">Details / Errors</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {replySyncDiagnostics.logs.slice(0, 25).map((entry) => {
+                      const detailSummary = Array.isArray(entry.details) && entry.details.length > 0
+                        ? entry.details.map((d) => `${d.rmaNumber || d.filename || 'item'} (${d.from || 'unknown'}: ${d.status}${d.changedFields?.length ? ` [${d.changedFields.join(', ')}]` : ''}${d.reason ? ` - ${d.reason}` : ''}${d.error ? ` - ${d.error}` : ''})`).join('; ')
+                        : (entry.error || `${entry.scannedRecentMessages || 0} recent messages scanned`);
+                      return (
+                        <tr key={entry.id || entry.timestamp} className="align-top">
+                          <td className="px-2.5 py-1.5 font-mono whitespace-nowrap text-slate-700 dark:text-slate-300">
+                            {formatDateTimeYmdHm(entry.lastSeenAt || entry.timestamp)}
+                            {Number(entry.attemptCount) > 1 ? ` (×${entry.attemptCount})` : ''}
+                          </td>
+                          <td className="px-2.5 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            {entry.triggerSource || '—'}
+                          </td>
+                          <td className="px-2.5 py-1.5 whitespace-nowrap">
+                            <span className={`px-1.5 py-0.5 rounded font-black text-[10px] uppercase ${
+                              entry.status === 'error'
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                : entry.status === 'unauthorized' || entry.status === 'partial'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  : entry.status === 'updated'
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                            }`}>
+                              {entry.status}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-1.5 text-slate-700 dark:text-slate-200 break-words">
+                            {detailSummary}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {replySyncDiagnostics.logs.slice(0, 25).map((entry) => {
+                  const detailSummary = Array.isArray(entry.details) && entry.details.length > 0
+                    ? entry.details.map((d) => `${d.rmaNumber || d.filename || 'item'} (${d.from || 'unknown'}: ${d.status}${d.changedFields?.length ? ` [${d.changedFields.join(', ')}]` : ''}${d.reason ? ` - ${d.reason}` : ''}${d.error ? ` - ${d.error}` : ''})`).join('; ')
+                    : (entry.error || `${entry.scannedRecentMessages || 0} recent messages scanned`);
+                  return (
+                    <div key={`mob-${entry.id || entry.timestamp}`} className="p-2.5 space-y-1 text-[11px]">
+                      <div className="flex items-center justify-between flex-wrap gap-1.5">
+                        <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
                           {formatDateTimeYmdHm(entry.lastSeenAt || entry.timestamp)}
                           {Number(entry.attemptCount) > 1 ? ` (×${entry.attemptCount})` : ''}
-                        </td>
-                        <td className="px-2.5 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                          {entry.triggerSource || '—'}
-                        </td>
-                        <td className="px-2.5 py-1.5 whitespace-nowrap">
-                          <span className={`px-1.5 py-0.5 rounded font-black text-[10px] uppercase ${
-                            entry.status === 'error'
-                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                              : entry.status === 'unauthorized' || entry.status === 'partial'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                                : entry.status === 'updated'
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                          }`}>
-                            {entry.status}
-                          </span>
-                        </td>
-                        <td className="px-2.5 py-1.5 text-slate-700 dark:text-slate-200 break-words">
-                          {detailSummary}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          {entry.triggerSource ? ` • ${entry.triggerSource}` : ''}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded font-black text-[9.5px] uppercase ${
+                          entry.status === 'error'
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                            : entry.status === 'unauthorized' || entry.status === 'partial'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                              : entry.status === 'updated'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}>
+                          {entry.status}
+                        </span>
+                      </div>
+                      <div className="text-slate-700 dark:text-slate-200 break-words leading-snug">
+                        {detailSummary}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              )
             )}
           </div>
         </div>
@@ -2269,19 +2316,30 @@ export default function SettingsTab({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={poApiKey}
-                onChange={(e) => setPoApiKey(e.target.value)}
-                placeholder="Paste EXTERNAL_API_KEY_DANILO private key here..."
-                className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600"
-              />
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <div className="relative flex-1 min-w-[200px]">
+                <input
+                  type={showPoApiKey ? 'text' : 'password'}
+                  value={poApiKey}
+                  onChange={(e) => setPoApiKey(e.target.value)}
+                  placeholder="Paste EXTERNAL_API_KEY_DANILO private key here..."
+                  className="w-full pl-3 pr-9 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPoApiKey(v => !v)}
+                  aria-label={showPoApiKey ? 'Hide API Key' : 'Reveal API Key'}
+                  title={showPoApiKey ? 'Hide API Key' : 'Reveal API Key'}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer p-0.5"
+                >
+                  {showPoApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={handleSavePoKey}
                 disabled={isSavingPoKey}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{isSavingPoKey ? 'Saving...' : 'Save Key'}</span>
@@ -2316,13 +2374,13 @@ export default function SettingsTab({
       </div>
 
       {/* 5. WAREHOUSE LOCATIONS MANAGEMENT (CUSTOMIZABLE DROPDOWN) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 rounded-2xl shadow-inner">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-3 bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 rounded-2xl shadow-inner shrink-0">
               <MapPin className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-base font-black text-slate-900 dark:text-white">
                 Standard Warehouse Locations
               </h3>
@@ -2334,13 +2392,13 @@ export default function SettingsTab({
           <button
             type="button"
             onClick={() => setIsLocationsModalOpen(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0 whitespace-nowrap"
           >
             <span>⚙️ Manage Locations</span>
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           {locationsList.map((loc, idx) => (
             <div
               key={loc}
@@ -2349,7 +2407,7 @@ export default function SettingsTab({
               <span className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 font-mono text-[10px] font-black flex items-center justify-center shrink-0">
                 #{idx + 1}
               </span>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate font-mono">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 break-words font-mono">
                 {loc}
               </span>
             </div>

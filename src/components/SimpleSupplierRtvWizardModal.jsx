@@ -1400,15 +1400,15 @@ export default function SimpleSupplierRtvWizardModal({
           </div>
 
           {/* Scrollable Body */}
-          <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-5">
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-3.5">
 
             {/* Interactive Add / Bundle Another RMA to This Pickup */}
             {step !== 'done' && (
-              <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-2.5">
+              <div className="p-2.5 sm:p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="text-xs font-black text-indigo-950 dark:text-indigo-100 flex items-center gap-1.5">
-                    <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>➕ Add / Bundle Another RMA to This Pickup</span>
+                  <div className="text-xs font-black text-indigo-950 dark:text-indigo-100 flex items-center flex-wrap gap-1.5">
+                    <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <span>Add / Bundle Another RMA to This Pickup</span>
                     <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-mono">
                       {activeBatchReports.length} RMA{activeBatchReports.length === 1 ? '' : 's'}
                     </span>
@@ -1591,7 +1591,7 @@ export default function SimpleSupplierRtvWizardModal({
             )}
 
             {/* Item Summary Card */}
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2.5">
               <div className="min-w-0 flex-1">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Reported Product / Contents
@@ -1616,7 +1616,7 @@ export default function SimpleSupplierRtvWizardModal({
                   </span>
                   {(activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date) && (
                     <span className="text-amber-700 dark:text-amber-400 font-bold">
-                      Expiry Date (YYYY-MM-DD): {formatDateYmd(activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date) || activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date}
+                      Expiry Date: {formatDateYmd(activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date) || activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date}
                     </span>
                   )}
                 </div>
@@ -1680,16 +1680,16 @@ export default function SimpleSupplierRtvWizardModal({
 
             {/* Step 1: Party Name (Supplier OR Customer / Store Branch) * & Manual Processed By * fields */}
             {step === 'choose' && (
-              <div className="space-y-3">
-                <div className={`p-4 rounded-xl border-2 transition-colors ${supplierMissing
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                <div className={`p-3 rounded-xl border-2 transition-colors ${supplierMissing
                   ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
                   : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
                   }`}>
-                  <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5">
-                    <Building2 className={`w-4 h-4 ${supplierMissing ? 'text-amber-600' : 'text-slate-500'}`} />
+                  <label className="flex items-center flex-wrap gap-1.5 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1">
+                    <Building2 className={`w-4 h-4 shrink-0 ${supplierMissing ? 'text-amber-600' : 'text-slate-500'}`} />
                     <span>{isSupplierStream ? 'Supplier Company Name *' : 'Customer / Store Branch Name *'}</span>
                     {supplierMissing && (
-                      <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[9.5px]">
                         {isSupplierStream ? 'Required for Claim / Replacement' : 'Required for Credit / Replacement'}
                       </span>
                     )}
@@ -1701,10 +1701,10 @@ export default function SimpleSupplierRtvWizardModal({
                     onChange={(e) => handlePartyNameChange(e.target.value)}
                     placeholder={
                       isSupplierStream
-                        ? 'Type or pick the Supplier Company Name (e.g. Century Pacific Food, Nestle)...'
-                        : 'Type or pick Customer / Store Branch Name...'
+                        ? 'Type or pick Supplier Name...'
+                        : 'Type or pick Customer / Branch...'
                     }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs sm:text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
                   />
                   <datalist id="supplier-rtv-company-list">
                     {activePartySuggestions.map((sup) => (
@@ -1713,18 +1713,18 @@ export default function SimpleSupplierRtvWizardModal({
                   </datalist>
                 </div>
 
-                <div className={`p-4 rounded-xl border-2 transition-colors ${processedByMissing
+                <div className={`p-3 rounded-xl border-2 transition-colors ${processedByMissing
                   ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
                   : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
                   }`}>
                   <label
                     htmlFor="wizard-processed-by-step1"
-                    className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5"
+                    className="flex items-center flex-wrap gap-1.5 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1"
                   >
-                    <UserCheck className={`w-4 h-4 ${processedByMissing ? 'text-amber-600' : 'text-emerald-600'}`} />
+                    <UserCheck className={`w-4 h-4 shrink-0 ${processedByMissing ? 'text-amber-600' : 'text-emerald-600'}`} />
                     <span>Processed By (Staff Full Name) *</span>
                     {processedByMissing && (
-                      <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[9.5px]">
                         Required
                       </span>
                     )}
@@ -1737,8 +1737,8 @@ export default function SimpleSupplierRtvWizardModal({
                       setProcessedBy(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    placeholder="Type staff full name processing this RMA (required for Scrap, Restock & Waiting)"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                    placeholder="Type staff full name..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs sm:text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
                   />
                 </div>
               </div>
@@ -2056,14 +2056,15 @@ export default function SimpleSupplierRtvWizardModal({
 
                 {/* 5 Photo Checklist Grid (Max 10 photos per category / 50 total) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {PICKUP_PHOTO_SLOTS.map((slot) => {
+                  {PICKUP_PHOTO_SLOTS.map((slot, slotIdx) => {
                     const slotPhotos = Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key] : [];
                     const hasImage = slotPhotos.length > 0;
                     const atSlotLimit = slotPhotos.length >= MAX_PHOTOS_PER_SLOT || totalPhotoCount >= MAX_TOTAL_PICKUP_PHOTOS;
+                    const isOddLastCard = slotIdx === PICKUP_PHOTO_SLOTS.length - 1 && PICKUP_PHOTO_SLOTS.length % 2 === 1;
                     return (
                       <div
                         key={slot.key}
-                        className={`p-3 rounded-xl border-2 transition-colors flex flex-col gap-2.5 ${hasImage
+                        className={`p-3 rounded-xl border-2 transition-colors flex flex-col gap-2.5 ${isOddLastCard ? 'sm:col-span-2' : ''} ${hasImage
                           ? 'border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/20'
                           : slot.ocrHighlight
                             ? 'border-amber-300 bg-amber-50/30 dark:bg-amber-950/10'
@@ -2106,6 +2107,12 @@ export default function SimpleSupplierRtvWizardModal({
                                 <img
                                   src={entry.previewUrl}
                                   alt={`${slot.title} #${idx + 1}`}
+                                  onError={(e) => {
+                                    if (!e.currentTarget.dataset.err) {
+                                      e.currentTarget.dataset.err = '1';
+                                      e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                    }
+                                  }}
                                   className="w-full h-full object-cover"
                                 />
                                 <button

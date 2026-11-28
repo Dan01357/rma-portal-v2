@@ -122,7 +122,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
 
       // Option 1: Customer Credit Memo / Return Handover wait-only + Driver Pickup screen navigation
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Live Outlet');
+      await page.locator('input[placeholder*="Customer / Branch" i], input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Live Outlet');
       await page.locator('#wizard-processed-by-step1').fill('Playwright Live Processor');
       await page.getByRole('button', { name: /Customer Credit Memo \/ Return Handover/i }).click();
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
@@ -172,7 +172,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
 
       // Option 2: Customer Buffer Replacement / Good Stock Exchange wait-only
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Sandbox Outlet');
+      await page.locator('input[placeholder*="Customer / Branch" i], input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Sandbox Outlet');
       await page.locator('#wizard-processed-by-step1').fill('Playwright Test Processor');
       await page.getByRole('button', { name: /Customer Buffer Replacement \/ Good Stock Exchange/i }).click();
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();

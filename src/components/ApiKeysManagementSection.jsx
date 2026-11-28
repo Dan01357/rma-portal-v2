@@ -17,6 +17,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatDateYmd, formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 const TARGET_SYSTEMS = [
   { id: 'primary', name: 'Primary System (Mine)', role: 'Internal Central System', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
@@ -26,6 +27,7 @@ const TARGET_SYSTEMS = [
 ];
 
 export default function ApiKeysManagementSection() {
+  const isDesktopMd = useIsDesktopMd();
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
@@ -345,6 +347,7 @@ export default function ApiKeysManagementSection() {
             No API keys issued yet. Click <strong>Generate New Key</strong> above to issue a key for Primary System, Jarmen, Jelo, or Arlito.
           </div>
         ) : (
+          isDesktopMd ? (
           <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
@@ -352,7 +355,7 @@ export default function ApiKeysManagementSection() {
                   <th className="p-3">Client System</th>
                   <th className="p-3">Masked Key</th>
                   <th className="p-3">Rate Limit</th>
-                    <th className="p-3">Last Used (YYYY-MM-DD HH:mm)</th>
+                  <th className="p-3">Last Used</th>
                   <th className="p-3">Status</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
@@ -411,6 +414,34 @@ export default function ApiKeysManagementSection() {
               </tbody>
             </table>
           </div>
+          ) : (
+          <div className="space-y-2.5">
+            {keys.map((k) => (
+              <div key={`mob-${k.id}`} className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/70 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-slate-900 dark:text-white">{k.name}</span>
+                  {k.is_active ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Active</span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">Revoked</span>
+                  )}
+                </div>
+                <div className="font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all">{k.masked_key}</div>
+                <div className="flex items-center justify-between text-[10.5px] text-slate-500 pt-1 border-t border-slate-200 dark:border-slate-800">
+                  <span>{k.rate_limit || 60} req/min • Used: {k.last_used_at ? formatDateTimeYmdHm(k.last_used_at) : 'Never'}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => handleRotateKey(k)} disabled={actionLoading === `rotate-${k.id}`} title="Rotate API Key" className="p-1.5 text-slate-500 hover:text-purple-600 rounded-lg">
+                      <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === `rotate-${k.id}` ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button type="button" onClick={() => handleRevokeKey(k)} disabled={actionLoading === `revoke-${k.id}`} title="Revoke API Key" className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          )
         )}
       </div>
 

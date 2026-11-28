@@ -29,6 +29,7 @@ import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToXlsx } from '../utils/exportCsv';
 import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl, resolveReorderStatus } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -50,6 +51,7 @@ export default function RMAReportsModal({
   liveCreditMemosList = null,
   testCreditMemosList = null
 }) {
+  const isDesktopMd = useIsDesktopMd();
   const [embeddedScopeIsTest, setEmbeddedScopeIsTest] = useState(Boolean(isTestMode));
   useEffect(() => {
     setEmbeddedScopeIsTest(Boolean(isTestMode));
@@ -447,14 +449,14 @@ export default function RMAReportsModal({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-2 w-full md:w-auto min-w-0">
               <select
                 value={reasonFilter}
                 onChange={(e) => {
                   setReasonFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
+                className="w-full sm:w-auto min-w-0 px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer truncate"
               >
                 <option value="all">All Return Reasons</option>
                 {distinctReasons.map(r => (
@@ -468,7 +470,7 @@ export default function RMAReportsModal({
                   setStatusFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
+                className="w-full sm:w-auto min-w-0 px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer truncate"
               >
                 <option value="all">All Status & Stages</option>
                 <option value="pending_admin_details">Awaiting SKU</option>
@@ -508,7 +510,9 @@ export default function RMAReportsModal({
                 : 'Scan any item barcode in Reporter Mode and submit to record returns with proof photos.'}
             </p>
           </div>
-        ) : viewMode === 'table' ? (
+        ) : (
+          <>
+          {viewMode === 'table' && isDesktopMd && (
           /* ============================================================ */
           /* TABLE VIEW: WITH INTERACTIVE SORT HEADERS & LIGHTBOX PHOTOS  */
           /* ============================================================ */
@@ -516,9 +520,9 @@ export default function RMAReportsModal({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
+                  <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[10.5px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
                     {/* Select All Checkbox Header */}
-                    <th className="py-2.5 px-1.5 w-8 text-center">
+                    <th className="py-2 px-1 w-7 text-center">
                       <input
                         type="checkbox"
                         checked={isAllPageSelected}
@@ -529,7 +533,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('id')}
-                      className="py-2.5 px-1.5 font-black text-slate-900 dark:text-white w-12 cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      className="py-2 px-1 font-black text-slate-900 dark:text-white w-10 cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>SN</span>
@@ -538,17 +542,17 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('rma_number')}
-                      className="py-2.5 px-1.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group whitespace-nowrap"
+                      className="py-2 px-1 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group whitespace-nowrap"
                     >
                       <div className="flex items-center">
                         <span>RMA #</span>
                         {renderSortIndicator('rma_number')}
                       </div>
                     </th>
-                    <th className="py-2.5 px-1.5 w-11 text-center">Photo</th>
+                    <th className="py-2 px-0.5 w-9 text-center">Photo</th>
                     <th 
                       onClick={() => handleSort('name')}
-                      className="py-2.5 px-1.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      className="py-2 px-1 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Item &amp; SKU/BC</span>
@@ -557,7 +561,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('reason')}
-                      className="py-2.5 px-1.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      className="py-2 px-1 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Reason</span>
@@ -566,7 +570,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('reporter')}
-                      className="py-2.5 px-1.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      className="py-2 px-1 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Reported By</span>
@@ -577,7 +581,7 @@ export default function RMAReportsModal({
                     {/* 8. Stage, Disposition & Bin Header */}
                     <th 
                       onClick={() => handleSort('disposition')}
-                      className="py-2.5 px-1.5 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group whitespace-nowrap"
+                      className="py-2 px-1 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group w-[124px]"
                       title="Sort by Stage, Disposition & Bin Location"
                     >
                       <div className="flex items-center justify-center">
@@ -587,14 +591,14 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('created_at')}
-                      className="py-2.5 px-1.5 text-right font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group whitespace-nowrap"
+                      className="py-2 px-1 text-right font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group whitespace-nowrap"
                     >
                       <div className="flex items-center justify-end">
                         <span>Reported &amp; GPS</span>
                         {renderSortIndicator('created_at')}
                       </div>
                     </th>
-                    <th className="py-2.5 px-1.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                    <th className="py-2 px-1 w-[114px] text-center font-bold select-none text-slate-500 dark:text-slate-400 whitespace-nowrap">
                       Actions
                     </th>
                   </tr>
@@ -622,7 +626,7 @@ export default function RMAReportsModal({
                         }`}
                       >
                         {/* Row Selection Checkbox */}
-                        <td className="py-2 px-1.5 text-center">
+                        <td className="py-2 px-1 text-center">
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -632,14 +636,14 @@ export default function RMAReportsModal({
                         </td>
 
                         {/* 1. SN COLUMN AT FAR LEFT */}
-                        <td className="py-2 px-1.5 font-mono">
-                          <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-1.5 py-0.5 rounded-lg text-[10.5px]">
+                        <td className="py-2 px-1 font-mono">
+                          <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-1 py-0.5 rounded-lg text-[10px]">
                             #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                         </td>
 
                         {/* 2. RMA Number + QR Code Sticker */}
-                        <td className="py-2 px-1.5 font-mono font-bold text-blue-700 dark:text-blue-400 whitespace-nowrap text-[11px]">
+                        <td className="py-2 px-1 font-mono font-bold text-blue-700 dark:text-blue-400 whitespace-nowrap text-[10.5px]">
                           <div className="flex items-center gap-0.5">
                             <span>{item.rma_number}</span>
                             {onViewReportQR && (
@@ -656,7 +660,7 @@ export default function RMAReportsModal({
                         </td>
 
                         {/* 3. Photo with Click-to-Zoom Lightbox */}
-                        <td className="py-2 px-1 text-center">
+                        <td className="py-2 px-0.5 text-center">
                           {photoList.length > 0 ? (
                             <button
                               type="button"
@@ -667,20 +671,30 @@ export default function RMAReportsModal({
                                 title: resolvedName || `Return ${item.rma_number}`,
                                 subtitle: `RMA #${item.rma_number} • Reported by ${reporterName} • ${item.reason || 'Damaged'}`
                               })}
-                              className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                              className="w-8 h-8 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                               title="Click to view full-size proof photo"
                             >
-                              <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
+                              <img
+                                src={photoList[0]}
+                                alt="Proof"
+                                onError={(e) => {
+                                  if (!e.currentTarget.dataset.err) {
+                                    e.currentTarget.dataset.err = '1';
+                                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                  }
+                                }}
+                                className="w-full h-full object-cover"
+                              />
                             </button>
                           ) : (
-                            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                            <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                               <ImageIcon className="w-3.5 h-3.5" />
                             </div>
                           )}
                         </td>
 
                         {/* 4. Merged Item Name & Barcode/SKU */}
-                        <td className="py-2 px-1.5 max-w-[155px]" title={resolvedName}>
+                        <td className="py-2 px-1 max-w-[125px]" title={resolvedName}>
                           <div className="font-bold text-slate-900 dark:text-white truncate text-[11px]">
                             {resolvedName}
                           </div>
@@ -701,14 +715,14 @@ export default function RMAReportsModal({
                         </td>
 
                         {/* 6. Reason */}
-                        <td className="py-2 px-1.5 max-w-[125px]">
-                          <span className="px-1.5 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[9.5px] inline-block truncate max-w-[118px]" title={item.reason || 'Damaged'}>
+                        <td className="py-2 px-1 max-w-[96px]">
+                          <span className="px-1.5 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[9.5px] inline-block truncate max-w-[90px]" title={item.reason || 'Damaged'}>
                             {item.reason || 'Damaged'}
                           </span>
                         </td>
 
                         {/* 7. Reported By */}
-                        <td className="py-2 px-1.5 max-w-[118px]">
+                        <td className="py-2 px-1 max-w-[96px]">
                           <div className="font-bold text-slate-900 dark:text-slate-200 text-[10.5px] truncate" title={reporterName}>
                             {reporterName}
                           </div>
@@ -720,21 +734,21 @@ export default function RMAReportsModal({
                         </td>
 
                         {/* 8. Combined Lifecycle Stage, 4-Choice Outcome, Reorder Status & Bin Location */}
-                        <td className="py-2 px-1.5 text-center">
+                        <td className="py-2 px-1 text-center w-[124px] max-w-[124px]">
                           {(() => {
                             const stageInfo = formatLifecycleStage(item.status, item);
                             const outcome = formatFourChoiceOutcome(item);
                             const reorderInfo = resolveReorderStatus(item);
                             return (
-                              <div className="inline-flex flex-col items-center gap-1">
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider inline-block whitespace-nowrap shadow-2xs ${stageInfo.color}`}>
+                              <div className="inline-flex flex-col items-center gap-1 max-w-full">
+                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider inline-block leading-tight text-center shadow-2xs ${stageInfo.color}`}>
                                   {stageInfo.label}
                                 </span>
-                                <span className={`px-2 py-0.5 rounded-lg text-[9.5px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                                <span className={`px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold border inline-block leading-tight text-center shadow-2xs ${outcome.badgeColor}`}>
                                   {outcome.label}
                                 </span>
                                 <span
-                                  className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border inline-block whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold border inline-block leading-tight text-center ${reorderInfo.badgeColor}`}
                                   title={reorderInfo.isReordered
                                     ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}`
                                     : 'Replacement PO not yet ordered'}
@@ -743,7 +757,7 @@ export default function RMAReportsModal({
                                   {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
                                 </span>
                                 {item.warehouse_location && (
-                                  <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[9.5px] font-mono font-bold inline-block max-w-[115px] truncate" title={item.warehouse_location}>
+                                  <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[9px] font-mono font-bold inline-block max-w-[115px] truncate" title={item.warehouse_location}>
                                     {item.warehouse_location}
                                   </span>
                                 )}
@@ -753,8 +767,8 @@ export default function RMAReportsModal({
                         </td>
 
                         {/* 9. Date & GPS */}
-                        <td className="py-2 px-1.5 text-right font-mono text-[10.5px] text-slate-500 dark:text-slate-400">
-                          <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
+                        <td className="py-2 px-1 text-right font-mono text-[10px] text-slate-500 dark:text-slate-400 max-w-[92px]">
+                          <div className="whitespace-nowrap">{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
                           {(() => {
                             const mapUrl = getGpsMapUrl(item);
                             const gpsAddr = getGpsAddressDisplay(item);
@@ -763,29 +777,29 @@ export default function RMAReportsModal({
                                 href={mapUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold max-w-[115px]"
+                                className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[9.5px] font-bold max-w-[88px]"
                                 title={gpsAddr || 'View GPS Location on Google Maps'}
                               >
-                                <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                                <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
                                 <span className="truncate">{gpsAddr || 'Map'}</span>
                               </a>
                             ) : (
-                              <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
+                              <span className="text-slate-300 dark:text-slate-600 text-[9.5px]">No GPS</span>
                             );
                           })()}
                         </td>
 
                         {/* 10. Actions: Assign SKU / Save Product, Credit Memo & Delete */}
-                        <td className="py-2 px-1.5 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
+                        <td className="py-2 px-1 text-center w-[114px]">
+                          <div className="flex flex-col items-stretch gap-1 w-[108px] mx-auto">
                             {canAdmin && onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                               <button
                                 type="button"
                                 onClick={() => onEditProductFromReport(item)}
-                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                className="w-full px-1.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                 title={`Assign official SKU and save "${item.name || item.barcode}" to Products catalog`}
                               >
-                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
                                 <span>Assign SKU</span>
                               </button>
                             )}
@@ -797,10 +811,10 @@ export default function RMAReportsModal({
                                   <button
                                     type="button"
                                     onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
-                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    className="w-full px-1.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                     title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
                                   >
-                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                     <span>CM Voucher</span>
                                   </button>
                                 );
@@ -810,10 +824,10 @@ export default function RMAReportsModal({
                                   <button
                                     type="button"
                                     onClick={() => onOpenCreditMemo && onOpenCreditMemo(item)}
-                                    className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    className="w-full px-1.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                     title="Issue Finance Credit Memo for this Return"
                                   >
-                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                     <span>+ Credit Memo</span>
                                   </button>
                                 );
@@ -822,14 +836,16 @@ export default function RMAReportsModal({
                             })()}
 
                             {canDeleteReports && (
-                              <button
-                                type="button"
-                                onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number, item)}
-                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
-                                title={`Delete RMA #${item.rma_number}`}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-center pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number, item)}
+                                  className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
+                                  title={`Delete RMA #${item.rma_number}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -905,10 +921,12 @@ export default function RMAReportsModal({
               itemLabel="return reports"
             />
           </div>
-        ) : (
-          /* ============================================================ */
-          /* GRID VIEW: WITH SN BADGE AND CLICKABLE PHOTOS                */
-          /* ============================================================ */
+          )}
+
+          {/* ============================================================ */}
+          {/* GRID VIEW: WITH SN BADGE & CLICKABLE PHOTOS (Auto on <md)   */}
+          {/* ============================================================ */}
+          {(!isDesktopMd || viewMode !== 'table') && (
           <div className="space-y-3.5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {paginatedReports.map((item, idx) => {
@@ -932,9 +950,9 @@ export default function RMAReportsModal({
                         : 'bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100/70 dark:hover:bg-slate-700/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-2.5 min-w-0">
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center flex-wrap gap-1.5 mb-1">
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -958,7 +976,7 @@ export default function RMAReportsModal({
                             </button>
                           )}
                         </div>
-                        <h4 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={resolvedName}>
+                        <h4 className="font-bold text-slate-900 dark:text-white text-sm break-words" title={resolvedName}>
                           {resolvedName}
                         </h4>
                         <div className="font-mono text-xs text-slate-500 dark:text-slate-400">
@@ -975,7 +993,7 @@ export default function RMAReportsModal({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/70 dark:border-slate-700/70">
                         {canAdmin && onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                           <button
                             type="button"
@@ -1101,7 +1119,17 @@ export default function RMAReportsModal({
                                 className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-600 hover:scale-105 shadow-xs transition-transform cursor-zoom-in"
                                 title="Click to zoom proof photo"
                               >
-                                <img src={url} alt="Proof" className="w-full h-full object-cover" />
+                                <img
+                                  src={url}
+                                  alt="Proof"
+                                  onError={(e) => {
+                                    if (!e.currentTarget.dataset.err) {
+                                      e.currentTarget.dataset.err = '1';
+                                      e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                    }
+                                  }}
+                                  className="w-full h-full object-cover"
+                                />
                               </button>
                             ))}
                           </div>
@@ -1179,6 +1207,8 @@ export default function RMAReportsModal({
               itemLabel="return reports"
             />
           </div>
+          )}
+          </>
         )}
 
       </div>

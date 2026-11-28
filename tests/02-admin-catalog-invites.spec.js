@@ -88,12 +88,12 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await page.locator('div.cursor-pointer', { hasText: 'Authorized team' }).first().click();
       const empPanel = page.locator('main');
       await expect(empPanel.getByText('Employee Access & Roles Management')).toBeVisible();
-      await empPanel.locator('input[placeholder*="Search by employee name" i]').fill('Danilo');
+      await empPanel.locator('input[placeholder*="Search name, email" i], input[placeholder*="Search by employee name" i]').fill('Danilo');
       await empPanel.locator('select').nth(0).selectOption('super_admin');
       await empPanel.locator('select').nth(1).selectOption('active');
       await empPanel.locator('select').nth(2).selectOption('name_desc');
       await empPanel.getByRole('button', { name: 'Reset', exact: true }).click();
-      await expect(empPanel.locator('input[placeholder*="Search by employee name" i]')).toHaveValue('');
+      await expect(empPanel.locator('input[placeholder*="Search name, email" i], input[placeholder*="Search by employee name" i]')).toHaveValue('');
 
       await empPanel.getByRole('button', { name: /HR Center API Sync/i }).click();
       await expect(empPanel.getByText(/Sync Active Staff/i)).toBeVisible();

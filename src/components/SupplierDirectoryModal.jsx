@@ -19,6 +19,7 @@ import {
   SUPPLIER_DIRECTORY_EVENT
 } from '../services/supplierDirectoryService';
 import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 const EMPTY_FORM = {
   id: '',
@@ -41,6 +42,7 @@ export default function SupplierDirectoryModal({
   isEmbeddedPage = false
 }) {
   // Always declare ALL React hooks unconditionally before any early returns
+  const isDesktopMd = useIsDesktopMd();
   const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -204,7 +206,7 @@ export default function SupplierDirectoryModal({
                   {contacts.length} Saved Supplier{contacts.length === 1 ? '' : 's'}
                 </span>
               </div>
-              <p className={`text-[11px] truncate ${isEmbeddedPage ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300'}`}>
+              <p className={`text-[11px] leading-snug ${isEmbeddedPage ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300'}`}>
                 Auto-populates To / CC emails everywhere a Supplier Name is typed or selected, and feeds automated follow-ups.
               </p>
             </div>
@@ -385,71 +387,133 @@ export default function SupplierDirectoryModal({
               </p>
             </div>
           ) : (
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
-                  <tr>
-                    <th className="py-2.5 px-3 min-w-[180px]">Supplier / Contact</th>
-                    <th className="py-2.5 px-3 min-w-[230px]">Primary Email(s) (TO)</th>
-                    <th className="py-2.5 px-3 min-w-[200px]">CC Email(s)</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap">Last Updated</th>
-                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredContacts.map((c) => (
-                    <tr key={c.id || c.supplier_name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="py-2.5 px-3 align-top">
-                        <div className="font-black text-slate-900 dark:text-white">{c.supplier_name}</div>
+            isDesktopMd ? (
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="py-2.5 px-3 min-w-[160px]">Supplier / Contact</th>
+                      <th className="py-2.5 px-3 min-w-[200px]">Primary Email(s) (TO)</th>
+                      <th className="py-2.5 px-3 min-w-[180px]">CC Email(s)</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Last Updated</th>
+                      <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredContacts.map((c) => (
+                      <tr key={c.id || c.supplier_name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3 align-top">
+                          <div className="font-black text-slate-900 dark:text-white">{c.supplier_name}</div>
+                          {c.contact_person && (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                              <User className="w-3 h-3" />
+                              <span>{c.contact_person}</span>
+                            </div>
+                          )}
+                          {c.notes && (
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">{c.notes}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-indigo-700 dark:text-indigo-300 align-top break-words">
+                          {c.email_to || <span className="text-slate-400 italic">None</span>}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300 align-top break-words">
+                          {c.email_cc || <span className="text-slate-400 italic">None</span>}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[10px] text-slate-500 align-top whitespace-nowrap">
+                          {c.updated_at ? formatDateTimeYmdHm(c.updated_at) : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right align-top whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(c)}
+                              className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900 text-slate-700 dark:text-slate-200 cursor-pointer"
+                              title={`Edit ${c.supplier_name}`}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingId === (c.id || c.supplier_name)}
+                              onClick={() => handleDelete(c)}
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 cursor-pointer disabled:opacity-50"
+                              title={`Delete ${c.supplier_name}`}
+                            >
+                              {deletingId === (c.id || c.supplier_name) ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {filteredContacts.map((c) => (
+                  <div
+                    key={`mob-${c.id || c.supplier_name}`}
+                    className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-black text-sm text-slate-900 dark:text-white break-words">{c.supplier_name}</div>
                         {c.contact_person && (
                           <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                            <User className="w-3 h-3" />
+                            <User className="w-3 h-3 shrink-0" />
                             <span>{c.contact_person}</span>
                           </div>
                         )}
-                        {c.notes && (
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">{c.notes}</div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-indigo-700 dark:text-indigo-300 align-top break-words">
-                        {c.email_to || <span className="text-slate-400 italic">None</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300 align-top break-words">
-                        {c.email_cc || <span className="text-slate-400 italic">None</span>}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-[10px] text-slate-500 align-top whitespace-nowrap">
-                        {c.updated_at ? formatDateTimeYmdHm(c.updated_at) : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right align-top whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEdit(c)}
-                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900 text-slate-700 dark:text-slate-200 cursor-pointer"
-                            title={`Edit ${c.supplier_name}`}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={deletingId === (c.id || c.supplier_name)}
-                            onClick={() => handleDelete(c)}
-                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 cursor-pointer disabled:opacity-50"
-                            title={`Delete ${c.supplier_name}`}
-                          >
-                            {deletingId === (c.id || c.supplier_name) ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(c)}
+                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900 text-slate-700 dark:text-slate-200 cursor-pointer"
+                          title={`Edit ${c.supplier_name}`}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === (c.id || c.supplier_name)}
+                          onClick={() => handleDelete(c)}
+                          className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 cursor-pointer disabled:opacity-50"
+                          title={`Delete ${c.supplier_name}`}
+                        >
+                          {deletingId === (c.id || c.supplier_name) ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-[11px]">
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 mr-1.5">TO:</span>
+                        <span className="font-mono text-indigo-700 dark:text-indigo-300 break-all">{c.email_to || 'None'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 mr-1.5">CC:</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300 break-all">{c.email_cc || 'None'}</span>
+                      </div>
+                      {c.notes && (
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">{c.notes}</div>
+                      )}
+                      <div className="text-[10px] font-mono text-slate-400 pt-0.5">
+                        Updated: {c.updated_at ? formatDateTimeYmdHm(c.updated_at) : '—'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </div>
       </div>

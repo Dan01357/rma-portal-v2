@@ -307,7 +307,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         }
       }
 
-      const expInput = page.locator('input[placeholder*="explanation" i]').first();
+      const expInput = page.locator('input[placeholder*="defect notes" i], input[placeholder*="explanation" i]').first();
       await expInput.fill('Crushed carton');
       await expect(page.getByText('14/250 chars')).toBeVisible();
 

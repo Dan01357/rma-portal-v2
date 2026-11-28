@@ -62,6 +62,7 @@ import {
   isMixedSuppliersSummary,
   resolveReorderStatus
 } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -87,6 +88,7 @@ export default function SupplierClaimsTab({
   coworkerQueueFilter = 'all',
   isTestMode = false
 }) {
+  const isDesktopMd = useIsDesktopMd();
   const effectiveArchiveReport = onRequestArchiveReport || onArchiveReport;
   const effectiveBulkArchiveReports = onRequestBulkArchiveReports || onBulkArchiveReports;
   const [selectedSupplier, setSelectedSupplier] = useState('All');
@@ -807,7 +809,7 @@ export default function SupplierClaimsTab({
                 </span>
               )}
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               Bundle damaged/defective merchandise by vendor to issue consolidated <strong>Return to Vendor (RTV) Debit Claims</strong>. All claims are automatically synced to database.
             </p>
           </div>
@@ -820,7 +822,7 @@ export default function SupplierClaimsTab({
           title="Open Persistent Supplier Emails Directory (Add, Edit, Search, Delete contacts)"
         >
           <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-          <span>📒 Supplier Emails Directory</span>
+          <span>Supplier Emails Directory</span>
         </button>
       </div>
 
@@ -1098,12 +1100,13 @@ export default function SupplierClaimsTab({
             )}
           </div>
         ) : (
+          isDesktopMd ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800 select-none">
+              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800 select-none text-[11px]">
                 <tr>
                   {/* Select All Checkbox */}
-                  <th className="p-3 w-10 text-center">
+                  <th className="py-2 px-1 w-7 text-center">
                     <input
                       type="checkbox"
                       checked={isAllPageSelected}
@@ -1114,21 +1117,21 @@ export default function SupplierClaimsTab({
                   </th>
 
                   {/* SN Column */}
-                  <th className="py-2.5 px-2 w-11 font-black text-slate-900 dark:text-white">
+                  <th className="py-2 px-1 w-9 font-black text-slate-900 dark:text-white">
                     SN
                   </th>
 
                   {/* Photo Column */}
-                  <th className="py-2.5 px-2 text-center w-11" title="Proof Photo">
+                  <th className="py-2 px-0.5 text-center w-10" title="Proof Photo">
                     <ImageIcon className="w-4 h-4 mx-auto text-slate-400" />
                   </th>
 
                   {/* RMA Identifier & Quick QR */}
                   <th 
                     onClick={() => handleSort('rma_number')}
-                    className="py-2.5 px-2.5 cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
+                    className="py-2 px-1 w-[130px] cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                       <span>RMA # &amp; Date</span>
                       {sortField === 'rma_number' || sortField === 'created_at' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1139,9 +1142,9 @@ export default function SupplierClaimsTab({
                   {/* Vendor / Supplier */}
                   <th 
                     onClick={() => handleSort('supplier_name')}
-                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                       <span>Vendor &amp; Bin</span>
                       {sortField === 'supplier_name' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1152,9 +1155,9 @@ export default function SupplierClaimsTab({
                   {/* Product Description & SKU */}
                   <th 
                     onClick={() => handleSort('name')}
-                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                       <span>Product &amp; SKU</span>
                       {sortField === 'name' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1165,9 +1168,9 @@ export default function SupplierClaimsTab({
                   {/* Disposition & 10-Day SLA */}
                   <th 
                     onClick={() => handleSort('disposition')}
-                    className="py-2 px-1.5 cursor-pointer hover:text-amber-600 transition-colors group"
+                    className="py-2 px-1 w-[124px] cursor-pointer hover:text-amber-600 transition-colors group"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                       <span>Disposition &amp; SLA</span>
                       {sortField === 'disposition' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1176,17 +1179,17 @@ export default function SupplierClaimsTab({
                   </th>
 
                   {/* Defect Reason & Reporter Notes */}
-                  <th className="py-2 px-1.5 font-bold">
+                  <th className="py-2 px-1 font-bold">
                     Defect &amp; Notes
                   </th>
 
                   {/* Qty & Unit */}
                   <th 
                     onClick={() => handleSort('quantity')}
-                    className="py-2 px-1.5 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
+                    className="py-2 px-1 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                     title="Click to sort by Quantity and Unit"
                   >
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-0.5">
                       <span>Qty</span>
                       {sortField === 'quantity' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1197,9 +1200,9 @@ export default function SupplierClaimsTab({
                   {/* Total Claim & Unit Price */}
                   <th 
                     onClick={() => handleSort('total')}
-                    className="py-2 px-1.5 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
+                    className="py-2 px-1 text-right cursor-pointer hover:text-amber-600 transition-colors group whitespace-nowrap"
                   >
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-0.5">
                       <span>Total Claim</span>
                       {sortField === 'total' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
@@ -1208,7 +1211,7 @@ export default function SupplierClaimsTab({
                   </th>
 
                   {/* Actions Column */}
-                  <th className="py-2 px-1.5 text-center font-bold whitespace-nowrap">
+                  <th className="py-2 px-1 w-[124px] text-center font-bold whitespace-nowrap">
                     Actions
                   </th>
                 </tr>
@@ -1245,7 +1248,7 @@ export default function SupplierClaimsTab({
                         }`}
                       >
                         {/* Checkbox */}
-                        <td className="py-2.5 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-1 text-center w-7" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -1255,24 +1258,30 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* SN Column */}
-                        <td className="py-2.5 px-2 font-mono whitespace-nowrap">
-                          <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-lg text-[11px]">
+                        <td className="py-2 px-1 font-mono whitespace-nowrap w-9">
+                          <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-1 py-0.5 rounded-lg text-[10.5px]">
                             #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                         </td>
 
                         {/* Photo Thumbnail */}
-                        <td className="py-2 px-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-0.5 text-center w-10" onClick={(e) => e.stopPropagation()}>
                           {photos.length > 0 ? (
                             <button
                               type="button"
                               onClick={() => handleOpenPhotoPreview(r)}
-                              className="relative w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:scale-105 transition-all shadow-2xs cursor-zoom-in"
+                              className="relative w-8 h-8 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:scale-105 transition-all shadow-2xs cursor-zoom-in"
                               title="Click to view full-size photo"
                             >
                               <img 
                                 src={photos[0]} 
                                 alt="Proof" 
+                                onError={(e) => {
+                                  if (!e.currentTarget.dataset.err) {
+                                    e.currentTarget.dataset.err = '1';
+                                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                  }
+                                }}
                                 className="w-full h-full object-cover" 
                               />
                               {photos.length > 1 && (
@@ -1282,15 +1291,15 @@ export default function SupplierClaimsTab({
                               )}
                             </button>
                           ) : (
-                            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                            <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                               <ImageIcon className="w-3.5 h-3.5" />
                             </div>
                           )}
                         </td>
 
                         {/* RMA Identifier & Inline Quick QR Button */}
-                        <td className="py-2.5 px-2.5">
-                          <div className="flex items-center gap-1 whitespace-nowrap">
+                        <td className="py-2 px-1 w-[130px]">
+                          <div className="flex items-center gap-0.5 whitespace-nowrap text-[10.5px]">
                             <span className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
                               {r.rma_number}
                             </span>
@@ -1415,16 +1424,16 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Vendor / Supplier & Warehouse Bin */}
-                        <td className="py-2 px-1.5 max-w-[130px]" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-1 max-w-[112px]" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className={`font-bold truncate max-w-[118px] ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`} title={res.supplier}>
+                            <span className={`font-bold truncate max-w-[106px] ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`} title={res.supplier}>
                               {res.supplier}
                             </span>
                             {(isPlaceholderSupplier(res.supplier) || wf.party.toEmails.length === 0) ? (
                               <button
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
-                                className="px-1.5 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-black cursor-pointer whitespace-nowrap"
+                                className="px-1.5 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9px] font-black cursor-pointer text-left leading-tight"
                                 title="Set Supplier Name and Follow-Up Emails (TO/CC)"
                               >
                                 + Set Supplier &amp; Email
@@ -1433,7 +1442,7 @@ export default function SupplierClaimsTab({
                               <button
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
-                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-mono cursor-pointer truncate max-w-[120px]"
+                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-mono cursor-pointer truncate max-w-[106px]"
                                 title={`Edit Supplier Email (${wf.party.toEmails[0]})`}
                               >
                                 📧 {wf.party.toEmails[0]}
@@ -1449,7 +1458,7 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Product Description & SKU (Clean: No duplicate Qty info) */}
-                        <td className="py-2 px-1.5 max-w-[150px]">
+                        <td className="py-2 px-1 max-w-[122px]">
                           <div className="font-bold text-slate-900 dark:text-white truncate" title={res.name}>
                             {res.name}
                           </div>
@@ -1478,9 +1487,9 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Disposition, Reorder Status & SLA Countdown */}
-                        <td className="py-2 px-1.5 max-w-[138px]">
+                        <td className="py-2 px-1 w-[124px] max-w-[124px]">
                           <div className="space-y-1">
-                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                            <span className={`px-1.5 py-0.5 rounded-lg text-[9.5px] font-extrabold border inline-block leading-tight shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
                             {(() => {
@@ -1488,7 +1497,7 @@ export default function SupplierClaimsTab({
                               return (
                                 <div>
                                   <span
-                                    className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border inline-flex flex-wrap items-center gap-0.5 leading-tight ${reorderInfo.badgeColor}`}
                                     title={reorderInfo.isReordered
                                       ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
                                       : 'Replacement PO not yet ordered'}
@@ -1513,11 +1522,11 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Dedicated Defect Reason & Reporter Note Column */}
-                        <td className="py-2 px-1.5 max-w-[125px]">
+                        <td className="py-2 px-1 max-w-[100px]">
                           <div className="space-y-1">
                             {r.reason && (
                               <span
-                                className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9.5px] font-bold inline-block truncate max-w-[118px]"
+                                className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9.5px] font-bold inline-block truncate max-w-[94px]"
                                 title={r.reason}
                               >
                                 {r.reason}
@@ -1533,7 +1542,7 @@ export default function SupplierClaimsTab({
                               const cleanNote = cleanExplanationText(rawNote);
                               if (!cleanNote) return null;
                               return (
-                                <div className="flex items-center gap-1 max-w-[118px]" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-1 max-w-[94px]" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={() => onViewExplanation && onViewExplanation({
@@ -1543,10 +1552,10 @@ export default function SupplierClaimsTab({
                                       explanation: cleanNote,
                                       reporter: r.reporter_name || r.reported_by || 'Staff'
                                     })}
-                                    className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-amber-950/60 border border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors cursor-pointer max-w-full"
+                                    className="group text-left flex items-center gap-1 px-1 py-0.5 rounded-md bg-slate-100/90 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-amber-950/60 border border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors cursor-pointer max-w-full"
                                     title="Click to read full reporter explanation"
                                   >
-                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[72px]">
+                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[54px]">
                                       &ldquo;{cleanNote}&rdquo;
                                     </span>
                                     <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 shrink-0 group-hover:underline">
@@ -1560,8 +1569,8 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Qty & Unit */}
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-mono">
-                          <span className="px-1.5 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
+                        <td className="py-2 px-1 text-right whitespace-nowrap font-mono">
+                          <span className="px-1.5 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-[11px] inline-flex items-center gap-1 shadow-2xs">
                             <span>
                               {isManifest
                                 ? formatManifestBreakdown(manifestChildren, false)
@@ -1571,20 +1580,20 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Total Claim + Subtle Unit Price */}
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-mono">
+                        <td className="py-2 px-1 text-right whitespace-nowrap font-mono text-[11px]">
                           <div className={`font-black text-amber-700 dark:text-amber-400 ${res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
                             ₱{res.total.toFixed(2)}
                           </div>
                           {!isManifest && (
-                            <div className={`text-[10px] ${res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-400'}`}>
+                            <div className={`text-[9.5px] ${res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-400'}`}>
                               @ ₱{res.price.toFixed(2)}
                             </div>
                           )}
                         </td>
 
                         {/* Actions Column: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Coworker Queue, Archive, Delete */}
-                        <td className="py-2 px-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <td className="py-2 px-1 text-center w-[124px]" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-col items-stretch gap-1 w-[116px] mx-auto">
 
                             {/* 1. Simple 4-Choice Supplier RTV & Pickup Verification Wizard */}
                             {onOpenSimpleWizard && (
@@ -1594,7 +1603,7 @@ export default function SupplierClaimsTab({
                                   const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
                                   onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : r);
                                 }}
-                                className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
+                                className={`w-full px-1.5 py-1 rounded-lg text-[9.5px] font-black leading-tight text-center transition-colors cursor-pointer border ${
                                   outcome.hasDecision
                                     ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
                                     : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-2xs'
@@ -1611,7 +1620,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleRowCloseCase(r)}
-                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                className="w-full px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
                                 title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
                               >
                                 <span>✓ Case Close</span>
@@ -1626,7 +1635,7 @@ export default function SupplierClaimsTab({
                                   const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
                                   onOpenPickupForm(batchGroup.length > 1 ? batchGroup : r);
                                 }}
-                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+                                className="w-full px-1.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-colors cursor-pointer text-center shadow-2xs"
                                 title={outcome.formType === 'replacement' ? 'View / Re-print Dual-Copy Replacement Form' : 'View / Re-print Dual-Copy Debit Claim Form'}
                               >
                                 <span>{outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}</span>
@@ -1638,7 +1647,7 @@ export default function SupplierClaimsTab({
                               <button
                                 type="button"
                                 onClick={() => onOpenQuickAction(r.rma_number)}
-                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                className="w-full px-1.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                 title={!isManifest && Number(res.qty) > 1 ? `Split Qty or edit details for ${r.rma_number}` : `View details, documents, or audit trail for ${r.rma_number}`}
                               >
                                 <span>{!isManifest && Number(res.qty) > 1 ? '✂️ Split Qty' : '📋 Details'}</span>
@@ -1653,10 +1662,10 @@ export default function SupplierClaimsTab({
                                   if (onAssignSku) onAssignSku(r);
                                   else if (onEditProductFromReport) onEditProductFromReport(r);
                                 }}
-                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                className="w-full px-1.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                 title={`Assign official SKU, pricing, and master vendor for "${res.name || r.barcode}"`}
                               >
-                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
                                 <span>Assign SKU</span>
                               </button>
                             )}
@@ -1667,7 +1676,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleConfirmCoworkerAction(r, 'restocked')}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                className="w-full px-1.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                                 title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                               >
                                 <span>✓ Confirm Restocked in WMS</span>
@@ -1680,7 +1689,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleMarkReordered(r, 'reordered')}
-                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                className="w-full px-1.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                                 title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                               >
                                 <span>🔄 Mark Reordered</span>
@@ -1693,7 +1702,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
-                                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                className="w-full px-1.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                                 title="1-click confirm that this total loss is written off without re-ordering"
                               >
                                 <span>✓ Confirm Written Off</span>
@@ -1705,17 +1714,17 @@ export default function SupplierClaimsTab({
                               <button
                                 type="button"
                                 onClick={() => onOpenQuickAction && onOpenQuickAction(r.rma_number)}
-                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                className="w-full px-1.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                 title="Release hold and re-triage to Restock, RTV, or Scrap"
                               >
-                                <Unlock className="w-3 h-3" />
-                                <span>🔓 Release Hold</span>
+                                <Unlock className="w-3 h-3 shrink-0" />
+                                <span>Release Hold</span>
                               </button>
                             )}
 
                             {/* Rejected Badge */}
                             {isItemRejected(r) && (
-                              <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[10px] border border-slate-300 dark:border-slate-700">
+                              <span className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[9.5px] border border-slate-300 dark:border-slate-700 text-center">
                                 🚫 Claim Rejected
                               </span>
                             )}
@@ -1740,42 +1749,45 @@ export default function SupplierClaimsTab({
                                     setUpdatingQueueId(null);
                                   }
                                 }}
-                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                className="w-full px-1.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                 title="Re-open this item and reset to pending so coworker queues can test restocking/reordering again"
                               >
-                                <RotateCcw className="w-3 h-3 text-slate-500" />
-                                <span>↩️ Reset to Pending</span>
+                                <RotateCcw className="w-3 h-3 text-slate-500 shrink-0" />
+                                <span>Reset to Pending</span>
                               </button>
                             )}
 
-                            {/* 5. Archive Report */}
-                            {effectiveArchiveReport && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const targetArchiveId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
-                                  effectiveArchiveReport(targetArchiveId, r.rma_number, r);
-                                }}
-                                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                                title={`Archive RMA #${r.rma_number} to Archive Vault`}
-                              >
-                                <span className="text-xs">🗄️</span>
-                              </button>
-                            )}
+                            {/* 5. Archive & 6. Delete Icon Row */}
+                            {(effectiveArchiveReport || (canDeleteReports && onRequestDeleteReport)) && (
+                              <div className="flex items-center justify-center gap-1 pt-0.5">
+                                {effectiveArchiveReport && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const targetArchiveId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                                      effectiveArchiveReport(targetArchiveId, r.rma_number, r);
+                                    }}
+                                    className="p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                    title={`Archive RMA #${r.rma_number} to Archive Vault`}
+                                  >
+                                    <span className="text-xs">🗄️</span>
+                                  </button>
+                                )}
 
-                            {/* 6. Delete Report */}
-                            {canDeleteReports && onRequestDeleteReport && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const targetDeleteId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
-                                  onRequestDeleteReport(targetDeleteId, r.rma_number, r);
-                                }}
-                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                                title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                                {canDeleteReports && onRequestDeleteReport && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const targetDeleteId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                                      onRequestDeleteReport(targetDeleteId, r.rma_number, r);
+                                    }}
+                                    className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>
@@ -1934,6 +1946,296 @@ export default function SupplierClaimsTab({
               </tbody>
             </table>
           </div>
+          ) : (
+          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+            {paginatedCandidates.map((r, idx) => {
+              const id = r.id || r.rma_number;
+              const isSelected = selectedRmaIds.has(id);
+              const res = resolveReportProduct(r);
+              const photos = getPhotos(r);
+              const existingClaim = getClaimForReport(r);
+              const outcome = formatFourChoiceOutcome(r);
+              const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList, {
+                customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+                testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
+              });
+              const wf = statusInfo.workflow;
+              const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
+              const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
+              const manifestKey = r.id || r.rma_number;
+              const isManifestExpanded = expandedManifestIds.has(manifestKey);
+              const reorderInfo = resolveReorderStatus(r);
+              const mapUrl = getGpsMapUrl(r);
+              const gpsAddr = getGpsAddressDisplay(r);
+
+              return (
+                <div
+                  key={`mob-${manifestKey}`}
+                  onClick={(e) => {
+                    if (e.target.closest('input, button, a')) return;
+                    if (onOpenQuickAction) onOpenQuickAction(r.rma_number);
+                  }}
+                  className={`p-3.5 space-y-2.5 transition-colors cursor-pointer ${isSelected ? 'bg-amber-50/80 dark:bg-amber-950/40' : ''}`}
+                >
+                  {/* Card Top Row: Checkbox + SN + RMA# + QR + Claim Total */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center flex-wrap gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(id)}
+                        className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="font-mono font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-lg text-[10.5px]">
+                        #{(currentPage - 1) * pageSize + idx + 1}
+                      </span>
+                      <span className="font-mono font-black text-xs text-slate-900 dark:text-white">
+                        {r.rma_number}
+                      </span>
+                      {onViewQR && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewQR({
+                              ...r,
+                              name: res.name,
+                              supplier_name: res.supplier,
+                              code: res.code || r.code,
+                              price: res.price || r.price
+                            });
+                          }}
+                          className="p-1 text-slate-400 hover:text-amber-600 rounded-md"
+                          title={`Print Box QR for ${r.rma_number}`}
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-right font-mono shrink-0">
+                      <div className="text-xs font-black text-amber-700 dark:text-amber-400">₱{res.total.toFixed(2)}</div>
+                      <div className="text-[10px] text-slate-500 font-bold">
+                        {isManifest ? formatManifestBreakdown(manifestChildren, false) : formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Product + Thumbnail + Supplier */}
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    {photos.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPhotoPreview(r)}
+                        className="relative w-11 h-11 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0"
+                      >
+                        <img
+                          src={photos[0]}
+                          alt="Proof"
+                          onError={(e) => {
+                            if (!e.currentTarget.dataset.err) {
+                              e.currentTarget.dataset.err = '1';
+                              e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                            }
+                          }}
+                          className="w-full h-full object-cover"
+                        />
+                      </button>
+                    ) : (
+                      <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0">
+                        <ImageIcon className="w-4 h-4" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="font-bold text-xs text-slate-900 dark:text-white break-words">{res.name}</div>
+                      <div className="flex items-center flex-wrap gap-1.5 text-[10px]">
+                        <span className={`font-bold ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                          {res.supplier}
+                        </span>
+                        <span className="text-slate-400 font-mono">
+                          SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600'}>{res.code || 'Unassigned'}</strong>
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
+                        <span>{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
+                        <span>{normalizeWarehouseLocation(r.warehouse_location, r)}</span>
+                        {mapUrl && (
+                          <a href={mapUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5">
+                            <MapPin className="w-2.5 h-2.5 text-rose-500" />
+                            <span>{gpsAddr || 'Map'}</span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Badges & Status */}
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border leading-tight ${outcome.badgeColor}`}>
+                      {outcome.label}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border ${reorderInfo.badgeColor}`}>
+                      {reorderInfo.isReordered ? '✓ Reordered' : 'Reorder: Pending'}
+                      {reorderInfo.poNumber ? ` (${reorderInfo.poNumber})` : ''}
+                    </span>
+                    {wf.isCountdownActive && !wf.isClosed && (
+                      <span className="text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">{wf.step2.text}</span>
+                    )}
+                    {r.reason && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9.5px] font-bold">
+                        {r.reason}
+                      </span>
+                    )}
+                    {isManifest && (
+                      <button
+                        type="button"
+                        onClick={() => toggleManifestExpand(manifestKey)}
+                        className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1"
+                      >
+                        <span>📦 Manifest ({manifestChildren.length})</span>
+                        <ChevronDown className={`w-3 h-3 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Mobile Actions */}
+                  <div className="flex items-center flex-wrap gap-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
+                    {onOpenSimpleWizard && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
+                          onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : r);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-black border ${
+                          outcome.hasDecision
+                            ? 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
+                            : 'bg-indigo-600 text-white border-indigo-600'
+                        }`}
+                      >
+                        {outcome.hasDecision ? '✏️ Edit Claim / 4-Choice' : '⚡ 4-Choice / Pickup'}
+                      </button>
+                    )}
+                    {!wf.isClosed && (
+                      <button
+                        type="button"
+                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                        onClick={() => handleRowCloseCase(r)}
+                        className="px-2 py-1 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black disabled:opacity-50"
+                      >
+                        ✓ Case Close
+                      </button>
+                    )}
+                    {onOpenPickupForm && (outcome.formType || r.status === 'picked_up' || r.ai_document_metadata?.supplier_pickup?.picked_up_at) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
+                          onOpenPickupForm(batchGroup.length > 1 ? batchGroup : r);
+                        }}
+                        className="px-2 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-black"
+                      >
+                        {outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}
+                      </button>
+                    )}
+                    {onOpenQuickAction && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenQuickAction(r.rma_number)}
+                        className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold"
+                      >
+                        {!isManifest && Number(res.qty) > 1 ? '✂️ Split Qty' : '📋 Details'}
+                      </button>
+                    )}
+                    {!resolveReorderStatus(r).isReordered && !['rejected', 'deleted', 'trashed'].includes(String(r.status || '').toLowerCase()) && (
+                      <button
+                        type="button"
+                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                        onClick={() => handleMarkReordered(r, 'reordered')}
+                        className="px-2 py-1 bg-amber-600 text-white border border-amber-500 rounded-lg text-[10px] font-black disabled:opacity-50"
+                      >
+                        🔄 Mark Reordered
+                      </button>
+                    )}
+                    {Boolean(outcome.hasDecision || String(r.status || 'pending').toLowerCase() !== 'pending' || r.ai_document_metadata?.follow_up?.case_closed_at) && (
+                      <button
+                        type="button"
+                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                        onClick={async () => {
+                          if (onResetToPending) {
+                            await onResetToPending(r);
+                            return;
+                          }
+                          try {
+                            setUpdatingQueueId(r.id || r.rma_number);
+                            await catalogService.resetReportToPending(r.id, r.rma_number, currentUser?.name || 'Staff');
+                            if (onRefresh) onRefresh();
+                          } catch (e) {
+                            alert('Could not reset report: ' + e.message);
+                          } finally {
+                            setUpdatingQueueId(null);
+                          }
+                        }}
+                        className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3 text-slate-500" />
+                        <span>Reset to Pending</span>
+                      </button>
+                    )}
+                    {effectiveArchiveReport && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetArchiveId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                          effectiveArchiveReport(targetArchiveId, r.rma_number, r);
+                        }}
+                        className="p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                        title={`Archive RMA #${r.rma_number}`}
+                      >
+                        <span className="text-xs">🗄️</span>
+                      </button>
+                    )}
+                    {canDeleteReports && onRequestDeleteReport && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetDeleteId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                          onRequestDeleteReport(targetDeleteId, r.rma_number, r);
+                        }}
+                        className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg"
+                        title={`Delete RMA #${r.rma_number}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Mobile Expandable Manifest Items */}
+                  {isManifest && isManifestExpanded && (
+                    <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-900/50 space-y-1.5">
+                      {manifestChildren.map((child, cIdx) => {
+                        const childName = (child.name || child.productName || `Item #${cIdx + 1}`).trim();
+                        const childQty = Number(child.quantity || child.qty) || 1;
+                        const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
+                        const childOutcome = formatFourChoiceOutcome(child);
+                        return (
+                          <div key={`mob-child-${cIdx}`} className="p-2 rounded-xl bg-amber-50/60 dark:bg-slate-800/70 border border-amber-200/70 dark:border-slate-700 text-[11px] space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-900 dark:text-white break-words">#{cIdx + 1} {childName}</span>
+                              <span className="font-mono font-bold text-amber-800 dark:text-amber-300 shrink-0">{childQty} {childUnit}</span>
+                            </div>
+                            <span className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border inline-block ${childOutcome.badgeColor}`}>
+                              {childOutcome.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          )
         )}
 
         {/* Table Pagination Component */}

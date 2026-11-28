@@ -68,6 +68,7 @@ import {
   sumManifestQuantity,
   resolveReorderStatus
 } from '../utils/rmaHelpers';
+import { useIsDesktopMd } from '../hooks/useIsDesktopMd';
 
 export default function CustomerHubTab({
   reportsList = [],
@@ -107,6 +108,7 @@ export default function CustomerHubTab({
   selectionResetTick = 0,
   externalStatusFilter = null
 }) {
+  const isDesktopMd = useIsDesktopMd();
   const canEditProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin' || currentUser?.role === 'staff';
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
@@ -928,7 +930,7 @@ export default function CustomerHubTab({
 
 
 
-      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
+      <div className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
         <span>
           Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {customerScopedTotal} reports
           {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsReorderFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
@@ -936,7 +938,7 @@ export default function CustomerHubTab({
           )}
         </span>
         <span className="text-slate-400 dark:text-slate-500">
-          Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
+          Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{reportsSortField === 'created_at' ? 'Date' : reportsSortField === 'rma_number' ? 'RMA #' : reportsSortField === 'store_branch' ? 'Branch' : reportsSortField === 'lifecycle_stage' ? 'Stage' : reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
         </span>
       </div>
     </div>
@@ -954,7 +956,9 @@ export default function CustomerHubTab({
           Clear filters
         </button>
       </div>
-    ) : reportsViewMode === 'table' ? (
+    ) : (
+      <>
+        {reportsViewMode === 'table' && isDesktopMd && (
       /* ============================================================ */
       /* ROWS / TABLE VIEW: WITH SORTABLE COLUMNS & LIGHTBOX PHOTOS   */
       /* ============================================================ */
@@ -962,9 +966,9 @@ export default function CustomerHubTab({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[10.5px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 {/* Select All Checkbox Header */}
-                <th className="py-2.5 px-2 w-9 text-center">
+                <th className="py-2 px-1 w-7 text-center">
                   <input
                     type="checkbox"
                     checked={isAllReportsPageSelected}
@@ -975,90 +979,90 @@ export default function CustomerHubTab({
                 </th>
                 <th
                   onClick={() => handleReportsSort('id')}
-                  className="py-2.5 px-2 font-black text-slate-900 dark:text-white w-12 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
+                  className="py-2 px-1 font-black text-slate-900 dark:text-white w-10 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
                   title="Click to sort by Serial Number"
                 >
                   <div className="flex items-center">
                     <span>SN</span>
                     {reportsSortField === 'id' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('rma_number')}
-                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
+                  className="py-2 px-1 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
                   title="Click to sort by RMA #"
                 >
                   <div className="flex items-center">
                     <span>RMA # &amp; Docs</span>
                     {reportsSortField === 'rma_number' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
-                <th className="py-2 px-1 w-10 text-center select-none">Photo</th>
+                <th className="py-2 px-0.5 w-9 text-center select-none">Photo</th>
                 <th
                   onClick={() => handleReportsSort('name')}
-                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  className="py-2 px-1 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                   title="Click to sort by Item Name / SKU"
                 >
                   <div className="flex items-center">
                     <span>Item &amp; SKU/BC</span>
                     {reportsSortField === 'name' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('quantity')}
-                  className="py-2 px-1.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
+                  className="py-2 px-1 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
                   title="Click to sort by Quantity & Unit"
                 >
                   <div className="flex items-center justify-center">
                     <span>Qty</span>
                     {reportsSortField === 'quantity' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('store_branch')}
-                  className="py-2 px-1.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  className="py-2 px-1 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                   title="Click to sort by Customer Branch / Defect Reason"
                 >
                   <div className="flex items-center">
                     <span>Defect &amp; Branch</span>
                     {reportsSortField === 'store_branch' || reportsSortField === 'reason' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('disposition')}
-                  className="py-2 px-1.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                  className="py-2 px-1 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group w-[116px]"
                   title="Click to sort by Stage & Disposition"
                 >
                   <div className="flex items-center justify-center">
                     <span>Stage, Disp &amp; Bin</span>
                     {reportsSortField === 'disposition' || reportsSortField === 'lifecycle_stage' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
                 <th
                   onClick={() => handleReportsSort('created_at')}
-                  className="py-2 px-1.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
+                  className="py-2 px-1 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group whitespace-nowrap"
                   title="Click to sort by Reported Date"
                 >
                   <div className="flex items-center justify-end">
                     <span>Reported &amp; GPS</span>
                     {reportsSortField === 'created_at' ? (
-                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                      reportsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" /> : <ArrowDown className="w-3 h-3 text-blue-600 shrink-0 ml-0.5" />
+                    ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-0.5" />}
                   </div>
                 </th>
-                <th className="py-2 px-1.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                <th className="py-2 px-1 w-[118px] text-center font-bold select-none text-slate-500 dark:text-slate-400 whitespace-nowrap">
                   Actions
                 </th>
               </tr>
@@ -1093,7 +1097,7 @@ export default function CustomerHubTab({
                       title={`Click row to inspect & triage RMA #${item.rma_number}`}
                     >
                       {/* Row Selection Checkbox */}
-                      <td className="py-2.5 px-2 text-center">
+                      <td className="py-2 px-1 text-center w-7">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1103,14 +1107,14 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 1. SN COLUMN AT FAR LEFT */}
-                      <td className="py-2.5 px-2 font-mono whitespace-nowrap">
-                        <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-1.5 py-0.5 rounded-lg text-[11px]">
+                      <td className="py-2 px-1 font-mono whitespace-nowrap w-10">
+                        <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-1 py-0.5 rounded-lg text-[10.5px]">
                           #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
                         </span>
                       </td>
 
                       {/* 2. RMA # + QR Sticker + Manifest Badge + Commercial Docs */}
-                      <td className="py-2 px-1.5 font-mono text-[11px]">
+                      <td className="py-2 px-1 font-mono text-[10.5px]">
                         <div className="flex items-center gap-1 whitespace-nowrap">
                           <button
                             type="button"
@@ -1185,7 +1189,7 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 3. Photo Thumbnail with Lightbox */}
-                      <td className="py-2 px-1.5 text-center">
+                      <td className="py-2 px-0.5 text-center w-9">
                         {photoList.length > 0 ? (
                           <button
                             type="button"
@@ -1196,24 +1200,30 @@ export default function CustomerHubTab({
                               title: resolvedName || `Return ${item.rma_number}`,
                               subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
                             })}
-                            className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                            className="w-8 h-8 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                             title="Click to view full-size proof photo"
                           >
                             <img
                               src={photoList[0]}
                               alt="Proof"
+                              onError={(e) => {
+                                if (!e.currentTarget.dataset.err) {
+                                  e.currentTarget.dataset.err = '1';
+                                  e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                                }
+                              }}
                               className="w-full h-full object-cover"
                             />
                           </button>
                         ) : (
-                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                          <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                             <ImageIcon className="w-4 h-4" />
                           </div>
                         )}
                       </td>
 
                       {/* 4. Merged Item Name, Barcode/SKU, Vendor SLA & Lot/Exp */}
-                      <td className="py-2 px-1.5 max-w-[140px]" title={resolvedName}>
+                      <td className="py-2 px-1 max-w-[118px]" title={resolvedName}>
                         <div className="font-bold text-slate-900 dark:text-white truncate">{resolvedName}</div>
                         <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {isManifest ? (
@@ -1277,8 +1287,8 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 5. Quantity & Unit */}
-                      <td className="py-2 px-1.5 text-center whitespace-nowrap">
-                        <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
+                      <td className="py-2 px-1 text-center whitespace-nowrap">
+                        <span className="font-mono font-black text-[11px] text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
                           <span>
                             {isManifest
                               ? formatManifestBreakdown(manifestChildren, false)
@@ -1288,9 +1298,9 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 6. Defect Reason, Notes & Customer Branch / Reporter */}
-                      <td className="py-2 px-1.5 max-w-[125px]">
+                      <td className="py-2 px-1 max-w-[104px]">
                         <div className="space-y-1">
-                          <span className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[9.5px] inline-block truncate max-w-[118px]" title={item.reason || 'Damaged'}>
+                          <span className="px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[9.5px] inline-block truncate max-w-[98px]" title={item.reason || 'Damaged'}>
                             {item.reason || 'Damaged'}
                           </span>
                           {(() => {
@@ -1312,10 +1322,10 @@ export default function CustomerHubTab({
                                   explanation: cleanNote,
                                   reporter: item.reporter_name || item.reported_by || 'Staff'
                                 })}
-                                className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
+                                className="group text-left flex items-center gap-1 px-1 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
                                 title="Click to read full reporter explanation"
                               >
-                                <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[100px]">
+                                <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[68px]">
                                   &ldquo;{cleanNote}&rdquo;
                                 </span>
                                 <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
@@ -1341,7 +1351,7 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 7. Lifecycle Stage, 4-Choice Disposition, SLA & Bin Location */}
-                      <td className="py-2 px-1.5 text-center max-w-[148px]">
+                      <td className="py-2 px-1 text-center w-[116px] max-w-[116px]">
                         <div className="inline-flex flex-col items-center gap-1">
                           {isManifest ? (() => {
                             const dynStage = resolveBatchManifestLifecycle(item, reportsList);
@@ -1366,7 +1376,7 @@ export default function CustomerHubTab({
                             });
                             return (
                               <>
-                                <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-bold border uppercase tracking-wider inline-block shadow-2xs whitespace-nowrap ${stageInfo.color}`}>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[9.5px] font-bold border uppercase tracking-wider inline-block shadow-2xs leading-tight text-center ${stageInfo.color}`}>
                                   {stageInfo.label}
                                 </span>
                                 {wf.isCountdownActive && !wf.isClosed && (
@@ -1393,14 +1403,14 @@ export default function CustomerHubTab({
                             </button>
                           ) : (
                             <>
-                              <span className={`px-2 py-0.5 rounded-lg text-[9.5px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                              <span className={`px-1.5 py-0.5 rounded-lg text-[9.5px] font-extrabold border inline-block leading-tight text-center shadow-2xs ${outcome.badgeColor}`}>
                                 {outcome.label}
                               </span>
                               {(() => {
                                 const reorderInfo = resolveReorderStatus(item);
                                 return (
                                   <span
-                                    className={`px-1.5 py-0.2 rounded-md text-[9.5px] font-extrabold border inline-flex items-center gap-1 whitespace-nowrap ${reorderInfo.badgeColor}`}
+                                    className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold border inline-flex flex-wrap items-center justify-center gap-0.5 leading-tight text-center ${reorderInfo.badgeColor}`}
                                     title={reorderInfo.isReordered
                                       ? `Reordered${reorderInfo.formattedTime ? ` on ${reorderInfo.formattedTime}` : ''}${reorderInfo.poNumber ? ` • PO #${reorderInfo.poNumber}` : ''}${reorderInfo.reorderedBy ? ` by ${reorderInfo.reorderedBy}` : ''}`
                                       : 'Replacement PO not yet ordered'}
@@ -1427,7 +1437,7 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 8. Date & GPS */}
-                      <td className="py-2 px-1.5 text-right font-mono text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      <td className="py-2 px-1 text-right font-mono text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap max-w-[92px]">
                         <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
                         {(() => {
                           const mapUrl = getGpsMapUrl(item);
@@ -1437,7 +1447,7 @@ export default function CustomerHubTab({
                               href={mapUrl}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[9.5px] font-bold max-w-[105px]"
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[9.5px] font-bold max-w-[88px]"
                               title={gpsAddr || 'View GPS Location on Google Maps'}
                             >
                               <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
@@ -1450,8 +1460,8 @@ export default function CustomerHubTab({
                       </td>
 
                       {/* 9. Actions: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Credit Memo & Delete */}
-                      <td className="py-2 px-1.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                      <td className="py-2 px-1 text-center w-[118px]">
+                        <div className="flex flex-col items-stretch gap-1 w-[112px] mx-auto">
                           {/* 4-Choice Outcome & Pickup Verification */}
                           {onOpenSimpleWizard && (
                             <button
@@ -1460,7 +1470,7 @@ export default function CustomerHubTab({
                                 const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
                                 onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : item);
                               }}
-                              className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
+                              className={`w-full px-1.5 py-1 rounded-lg text-[9.5px] font-black leading-tight text-center transition-colors cursor-pointer border ${
                                 outcome.hasDecision
                                   ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
                                   : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-2xs'
@@ -1479,7 +1489,7 @@ export default function CustomerHubTab({
                                 const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
                                 onOpenPickupForm(batchGroup.length > 1 ? batchGroup : item);
                               }}
-                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+                              className="w-full px-1.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-colors cursor-pointer text-center shadow-2xs"
                               title={outcome.formType === 'replacement' ? 'View / Re-print Buffer Replacement Form' : 'View / Re-print Credit Return Form'}
                             >
                               <span>{outcome.formType === 'replacement' ? '📄 Buffer Replacement Form' : '📄 Credit Return Form'}</span>
@@ -1492,7 +1502,7 @@ export default function CustomerHubTab({
                               type="button"
                               disabled={customerRowBusyId === (item.id || item.rma_number)}
                               onClick={() => handleCustomerCloseCase(item)}
-                              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                              className="w-full px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[9.5px] font-black leading-tight text-center cursor-pointer disabled:opacity-50"
                               title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
                             >
                               <span>✓ Case Close</span>
@@ -1503,7 +1513,7 @@ export default function CustomerHubTab({
                           <button
                             type="button"
                             onClick={() => onInspectTriage(item)}
-                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                            className="w-full px-1.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                             title={!isManifest && Number(item.quantity) > 1 ? `Split Qty or edit details for ${item.rma_number}` : `View details, documents, or audit trail for ${item.rma_number}`}
                           >
                             <span>{!isManifest && Number(item.quantity) > 1 ? '✂️ Split Qty' : '📋 Details'}</span>
@@ -1515,7 +1525,7 @@ export default function CustomerHubTab({
                               type="button"
                               disabled={updatingQueueId === (item.id || item.rma_number)}
                               onClick={() => onConfirmCoworkerAction(item, 'restocked')}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              className="w-full px-1.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                               title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                             >
                               <span>✓ Restocked in WMS</span>
@@ -1528,7 +1538,7 @@ export default function CustomerHubTab({
                               type="button"
                               disabled={customerRowBusyId === (item.id || item.rma_number)}
                               onClick={() => handleMarkReordered(item, 'reordered')}
-                              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              className="w-full px-1.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                               title="Mark replacement PO as Reordered (keeps 4-Choice Outcome & 10-Day SLA unchanged)"
                             >
                               <span>🔄 Mark Reordered</span>
@@ -1541,7 +1551,7 @@ export default function CustomerHubTab({
                               type="button"
                               disabled={updatingQueueId === (item.id || item.rma_number)}
                               onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
-                              className="px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white border border-slate-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              className="w-full px-1.5 py-1 bg-slate-700 hover:bg-slate-800 text-white border border-slate-600 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                               title="1-click confirm that this total loss is written off without re-ordering"
                             >
                               <span>✓ Written Off</span>
@@ -1554,11 +1564,11 @@ export default function CustomerHubTab({
                               type="button"
                               disabled={updatingQueueId === (item.id || item.rma_number)}
                               onClick={() => onResetToPending && onResetToPending(item)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                              className="w-full px-1.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                               title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
                             >
-                              <RotateCcw className="w-3 h-3 text-slate-500" />
-                              <span>↩️ Reset to Pending</span>
+                              <RotateCcw className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span>Reset to Pending</span>
                             </button>
                           )}
 
@@ -1567,11 +1577,11 @@ export default function CustomerHubTab({
                             <button
                               type="button"
                               onClick={() => (onOpenSimpleWizard ? onOpenSimpleWizard(item) : onInspectTriage(item))}
-                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                              className="w-full px-1.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                               title="Release hold via 4-Choice window"
                             >
-                              <Unlock className="w-3 h-3" />
-                              <span>🔓 Release Hold</span>
+                              <Unlock className="w-3 h-3 shrink-0" />
+                              <span>Release Hold</span>
                             </button>
                           )}
 
@@ -1580,10 +1590,10 @@ export default function CustomerHubTab({
                             <button
                               type="button"
                               onClick={() => onEditProductFromReport(item)}
-                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              className="w-full px-1.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                               title={`Assign official SKU and save "${item.name || item.barcode}" to Products catalog`}
                             >
-                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
                               <span>Assign SKU</span>
                             </button>
                           )}
@@ -1596,10 +1606,10 @@ export default function CustomerHubTab({
                                   <button
                                     type="button"
                                     onClick={() => onViewCreditMemoVoucher(linkedMemos.length === 1 ? linkedMemos[0] : linkedMemos)}
-                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    className="w-full px-1.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                     title={`View ${linkedMemos.length} Credit Memo Voucher(s) for this batch`}
                                   >
-                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                     <span>CM Voucher{linkedMemos.length > 1 ? ` (${linkedMemos.length})` : ''}</span>
                                   </button>
                                 );
@@ -1608,10 +1618,10 @@ export default function CustomerHubTab({
                                 <button
                                   type="button"
                                   onClick={() => toggleManifestExpand(manifestKey)}
-                                  className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                  className="w-full px-1.5 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                   title="View manifest line items to issue individual Credit Memos"
                                 >
-                                  <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                                  <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400 shrink-0" />
                                   <span>CM in Drawer</span>
                                 </button>
                               );
@@ -1623,10 +1633,10 @@ export default function CustomerHubTab({
                                 <button
                                   type="button"
                                   onClick={() => onViewCreditMemoVoucher(existingMemo)}
-                                  className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                  className="w-full px-1.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[9.5px] font-black leading-tight flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
                                   title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
                                 >
-                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                   <span>CM Voucher</span>
                                 </button>
                               );
@@ -1645,14 +1655,14 @@ export default function CustomerHubTab({
                                     }
                                     onOpenCreditMemo(item);
                                   }}
-                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all shadow-2xs ${
+                                  className={`w-full px-1.5 py-1 rounded-lg text-[9.5px] font-bold leading-tight flex items-center justify-center gap-1 transition-all shadow-2xs ${
                                     isReportOnHold
                                       ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
                                       : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 cursor-pointer'
                                   }`}
                                   title={isReportOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : "Issue Finance Credit Memo for this Return"}
                                 >
-                                  {isReportOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                  {isReportOnHold ? <Lock className="w-3 h-3 text-amber-500 shrink-0" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />}
                                   <span>{isReportOnHold ? 'On Hold' : '+ Credit Memo'}</span>
                                 </button>
                               );
@@ -1660,26 +1670,28 @@ export default function CustomerHubTab({
                             return null;
                           })()}
 
-                          {/* Archive to Vault */}
-                          <button
-                            type="button"
-                            onClick={() => onArchiveReport(item.id, item.rma_number, item)}
-                            className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                            title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
-                          >
-                            <Archive className="w-4 h-4 text-slate-500 hover:text-slate-700" />
-                          </button>
-
-                          {canDeleteReports && (
+                          {/* Archive & Delete Icon Row */}
+                          <div className="flex items-center justify-center gap-1 pt-0.5">
                             <button
                               type="button"
-                              onClick={() => onRequestDeleteReport(item.id, item.rma_number, item)}
-                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
-                              title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
+                              onClick={() => onArchiveReport(item.id, item.rma_number, item)}
+                              className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Archive className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
                             </button>
-                          )}
+
+                            {canDeleteReports && (
+                              <button
+                                type="button"
+                                onClick={() => onRequestDeleteReport(item.id, item.rma_number, item)}
+                                className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -2055,10 +2067,12 @@ export default function CustomerHubTab({
           }}
         />
       </div>
-    ) : (
-      /* ============================================================ */
-      /* GRID / CARDS VIEW (With SN badge and clickable photos)       */
-      /* ============================================================ */
+        )}
+
+      {/* ============================================================ */}
+      {/* GRID / CARDS VIEW (Auto on <md, or selectable on desktop)    */}
+      {/* ============================================================ */}
+      {(!isDesktopMd || reportsViewMode !== 'table') && (
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {paginatedReports.map((item, index) => {
@@ -2084,9 +2098,9 @@ export default function CustomerHubTab({
                   : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
+                <div className="flex flex-col gap-2.5 min-w-0">
+                  <div className="min-w-0">
+                    <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -2171,7 +2185,7 @@ export default function CustomerHubTab({
                         </span>
                       ) : null}
                     </div>
-                    <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5 truncate" title={resolvedName}>
+                    <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-1 break-words" title={resolvedName}>
                       {resolvedName}
                     </h4>
                     <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
@@ -2197,7 +2211,7 @@ export default function CustomerHubTab({
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/70 dark:border-slate-700/70">
                     {/* 4-Choice Outcome & Pickup Verification */}
                     {onOpenSimpleWizard && (
                       <button
@@ -2314,7 +2328,7 @@ export default function CustomerHubTab({
                         title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
                       >
                         <RotateCcw className="w-3 h-3 text-slate-500" />
-                        <span>↩️ Reset to Pending</span>
+                        <span>Reset to Pending</span>
                       </button>
                     )}
 
@@ -2541,6 +2555,12 @@ export default function CustomerHubTab({
                           <img
                             src={url}
                             alt="Proof"
+                            onError={(e) => {
+                              if (!e.currentTarget.dataset.err) {
+                                e.currentTarget.dataset.err = '1';
+                                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.75'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E";
+                              }
+                            }}
                             className="w-full h-full object-cover"
                           />
                         </button>
@@ -2713,6 +2733,8 @@ export default function CustomerHubTab({
           }}
         />
       </div>
+      )}
+      </>
     )}
   </div>
     )}

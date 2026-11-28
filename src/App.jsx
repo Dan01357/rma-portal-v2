@@ -3515,14 +3515,14 @@ export default function App() {
             <div className="space-y-4 animate-in fade-in duration-200">
 
             {/* Top Navigation Bar: Station Branding, Device Lock & Theme Control */}
-            <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
-              <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
+              <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
                 <div className="p-2 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 shrink-0">
                   {gateSession?.type === 'internal_warehouse' ? <Building2 className="w-4 h-4" /> : <Package className="w-4 h-4" />}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-extrabold text-xs text-slate-900 dark:text-white leading-tight break-words">
+                    <span className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight break-words">
                       {gateSession ? (gateSession.profileName || 'Station Active') : 'Customer & Warehouse Returns'}
                     </span>
                     {gateSession?.slug && (
@@ -3544,19 +3544,19 @@ export default function App() {
                       </span>
                     </div>
                   ) : (
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight">
                       {gateSession ? 'Authorized Return Intake Active' : 'Pingcon RMA Return Intake'}
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end w-full sm:w-auto pt-2 sm:pt-0 border-t border-slate-100 dark:border-slate-800 sm:border-t-0">
                 {activeSessionSubmittedReports.length >= 1 && (
                   <button
                     type="button"
                     onClick={() => openQrModal(activeSessionSubmittedReports)}
-                    className="touch-target px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    className="touch-target px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                     title="View, resize, or print all RMA QR cards submitted during this session"
                   >
                     <QrCode className="w-3.5 h-3.5 shrink-0" />
@@ -3567,10 +3567,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsScannerOpen(true)}
-                  className="touch-target px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  className="touch-target px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                   title="Scan product barcode or printed RMA sticker QR"
                 >
-                  <QrCode className="w-3.5 h-3.5" />
+                  <QrCode className="w-3.5 h-3.5 shrink-0" />
                   <span className="hidden sm:inline">Scan RMA QR</span>
                 </button>
 
@@ -3578,10 +3578,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleLockStation}
-                    className="touch-target px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    className="touch-target px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                     title="Lock device and require 6-digit PIN"
                   >
-                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span>Lock Device</span>
                   </button>
                 )}
@@ -4040,9 +4040,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsScannerOpen(true)}
-                    className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] cursor-pointer"
+                    className="w-full py-3.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[13px] sm:text-sm rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] cursor-pointer"
                   >
-                    <Camera className="w-5 h-5" />
+                    <Camera className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                     <span>Scan Product Barcode or RMA Sticker QR</span>
                   </button>
 
@@ -4191,7 +4191,7 @@ export default function App() {
                         type="text"
                         value={customItemName}
                         onChange={(e) => setCustomItemName(e.target.value)}
-                        placeholder={detectedProduct?.name || "e.g. Oishi Prawn Crackers 60g, MSH12 Ballpen (helps warehouse identify unlisted items)"}
+                        placeholder={detectedProduct?.name || "e.g. Oishi Prawn Crackers 60g, MSH12 Ballpen"}
                         className={`w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 transition-colors shadow-2xs ${detectedProduct
                           ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20'
                           : 'border-slate-300 dark:border-slate-700'
@@ -4381,7 +4381,7 @@ export default function App() {
                         maxLength={250}
                         value={explanation}
                         onChange={(e) => setExplanation(e.target.value.slice(0, 250))}
-                        placeholder="Optional details / explanation for this item (max 250 chars)..."
+                        placeholder="Optional defect notes (max 250 chars)..."
                         className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
                       />
                     </div>
@@ -4729,7 +4729,7 @@ export default function App() {
                             <FileText className="w-4.5 h-4.5" />
                           </div>
                           <span className="text-xs font-black text-violet-950 dark:text-violet-200">
-                            Snap Live Photo or Upload DR / Invoice / PO
+                            Snap or Upload DR / Invoice / PO
                           </span>
                           <span className="text-[10px] text-violet-700/90 dark:text-violet-400 mt-0.5">
                             Up to 3 pages • AI OCR extracts SI, DR &amp; PO automatically
@@ -4900,7 +4900,7 @@ export default function App() {
                         type="text"
                         value={storeBranch}
                         onChange={(e) => setStoreBranch(e.target.value)}
-                        placeholder="Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or type N/A if not applicable)"
+                        placeholder="e.g., Walter Mart, Savemore Taguig (or N/A)"
                         className="w-full pl-10 pr-9 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
                       />
                       {storeBranch && (
@@ -5083,8 +5083,8 @@ export default function App() {
 
               <div className="flex-1 min-w-0 flex flex-col">
                 {/* Slim Enterprise Sticky Top Utility Bar */}
-                <header className="sticky top-0 z-20 h-14 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
+                <header className="sticky top-0 z-20 min-h-14 py-1.5 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <button
                       type="button"
                       onClick={() => setIsMobileSidebarOpen(true)}
@@ -5094,30 +5094,30 @@ export default function App() {
                       <Menu className="w-5 h-5" />
                     </button>
 
-                    <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                      <span className="hidden sm:inline text-xs font-black tracking-tight text-slate-500 dark:text-slate-400 shrink-0">
+                    <div className="min-w-0 flex items-center gap-1.5 sm:gap-2 flex-nowrap">
+                      <span className="hidden xl:inline text-[11px] font-black tracking-tight text-slate-500 dark:text-slate-400 shrink-0 whitespace-nowrap">
                         Pingcon RMA Operations
                       </span>
-                      <span className="hidden sm:inline text-slate-300 dark:text-slate-700">/</span>
-                      <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
+                      <span className="hidden xl:inline text-slate-300 dark:text-slate-700 shrink-0">/</span>
+                      <h1 className="text-sm sm:text-[15px] font-black text-slate-900 dark:text-white tracking-tight truncate">
                         {activeRouteTitle}
                       </h1>
-                      <span className="hidden md:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                      <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         <span>Live Auto-Sync</span>
                       </span>
                       {normalizedTab === 'sandbox' && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shrink-0">
-                          🧪 Sandbox Isolated
+                        <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shrink-0 whitespace-nowrap">
+                          🧪 Sandbox
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                    <span className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-                      <span className="truncate max-w-[140px]">{currentUser?.name || 'Authorized Staff'}</span>
-                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 whitespace-nowrap">
+                      <span className="truncate max-w-[130px]">{currentUser?.name || 'Authorized Staff'}</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 shrink-0">
                         {currentUser?.role === 'super_admin' ? 'Super Admin' : (currentUser?.role || 'Staff')}
                       </span>
                     </span>
@@ -5143,7 +5143,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => navigateTo('/')}
-                      className="hidden sm:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold items-center gap-1.5 transition-colors cursor-pointer"
+                      className="hidden sm:flex px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                     >
                       <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                       <span className="hidden md:inline">Public Reporter</span>
@@ -5152,7 +5152,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleLogout}
-                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Logout</span>
@@ -5185,7 +5185,7 @@ export default function App() {
                     >
                       <div className="min-w-0">
                         <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Customer Inbound</div>
-                        <div className="flex items-baseline gap-2">
+                        <div className="flex items-center flex-wrap gap-2 mt-0.5">
                           <span className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono leading-tight">{customerInboundReports.length}</span>
                           <button
                             type="button"
@@ -5194,7 +5194,7 @@ export default function App() {
                               setCreditMemoScopeIsTest(false);
                               setAdminActiveTab('credit_memos');
                             }}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9.5px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 cursor-pointer"
+                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9.5px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 cursor-pointer whitespace-nowrap"
                             title="Open Credit Memos Ledger"
                           >
                             <span>CM ({liveCreditMemosList.length}) →</span>
@@ -5275,11 +5275,11 @@ export default function App() {
                     normalizedTab === 'sandbox'
                   ) && (
                     <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
                           WMS / ERP Sync
                         </span>
-                        <span className="text-xs font-black text-white truncate">
+                        <span className="text-xs font-black text-white leading-snug">
                           Coworker Inventory &amp; Procurement Queues {normalizedTab === 'sandbox' ? '(Sandbox)' : ''}
                         </span>
                       </div>
@@ -6330,7 +6330,7 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed top-4 right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed top-[68px] right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
           <div className={`pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
             : toastMessage.type === 'warning'

@@ -184,10 +184,10 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
 
       // 6. Stream Switcher: Customer Hub -> Supplier RTV (hides Credit Memo card) -> back to Customer Hub
       await expect(page.getByText(/Customer Credit Memo/i).first()).toBeVisible();
-      const supplierStreamBtn = page.getByRole('button', { name: /📤 Supplier RTV/i });
+      const supplierStreamBtn = page.getByRole('button', { name: 'Supplier RTV', exact: true });
       await supplierStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeHidden({ timeout: 10_000 });
-      const customerStreamBtn = page.getByRole('button', { name: /📥 Customer Hub/i });
+      const customerStreamBtn = page.getByRole('button', { name: 'Customer Hub', exact: true });
       await customerStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeVisible({ timeout: 10_000 });
 

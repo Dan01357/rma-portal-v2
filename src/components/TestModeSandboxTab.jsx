@@ -469,31 +469,31 @@ export default function TestModeSandboxTab({
       </div>
 
       {/* 2. Standardized Symmetrical 2-Hub Sandbox Sub-Tabs Bar */}
-      <div className="flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800/80 p-1 rounded-2xl overflow-x-auto">
+      <div className="grid grid-cols-1 sm:inline-flex sm:items-center gap-1.5 sm:gap-2 bg-slate-200/80 dark:bg-slate-800/80 p-1.5 sm:p-1 rounded-2xl w-full sm:w-auto">
         <button
           type="button"
           onClick={() => setActiveSubTab('customer')}
-          className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+          className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
             activeSubTab === 'customer'
               ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <FileText className="w-4 h-4 text-blue-600" />
-          <span>📥 Sandbox Customer RMAs ({sandboxCustomerCount})</span>
+          <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+          <span>Sandbox Customer RMAs ({sandboxCustomerCount})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab('supplier')}
-          className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+          className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center sm:justify-start gap-2 transition-all cursor-pointer whitespace-nowrap ${
             activeSubTab === 'supplier'
               ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <Building2 className="w-4 h-4 text-amber-600" />
-          <span>🚚 Sandbox Supplier RTVs ({sandboxSupplierCount})</span>
+          <Building2 className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>Sandbox Supplier RTVs ({sandboxSupplierCount})</span>
         </button>
       </div>
 

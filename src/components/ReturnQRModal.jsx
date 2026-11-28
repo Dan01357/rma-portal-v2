@@ -104,8 +104,35 @@ export default function ReturnQRModal({
   const [downloadingType, setDownloadingType] = useState(null);
   const [downloadNotice, setDownloadNotice] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [canvasContainerWidth, setCanvasContainerWidth] = useState(() => (
+    typeof window !== 'undefined' ? Math.min(820, window.innerWidth - 40) : 720
+  ));
 
   const dragStateRef = useRef(null);
+  const canvasAreaRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const measure = () => {
+      const el = canvasAreaRef.current;
+      if (el && el.clientWidth > 0) {
+        setCanvasContainerWidth(el.clientWidth);
+      } else if (typeof window !== 'undefined') {
+        setCanvasContainerWidth(Math.min(820, window.innerWidth - 40));
+      }
+    };
+    measure();
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined' && canvasAreaRef.current) {
+      ro = new ResizeObserver(measure);
+      ro.observe(canvasAreaRef.current);
+    }
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [isOpen]);
 
   // Reset per-batch ephemeral state when opening or switching batch selection
   useEffect(() => {
@@ -404,9 +431,9 @@ export default function ReturnQRModal({
 
   // Screen preview scale so any paper sheet fits neatly inside the modal without horizontal cropping
   const previewPxPerMm = useMemo(() => {
-    const maxModalSheetPx = 640;
-    return Math.min(3.35, Math.max(1.5, maxModalSheetPx / Math.max(effectivePaper.widthMm, 1)));
-  }, [effectivePaper.widthMm]);
+    const usableW = Math.max(240, Math.min(640, (canvasContainerWidth || 640) - 28));
+    return Math.min(3.35, Math.max(0.85, usableW / Math.max(effectivePaper.widthMm, 1)));
+  }, [effectivePaper.widthMm, canvasContainerWidth]);
 
   // Build normalized cards list with stable SVG DOM IDs and per-card mm dimensions
   const cards = useMemo(() => {
@@ -752,7 +779,7 @@ export default function ReturnQRModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:border-0 print:shadow-none">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[96vh] print:max-h-none print:border-0 print:shadow-none">
 
         {/* Modal Header */}
         <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden">
@@ -771,9 +798,9 @@ export default function ReturnQRModal({
                   </span>
                 )}
               </h3>
-              <p className="text-[11px] text-slate-300 truncate">
+              <p className="text-[11px] text-slate-300 leading-snug">
                 {isMulti
-                  ? `${packedLayout.pages.length} ${effectivePaper.label} Page${packedLayout.pages.length > 1 ? 's' : ''} (${effectivePaper.widthMm}×${effectivePaper.heightMm}mm) • Drag any QR corner to resize individually`
+                  ? `${packedLayout.pages.length} ${effectivePaper.label} Page${packedLayout.pages.length > 1 ? 's' : ''} (${effectivePaper.widthMm}×${effectivePaper.heightMm}mm) • Drag any QR corner to resize`
                   : `${cards[0].cardData.rmaNumber} • Unified B&W QR Card on ${effectivePaper.label}`}
               </p>
             </div>
@@ -804,15 +831,17 @@ export default function ReturnQRModal({
 
         {/* Private Portal Scan Security Notice */}
         <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden">
-          <div className="flex items-center gap-1.5 font-semibold">
+          <div className="flex items-center gap-1.5 font-semibold min-w-0">
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>Private Portal QR: Standard cameras/Google Lens cannot open links — scan inside RMA Admin Scanner.</span>
           </div>
           <span className="font-mono font-black shrink-0 hidden sm:inline">B&amp;W Ink-Saver</span>
         </div>
 
+        {/* Single Unified Scrollable Body (Toolbar + Paper Preview Canvas — prevents nested double scrollbars on mobile) */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col print:overflow-visible">
         {/* Dynamic Paper Size, Page Packing & Per-QR Resize Toolbar */}
-        <div className="shrink-0 px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden">
+        <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden">
 
           {/* Row 1: Dynamic Paper Size + Orientation + Margins + Sheet Layout */}
           <div className="flex flex-wrap items-center gap-2">
@@ -905,13 +934,13 @@ export default function ReturnQRModal({
               <div
                 role="group"
                 aria-label="Multi-Item QR Split Mode"
-                className="flex items-center rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold shadow-2xs"
+                className="grid grid-cols-1 sm:inline-flex items-stretch sm:items-center rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold shadow-2xs w-full sm:w-auto gap-0.5 sm:gap-0"
               >
                 <button
                   type="button"
                   onClick={() => handleChangeSplitMode('consolidated')}
                   aria-pressed={qrSplitMode === 'consolidated'}
-                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`px-2.5 py-1 sm:py-0.5 rounded-md transition-colors cursor-pointer text-center sm:whitespace-nowrap ${
                     qrSplitMode === 'consolidated'
                       ? 'bg-indigo-600 text-white'
                       : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -924,7 +953,7 @@ export default function ReturnQRModal({
                   type="button"
                   onClick={() => handleChangeSplitMode('per_item')}
                   aria-pressed={qrSplitMode === 'per_item'}
-                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`px-2.5 py-1 sm:py-0.5 rounded-md transition-colors cursor-pointer text-center sm:whitespace-nowrap ${
                     qrSplitMode === 'per_item'
                       ? 'bg-indigo-600 text-white'
                       : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -937,30 +966,30 @@ export default function ReturnQRModal({
             )}
 
             {/* Sheet Packing Mode (1 Page Consolidated vs Multiple Pages Multi-Up) */}
-            <div className="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold">
+            <div className="grid grid-cols-2 sm:inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setLayoutMode('one_page')}
-                className={`px-2.5 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 sm:py-0.5 rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                   layoutMode === 'one_page'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Maximize2 className="w-3 h-3" />
-                <span>1 Page (Consolidated)</span>
+                <Maximize2 className="w-3 h-3 shrink-0" />
+                <span className="truncate">1 Page (Consolidated)</span>
               </button>
               <button
                 type="button"
                 onClick={() => setLayoutMode('multi_page')}
-                className={`px-2.5 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 sm:py-0.5 rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                   layoutMode === 'multi_page'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Layers className="w-3 h-3" />
-                <span>Multiple Pages ({packedLayout.pages.length})</span>
+                <Layers className="w-3 h-3 shrink-0" />
+                <span className="truncate">Multiple Pages ({packedLayout.pages.length})</span>
               </button>
             </div>
 
@@ -987,8 +1016,8 @@ export default function ReturnQRModal({
                   }`}
                   title="Append additional RMA QRs to print or download on the same consolidated sheet"
                 >
-                  <Plus className="w-3 h-3" />
-                  <span>➕ Add More RMA QRs to Sheet</span>
+                  <Plus className="w-3 h-3 shrink-0" />
+                  <span>Add More RMA QRs to Sheet</span>
                 </button>
 
                 {scopedSessionMissing.length > 0 && (
@@ -1174,7 +1203,10 @@ export default function ReturnQRModal({
         </div>
 
         {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
-        <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible">
+        <div
+          ref={canvasAreaRef}
+          className="flex-1 p-3 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible"
+        >
           <div
             id="rma-qr-batch-sheet-root"
             style={{ '--u': `${previewPxPerMm}px` }}
@@ -1427,6 +1459,7 @@ export default function ReturnQRModal({
             })}
           </div>
         </div>
+        </div>
 
         {/* Status Toast */}
         {downloadNotice && (
@@ -1441,16 +1474,16 @@ export default function ReturnQRModal({
         )}
 
         {/* Unified Action Footer: Strictly "Save QR (PNG)" and "Print QR" / "Print N QRs" */}
-        <div className="shrink-0 p-3.5 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2.5 print:hidden">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="shrink-0 p-3 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 print:hidden">
+          <div className="contents sm:flex sm:flex-wrap sm:items-center sm:gap-2">
             <button
               type="button"
               onClick={handleSaveQrPng}
               disabled={downloadingType !== null}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              className="px-3 sm:px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
               title={isMulti ? 'Download consolidated multi-up QR sheet PNG(s)' : `Download ${cards[0].cardData.rmaNumber}-QR.png`}
             >
-              <Download className="w-4 h-4 text-emerald-400" />
+              <Download className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>{downloadingType === 'qr' ? 'Generating...' : 'Save QR (PNG)'}</span>
             </button>
 
@@ -1458,11 +1491,11 @@ export default function ReturnQRModal({
               type="button"
               onClick={handlePrint}
               disabled={isPrinting}
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              className="col-span-2 sm:col-span-1 order-first sm:order-none px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
               title={`Print on ${effectivePaper.label} (${effectivePaper.widthMm}×${effectivePaper.heightMm}mm)`}
             >
-              <Printer className="w-4 h-4" />
-              <span>
+              <Printer className="w-4 h-4 shrink-0" />
+              <span className="truncate">
                 {isPrinting
                   ? 'Printing...'
                   : isMulti
@@ -1475,9 +1508,9 @@ export default function ReturnQRModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+            className="px-3 sm:px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
           >
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>Done</span>
           </button>
         </div>

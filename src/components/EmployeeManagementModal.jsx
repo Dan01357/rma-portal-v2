@@ -235,7 +235,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser, 
             </div>
 
             <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              Total Staff: <strong className="text-slate-800 dark:text-white">{employees.length}</strong>
+              Total Staff: <strong className="text-slate-800 dark:text-white">{isLoading && employees.length === 0 ? 'Loading...' : employees.length}</strong>
             </div>
           </div>
 
@@ -249,7 +249,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser, 
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Search by employee name, company email (@keysys, @pingcon, @a2z2go), or department..."
+              placeholder="Search name, email, or department..."
               className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/30 shadow-sm transition-all"
             />
             {searchQuery && (
