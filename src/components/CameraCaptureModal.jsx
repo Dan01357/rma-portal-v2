@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Camera, RefreshCw, Upload, X, MapPin, CheckCircle2, SwitchCamera, AlertCircle } from 'lucide-react';
 import { formatCameraTimestamp, getGpsCoordinatesText, getGpsAddressDisplay } from '../utils/rmaHelpers';
-import { drawWatermarkOverlay, stampWatermarkOnImage } from '../utils/cameraWatermark';
+import { drawWatermarkOverlay, stampWatermarkOnImage, markFileWatermarked } from '../utils/cameraWatermark';
 
 export default function CameraCaptureModal({
   isOpen,
@@ -17,6 +18,7 @@ export default function CameraCaptureModal({
   const streamRef = useRef(null);
 
   const [facingMode, setFacingMode] = useState('environment');
+  const [retryTick, setRetryTick] = useState(0);
   const [liveTime, setLiveTime] = useState(() => formatCameraTimestamp(new Date()));
   const [isStarting, setIsStarting] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -102,22 +104,8 @@ export default function CameraCaptureModal({
     };
   }, [isOpen, localGeo.address, localGeo.latitude, localGeo.longitude]);
 
-  // Start / switch MediaDevices camera stream
+  // Start / switch MediaDevices camera stream with progressive constraint fallbacks
   useEffect(() => {
-    if (!isOpen) {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => {
-          try { t.stop(); } catch {}
-        });
-        streamRef.current = null;
-      }
-      return undefined;
-    }
-
-    let cancelled = false;
-    setIsStarting(true);
-    setCameraError('');
-
     const stopCurrent = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => {
@@ -125,6 +113,46 @@ export default function CameraCaptureModal({
         });
         streamRef.current = null;
       }
+      if (videoRef.current) {
+        try { videoRef.current.srcObject = null; } catch {}
+      }
+    };
+
+    if (!isOpen) {
+      stopCurrent();
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsStarting(true);
+    setCameraError('');
+
+    const openStreamWithFallback = async () => {
+      const candidates = [
+        {
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        },
+        { video: { facingMode }, audio: false },
+        { video: true, audio: false }
+      ];
+
+      let lastErr = null;
+      for (const constraints of candidates) {
+        try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          lastErr = err;
+          if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+            throw err;
+          }
+        }
+      }
+      throw lastErr || new Error('Unable to access camera stream.');
     };
 
     const startCamera = async () => {
@@ -135,14 +163,7 @@ export default function CameraCaptureModal({
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
+        const stream = await openStreamWithFallback();
         if (cancelled) {
           stream.getTracks().forEach((t) => {
             try { t.stop(); } catch {}
@@ -150,17 +171,30 @@ export default function CameraCaptureModal({
           return;
         }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          try { await videoRef.current.play(); } catch {}
+        const videoEl = videoRef.current;
+        if (videoEl) {
+          videoEl.muted = true;
+          videoEl.playsInline = true;
+          videoEl.setAttribute('playsinline', '');
+          videoEl.setAttribute('muted', '');
+          videoEl.srcObject = stream;
+          try {
+            await videoEl.play();
+          } catch (playErr) {
+            if (playErr?.name !== 'AbortError') {
+              console.warn('Camera preview play notice:', playErr);
+            }
+          }
         }
-        setIsStarting(false);
+        if (!cancelled) {
+          setIsStarting(false);
+        }
       } catch (err) {
         if (!cancelled) {
           setCameraError(
             err?.name === 'NotAllowedError'
-              ? 'Camera permission denied. Allow browser camera access or use "Choose / Native Camera" below (watermark stamp still applies).'
-              : 'Live viewfinder unavailable on this device/camera. Use "Choose / Native Camera" below (watermark stamp still applies).'
+              ? 'Camera permission denied. Allow browser camera access or use "Select Image (Auto-Stamped)" below (watermark stamp still applies).'
+              : 'Live viewfinder unavailable on this device/camera. Use "Select Image (Auto-Stamped)" below (watermark stamp still applies).'
           );
           setIsStarting(false);
         }
@@ -173,7 +207,7 @@ export default function CameraCaptureModal({
       cancelled = true;
       stopCurrent();
     };
-  }, [isOpen, facingMode]);
+  }, [isOpen, facingMode, retryTick]);
 
   if (!isOpen) return null;
 
@@ -210,6 +244,7 @@ export default function CameraCaptureModal({
           type: 'image/jpeg',
           lastModified: Date.now()
         });
+        markFileWatermarked(file);
         await onCapture([file]);
       }
     } catch (err) {
@@ -240,9 +275,10 @@ export default function CameraCaptureModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in"
+      data-testid="camera-capture-modal"
+      className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -280,29 +316,37 @@ export default function CameraCaptureModal({
 
         {/* Viewfinder */}
         <div className="relative bg-black w-full flex-1 min-h-[300px] sm:min-h-[340px] max-h-[64dvh] flex items-center justify-center overflow-hidden">
-          {!cameraError ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={cameraError ? 'hidden' : 'w-full h-full object-cover'}
+          />
+          {cameraError && (
             <div className="p-6 text-center max-w-sm space-y-3">
               <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
               <p className="text-xs text-slate-200 leading-relaxed">{cameraError}</p>
-              <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black cursor-pointer shadow-md">
-                <Upload className="w-3.5 h-3.5" />
-                <span>Select Image (Auto-Stamped)</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple={multiple}
-                  onChange={handleFallbackFiles}
-                  className="hidden"
-                />
-              </label>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRetryTick((prev) => prev + 1)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold cursor-pointer shadow-md"
+                >
+                  Retry Camera
+                </button>
+                <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black cursor-pointer shadow-md">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Select Image (Auto-Stamped)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple={multiple}
+                    onChange={handleFallbackFiles}
+                    className="hidden"
+                  />
+                </label>
+              </div>
             </div>
           )}
 
@@ -377,4 +421,6 @@ export default function CameraCaptureModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

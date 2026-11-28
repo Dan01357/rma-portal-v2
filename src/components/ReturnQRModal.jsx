@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   X, Printer, QrCode, ShieldCheck, CheckCircle2, AlertTriangle,
@@ -531,6 +532,31 @@ export default function ReturnQRModal({
     };
   }, []);
 
+  const isModalActiveForPrint = Boolean(isOpen && cards.length > 0);
+  const pageWidthMmForStyle = effectivePaper.widthMm;
+  const pageHeightMmForStyle = effectivePaper.heightMm;
+
+  // Isolate browser/Chrome Ctrl+P (@media print) strictly to #rma-qr-print-portal while this modal is open
+  useEffect(() => {
+    if (!isModalActiveForPrint || typeof document === 'undefined') return undefined;
+    document.body.classList.add('is-printing-qr-modal');
+
+    const styleId = 'rma-qr-dynamic-page-style';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `@media print { @page { size: ${pageWidthMmForStyle}mm ${pageHeightMmForStyle}mm; margin: 0; } }`;
+
+    return () => {
+      document.body.classList.remove('is-printing-qr-modal');
+      const existing = document.getElementById(styleId);
+      if (existing) existing.remove();
+    };
+  }, [isModalActiveForPrint, pageWidthMmForStyle, pageHeightMmForStyle]);
+
   // Safe conditional return AFTER all hooks
   if (!isOpen || cards.length === 0) return null;
 
@@ -777,12 +803,13 @@ export default function ReturnQRModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[96vh] print:max-h-none print:border-0 print:shadow-none">
+  const modalContent = (
+    <div id="rma-qr-print-portal" className="rma-qr-print-portal">
+      <div className="rma-qr-modal-backdrop fixed inset-0 z-[130] flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0 print:block">
+        <div className="rma-qr-modal-shell bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[96vh] print:max-h-none print:border-0 print:shadow-none print:block">
 
         {/* Modal Header */}
-        <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden">
+        <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden no-print-qr">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center shrink-0">
               <QrCode className="w-4 h-4 text-blue-400" />
@@ -830,7 +857,7 @@ export default function ReturnQRModal({
         </div>
 
         {/* Private Portal Scan Security Notice */}
-        <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden">
+        <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden no-print-qr">
           <div className="flex items-center gap-1.5 font-semibold min-w-0">
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>Private Portal QR: Standard cameras/Google Lens cannot open links — scan inside RMA Admin Scanner.</span>
@@ -839,9 +866,9 @@ export default function ReturnQRModal({
         </div>
 
         {/* Single Unified Scrollable Body (Toolbar + Paper Preview Canvas — prevents nested double scrollbars on mobile) */}
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col print:overflow-visible">
+        <div className="rma-qr-modal-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col print:overflow-visible print:block">
         {/* Dynamic Paper Size, Page Packing & Per-QR Resize Toolbar */}
-        <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden">
+        <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden no-print-qr">
 
           {/* Row 1: Dynamic Paper Size + Orientation + Margins + Sheet Layout */}
           <div className="flex flex-wrap items-center gap-2">
@@ -1205,7 +1232,7 @@ export default function ReturnQRModal({
         {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
         <div
           ref={canvasAreaRef}
-          className="flex-1 p-3 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible"
+          className="rma-qr-modal-canvas-wrap flex-1 p-3 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible"
         >
           <div
             id="rma-qr-batch-sheet-root"
@@ -1463,7 +1490,7 @@ export default function ReturnQRModal({
 
         {/* Status Toast */}
         {downloadNotice && (
-          <div className={`shrink-0 mx-4 sm:mx-6 mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 ${
+          <div className={`shrink-0 mx-4 sm:mx-6 mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 print:hidden no-print-qr ${
             downloadNotice.type === 'success'
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700'
               : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700'
@@ -1474,7 +1501,7 @@ export default function ReturnQRModal({
         )}
 
         {/* Unified Action Footer: Strictly "Save QR (PNG)" and "Print QR" / "Print N QRs" */}
-        <div className="shrink-0 p-3 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 print:hidden">
+        <div className="shrink-0 p-3 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 print:hidden no-print-qr">
           <div className="contents sm:flex sm:flex-wrap sm:items-center sm:gap-2">
             <button
               type="button"
@@ -1514,7 +1541,10 @@ export default function ReturnQRModal({
             <span>Done</span>
           </button>
         </div>
+        </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

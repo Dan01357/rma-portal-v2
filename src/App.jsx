@@ -3486,13 +3486,13 @@ export default function App() {
 
   return (
     <div className={isAdminView && currentUser
-      ? 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 overflow-x-hidden box-border'
-      : 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border'
+      ? 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 overflow-x-hidden box-border print:bg-white'
+      : 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border print:p-0 print:bg-white'
     }>
       {/* Dynamic container width: spacious centered card for public reporter (max-w-2xl) and full-width enterprise workspace for admin */}
       <div id="app-main-view-container" className={isAdminView && currentUser
         ? 'w-full min-w-0 box-border'
-        : `${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`
+        : `${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border print:max-w-none print:space-y-0`
       }>
 
         {/* ================================================================= */}
@@ -3512,10 +3512,10 @@ export default function App() {
               onToast={showToast}
             />
           ) : (
-            <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="space-y-4 animate-in fade-in duration-200 print:space-y-0">
 
             {/* Top Navigation Bar: Station Branding, Device Lock & Theme Control */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
+            <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
               <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
                 <div className="p-2 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 shrink-0">
                   {gateSession?.type === 'internal_warehouse' ? <Building2 className="w-4 h-4" /> : <Package className="w-4 h-4" />}
@@ -3602,7 +3602,7 @@ export default function App() {
             {portalScanAlert && (
               <div
                 role="alert"
-                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${portalScanAlert.type === 'error'
+                className={`print:hidden p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${portalScanAlert.type === 'error'
                   ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
                   : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
                   }`}
@@ -3633,7 +3633,7 @@ export default function App() {
               const p = new URLSearchParams(window.location.search);
               return p.has('token') || Boolean(gateSession);
             })() && (
-                <div className={`p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
+                <div className={`print:hidden p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
                   ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
                   : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
                   }`}>
@@ -3725,7 +3725,7 @@ export default function App() {
               )}
 
             {/* Fluid Header Typography */}
-            <div className="text-center space-y-1.5 pb-1">
+            <div className="print:hidden text-center space-y-1.5 pb-1">
               <h1 className="text-fluid-title font-black text-slate-900 dark:text-white tracking-tight">
                 Report Item for Return
               </h1>
@@ -3736,18 +3736,18 @@ export default function App() {
 
             {/* Submission Success Screen with Full Dark Mode Support */}
             {submitSuccessReport ? (
-              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-5 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
-                <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-5 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95 print:border-0 print:shadow-none print:p-0 print:bg-transparent">
+                <div className="print:hidden w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
                   <CheckCircle className="w-8 h-8" />
                 </div>
-                <div>
+                <div className="print:hidden">
                   <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">Return Report Filed!</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Your report has been logged and the inventory team has been notified.
                   </p>
                 </div>
 
-                <div className="p-3.5 sm:p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
+                <div className="print:hidden p-3.5 sm:p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
                   <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                     <span className="text-slate-500 dark:text-slate-400">RMA Number:</span>
                     <strong className="font-mono text-emerald-800 dark:text-emerald-300 text-sm">{submitSuccessReport.rmaNumber}</strong>
@@ -3809,7 +3809,7 @@ export default function App() {
                 </div>
 
                 {/* Generated RMA QR Code Box Sticker Card */}
-                <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-3.5 sm:gap-4 text-left shadow-xs">
+                <div id="public-success-qr-card" className="p-3.5 sm:p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-3.5 sm:gap-4 text-left shadow-xs print:border-black print:shadow-none print:mx-auto print:max-w-md print:bg-white">
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
                       id="filed-report-qr-svg"
@@ -3880,14 +3880,14 @@ export default function App() {
                       </div>
                     </div>
 
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                    <p className="print:hidden text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                       Download QR (PNG) or resize &amp; print directly onto paper/labels for instant warehouse intake scanning.
                     </p>
                   </div>
                 </div>
 
                 {/* Action Buttons: Save QR (PNG), Resize / Print QR, Report Another */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <div className="print:hidden grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
                     onClick={async () => {
@@ -3975,7 +3975,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+              <form onSubmit={handleSubmitReport} className="print:hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
 
                 {/* Authorized Return Identity & Live Session Timer Banner */}
                 {gateSession && (
@@ -5083,7 +5083,7 @@ export default function App() {
 
               <div className="flex-1 min-w-0 flex flex-col">
                 {/* Slim Enterprise Sticky Top Utility Bar */}
-                <header className="sticky top-0 z-20 min-h-14 py-1.5 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                <header className="print:hidden sticky top-0 z-20 min-h-14 py-1.5 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <button
                       type="button"
@@ -5164,7 +5164,7 @@ export default function App() {
                 <main className="flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6 space-y-4">
 
                   {/* Compact 5-Card Enterprise KPI Strip (clickable shortcuts into key operational routes) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
+                  <div className="print:hidden grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
                     {/* KPI 1: Saved Products */}
                     <div
                       onClick={() => setAdminActiveTab('products')}
@@ -5274,7 +5274,7 @@ export default function App() {
                     normalizedTab === 'supplier_claims' ||
                     normalizedTab === 'sandbox'
                   ) && (
-                    <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
+                    <div className="print:hidden bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
                       <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
                           WMS / ERP Sync
@@ -6330,7 +6330,7 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed top-[68px] right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="print:hidden fixed top-[68px] right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
           <div className={`pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
             : toastMessage.type === 'warning'
@@ -6433,7 +6433,7 @@ export default function App() {
       {/* Full Reporter Explanation / Notes Viewer Modal */}
       {viewingExplanationModal && (
         <div
-          className="fixed inset-0 z-[110] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          className="print:hidden fixed inset-0 z-[110] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
           onClick={() => setViewingExplanationModal(null)}
         >
           <div

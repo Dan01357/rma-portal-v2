@@ -195,8 +195,8 @@ export function printIsolatedElement({
     ${serializedCss ? `<style>\n${serializedCss}\n</style>` : ''}
     <style>
       @page {
-        size: ${pageSize} !important;
-        margin: 0 !important;
+        size: ${pageSize};
+        margin: 0;
       }
       *, *::before, *::after {
         box-sizing: border-box !important;

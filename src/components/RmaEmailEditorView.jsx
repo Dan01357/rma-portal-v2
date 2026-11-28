@@ -305,7 +305,7 @@ export default function RmaEmailEditorView({
   const isTestEnv = Boolean(gateSession?.is_test || /^RMA-TEST-/i.test(activeRmaNumber));
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-200">
+    <div className="space-y-4 animate-in fade-in duration-200 print:hidden">
       {/* Focused Editor Header Bar (Zero Admin Buttons/Tabs) */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
         <div className="flex items-center gap-2.5 min-w-0">

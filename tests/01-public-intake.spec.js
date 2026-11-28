@@ -577,4 +577,204 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       guard.detach();
     }
   });
+
+  test('/intake?token=... unlocked invite link QR Print Studio isolates @media print strictly to QR sheets (hides whole page)', async ({
+    browser
+  }) => {
+    test.setTimeout(120_000);
+    const inviteContext = await browser.newContext({
+      ignoreHTTPSErrors: true,
+      storageState: { cookies: [], origins: [] },
+      permissions: ['camera']
+    });
+    await installPrintStubs(inviteContext);
+    const page = await inviteContext.newPage();
+    const guard = attachStrictGuards(page);
+    await interceptAndCaptureEmails(page);
+    await mockPhotoUploadSuccess(page);
+
+    const buildMockJwt = (emailAddr) => {
+      const hdr = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const pay = Buffer.from(
+        JSON.stringify({
+          sub: '00000000-0000-4000-8000-000000000001',
+          email: emailAddr,
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          user_metadata: { full_name: 'PW Invite Partner' }
+        })
+      ).toString('base64url');
+      return `${hdr}.${pay}.pwprintsig`;
+    };
+
+    try {
+      const futureIso = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      await page.route('**/rest/v1/rma_invites**', async (route) => {
+        const req = route.request();
+        if (req.method() === 'GET' && req.url().includes('PW-PRINT-TOKEN')) {
+          const row = {
+            id: '00000000-0000-4000-8000-000000009091',
+            token: 'PW-PRINT-TOKEN',
+            authorized_email: 'pw-invite-print@pingcon.local',
+            entity_name: 'Playwright Invite Print Branch',
+            store_branch: 'Playwright Invite Print Branch',
+            stream_type: 'customer_inbound',
+            is_test: true,
+            status: 'active',
+            expires_at: futureIso
+          };
+          const acceptHdr = String(req.headers()['accept'] || '');
+          const isObj = acceptHdr.includes('application/vnd.pgrst.object+json');
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(isObj ? row : [row])
+          });
+        }
+        return route.continue();
+      });
+
+      await page.route('**/auth/v1/user**', async (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: '00000000-0000-4000-8000-000000000001',
+            email: 'pw-invite-print@pingcon.local',
+            user_metadata: { full_name: 'PW Invite Partner' }
+          })
+        })
+      );
+
+      await page.route('**/rest/v1/rma_reports**', async (route) => {
+        const req = route.request();
+        if (req.method() === 'POST') {
+          let payload = {};
+          try {
+            const raw = req.postDataJSON();
+            payload = Array.isArray(raw) ? raw[0] : raw || {};
+          } catch { }
+          const created = {
+            id: '00000000-0000-4000-8000-000000009099',
+            created_at: new Date().toISOString(),
+            ...payload
+          };
+          const acceptHdr = String(req.headers()['accept'] || '');
+          const isObj = acceptHdr.includes('application/vnd.pgrst.object+json');
+          return route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify(isObj ? created : [created])
+          });
+        }
+        if (req.method() === 'GET') {
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([])
+          });
+        }
+        return route.continue();
+      });
+
+      await page.goto(
+        `/intake?token=PW-PRINT-TOKEN#access_token=${buildMockJwt('pw-invite-print@pingcon.local')}&expires_in=3600&token_type=bearer`,
+        { waitUntil: 'domcontentloaded' }
+      );
+      await expect(page.getByText('Playwright Invite Print Branch').first()).toBeVisible({ timeout: 25_000 });
+      await expect(page.getByText(/Authorized Return Intake Active/i)).toBeVisible();
+      await expect(page.getByRole('button', { name: /Admin Portal/i })).toHaveCount(0);
+
+      // Submit a Customer return under the external invite token
+      await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
+      await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
+      await page.locator('input[placeholder*="defect notes" i]').first().fill('Playwright external invite QR print isolation check');
+      await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
+        name: 'pw-invite-proof.png',
+        mimeType: 'image/png',
+        buffer: PNG_BUFFER
+      });
+      await expect(page.getByText('1/10 photos')).toBeVisible();
+      await page.locator('input[placeholder="Your Full Name *"]').fill('PW Invite Staff');
+      const contactField = page.locator('input[placeholder="Phone No. or Email *"]');
+      if ((await contactField.inputValue()).trim() === '') {
+        await contactField.fill('pw-invite-print@pingcon.local');
+      }
+      await page.getByRole('button', { name: /Submit Return Report/i }).click();
+
+      await expect(page.getByText('Return Report Filed!')).toBeVisible({ timeout: 25_000 });
+
+      // A. Even raw Chrome Ctrl+P on the Filed confirmation screen must hide nav/summary/buttons and keep #public-success-qr-card
+      await page.emulateMedia({ media: 'print' });
+      const successPrintCheck = await page.evaluate(() => {
+        const heading = Array.from(document.querySelectorAll('h2')).find((el) =>
+          el.textContent?.includes('Return Report Filed!')
+        );
+        const qrCard = document.getElementById('public-success-qr-card');
+        const formEl = document.querySelector('form');
+        return {
+          headingHidden: heading ? getComputedStyle(heading.parentElement).display === 'none' : false,
+          qrCardVisible: qrCard ? getComputedStyle(qrCard).display !== 'none' : false,
+          formAbsentOrHidden: !formEl || getComputedStyle(formEl).display === 'none'
+        };
+      });
+      expect(successPrintCheck.headingHidden).toBe(true);
+      expect(successPrintCheck.qrCardVisible).toBe(true);
+      await page.emulateMedia({ media: 'screen' });
+
+      // B. Open ReturnQRModal -> verify portal + body.is-printing-qr-modal + @media print hides entire page & shows ONLY QR sheet
+      await page.getByRole('button', { name: /Resize \/ Print QR/i }).click();
+      const qrModal = page.locator('#rma-qr-print-portal .rma-qr-modal-backdrop');
+      await expect(qrModal).toBeVisible({ timeout: 10_000 });
+
+      await page.emulateMedia({ media: 'print' });
+      const printIsolation = await page.evaluate(() => {
+        const rootEl = document.getElementById('root');
+        const portalEl = document.getElementById('rma-qr-print-portal');
+        const sheetRoot = document.getElementById('rma-qr-batch-sheet-root');
+        const printPage = document.querySelector('#rma-qr-batch-sheet-root .rma-print-page');
+        const hiddenHeader = document.querySelector('#rma-qr-print-portal .no-print-qr');
+        const dynStyle = document.getElementById('rma-qr-dynamic-page-style');
+        return {
+          hasBodyClass: document.body.classList.contains('is-printing-qr-modal'),
+          rootHidden: rootEl ? getComputedStyle(rootEl).display === 'none' : false,
+          portalVisible: portalEl ? getComputedStyle(portalEl).display !== 'none' : false,
+          sheetVisible: sheetRoot ? getComputedStyle(sheetRoot).display !== 'none' : false,
+          pageVisible: printPage ? getComputedStyle(printPage).display !== 'none' : false,
+          uUnit: sheetRoot ? getComputedStyle(sheetRoot).getPropertyValue('--u').trim() : '',
+          chromeHidden: hiddenHeader ? getComputedStyle(hiddenHeader).display === 'none' : false,
+          dynPageCss: dynStyle?.textContent || ''
+        };
+      });
+      expect(printIsolation.hasBodyClass).toBe(true);
+      expect(printIsolation.rootHidden).toBe(true);
+      expect(printIsolation.portalVisible).toBe(true);
+      expect(printIsolation.sheetVisible).toBe(true);
+      expect(printIsolation.pageVisible).toBe(true);
+      expect(printIsolation.uUnit).toBe('1mm');
+      expect(printIsolation.chromeHidden).toBe(true);
+      expect(printIsolation.dynPageCss).toContain('215.9mm 279.4mm');
+      await page.emulateMedia({ media: 'screen' });
+
+      // C. Clicking "Print QR (" inside invited modal triggers isolated iframe print without printing #app-main-view-container
+      const printsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
+      const topPrintsBefore = await page.evaluate(() => window.__pwTopWindowPrintCount || 0);
+      await qrModal.getByRole('button', { name: /Print QR \(/i }).click();
+      await page.waitForTimeout(350);
+      expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(printsBefore);
+      expect(await page.evaluate(() => window.__pwTopWindowPrintCount || 0)).toBe(topPrintsBefore);
+      const htmls = await page.evaluate(() => window.__pwPrintHtmls || []);
+      const lastHtml = htmls[htmls.length - 1] || '';
+      expect(lastHtml).toContain('rma-qr-batch-sheet-root');
+      expect(lastHtml).not.toContain('id="app-main-view-container"');
+
+      await qrModal.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(qrModal).toBeHidden();
+      expect(await page.evaluate(() => document.body.classList.contains('is-printing-qr-modal'))).toBe(false);
+
+      guard.assertClean('suite 01 /intake?token= QR print isolation');
+    } finally {
+      guard.detach();
+      await inviteContext.close();
+    }
+  });
 });

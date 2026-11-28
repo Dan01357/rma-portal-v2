@@ -602,7 +602,7 @@ export default function GatekeeperPinModal({
   const isSupplier = validationResult?.invite?.stream_type === 'supplier_outbound';
 
   return (
-    <div className="fixed inset-0 h-dvh w-screen z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
+    <div className="fixed inset-0 h-dvh w-screen z-[100] print:hidden flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden p-6 sm:p-8 space-y-6 text-center">
 
         {/* 1. Loading State */}

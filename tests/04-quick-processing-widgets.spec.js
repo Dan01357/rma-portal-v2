@@ -182,11 +182,53 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await reorderCard.getByRole('button', { name: /Reset Reorder to Pending/i }).click();
       await expect(page.getByTestId('quick-rma-reorder-badge')).toContainText('Reorder: Pending', { timeout: 30_000 });
 
-      // 6. Stream Switcher: Customer Hub -> Supplier RTV (hides Credit Memo card) -> back to Customer Hub
+      // 6. Stream Switcher: Customer Hub -> Supplier RTV (verify Driver Pickup Timestamp Camera portal layering & live capture) -> back to Customer Hub
       await expect(page.getByText(/Customer Credit Memo/i).first()).toBeVisible();
       const supplierStreamBtn = page.getByRole('button', { name: 'Supplier RTV', exact: true });
       await supplierStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeHidden({ timeout: 10_000 });
+
+      // 6a. Regression check for Bug 1: Driver Pickup "Take Photo" opens CameraCaptureModal via portal cleanly ON TOP of SimpleSupplierRtvWizardModal
+      await page.getByRole('button', { name: /Open 4-Choice \/ Pickup Window/i }).click();
+      await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
+      await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
+      await expect(page.getByText(/Driver Pickup Verification \(0\/5(?: Optional)? Slots\)/i)).toBeVisible();
+      await page.getByRole('button', { name: /Take Photo/i }).first().click();
+
+      const camModal = page.getByTestId('camera-capture-modal');
+      await expect(camModal).toBeVisible({ timeout: 10_000 });
+      const camHud = page.getByTestId('camera-watermark-hud');
+      await expect(camHud).toBeVisible();
+      await expect(camHud).toContainText(/PHT/);
+
+      const camLayer = await page.evaluate(() => {
+        const cam = document.querySelector('[data-testid="camera-capture-modal"]');
+        if (!cam) return null;
+        const rect = cam.getBoundingClientRect();
+        const centerHit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return {
+          parentTag: cam.parentElement?.tagName,
+          zIndex: Number(getComputedStyle(cam).zIndex || 0),
+          centerHitsCamera: Boolean(centerHit && cam.contains(centerHit))
+        };
+      });
+      expect(camLayer?.parentTag).toBe('BODY');
+      expect(camLayer?.zIndex).toBeGreaterThanOrEqual(200);
+      expect(camLayer?.centerHitsCamera).toBe(true);
+
+      const snapBtn = camModal.getByRole('button', { name: /Capture Photo/i });
+      await expect(snapBtn).toBeEnabled({ timeout: 15_000 });
+      await snapBtn.click();
+      await expect(camModal).toBeHidden({ timeout: 10_000 });
+      await expect(page.getByText(/Driver Pickup Verification \(1\/5(?: Optional)? Slots\)/i)).toBeVisible({
+        timeout: 10_000
+      });
+      await expect(page.getByText(/Total:\s*1\/50 photos/i)).toBeVisible();
+
+      await page.getByRole('button', { name: 'Close modal', exact: true }).first().click();
+      await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible({ timeout: 10_000 });
+
       const customerStreamBtn = page.getByRole('button', { name: 'Customer Hub', exact: true });
       await customerStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeVisible({ timeout: 10_000 });

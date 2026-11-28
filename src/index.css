@@ -236,13 +236,13 @@
 }
 
 /* ========================================================================= */
-/* DEDICATED HIGH-RESOLUTION PRINT ISOLATION                                */
-/* Targets high-resolution poster / label exclusively; guarantees strict 1-page output */
+/* DEDICATED HIGH-RESOLUTION & QR MODAL PRINT ISOLATION                      */
+/* Guarantees only the target poster, label, or QR sheet prints cleanly      */
 /* ========================================================================= */
 @media print {
   @page {
     size: letter portrait;
-    margin: 4mm !important;
+    margin: 4mm;
   }
 
   html, body {
@@ -252,6 +252,90 @@
     color: #000000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  body.is-printing-qr-modal {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Completely suppress #root, intake forms, navbars, banners & other overlays when QR modal is open */
+  body.is-printing-qr-modal > *:not(#rma-qr-print-portal):not(#app-isolated-print-iframe) {
+    display: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-print-portal,
+  body.is-printing-qr-modal .rma-qr-modal-backdrop,
+  body.is-printing-qr-modal .rma-qr-modal-shell,
+  body.is-printing-qr-modal .rma-qr-modal-scroll,
+  body.is-printing-qr-modal .rma-qr-modal-canvas-wrap {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    display: block !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-print-portal .no-print-qr,
+  body.is-printing-qr-modal #rma-qr-print-portal .print\:hidden {
+    display: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root {
+    --u: 1mm !important;
+    display: block !important;
+    gap: 0 !important;
+    margin: 0 auto !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page {
+    position: relative !important;
+    margin: 0 auto !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page:not(:last-child) {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  body.is-printing-qr-modal .rma-qr-card,
+  body.is-printing-qr-modal .rma-qr-card * {
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+
+  body.is-printing-qr-modal .rma-qr-card {
+    outline: none !important;
+    background: #ffffff !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   body.is-printing-highres {

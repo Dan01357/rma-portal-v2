@@ -2367,8 +2367,20 @@ export default function SimpleSupplierRtvWizardModal({
         subtitle="Stamps live PHT timestamp, clear GPS street/city address & processor tag"
         gpsLocation={{
           address: getGpsAddressDisplay(activeReport) || getGpsAddressDisplay(primaryInputReport),
-          latitude: activeReport?.gps_latitude ?? primaryInputReport?.gps_latitude ?? null,
-          longitude: activeReport?.gps_longitude ?? primaryInputReport?.gps_longitude ?? null
+          addressParts: activeReport?.ai_document_metadata?.gps_address || primaryInputReport?.ai_document_metadata?.gps_address || null,
+          addressLines: activeReport?.ai_document_metadata?.gps_address?.lines || primaryInputReport?.ai_document_metadata?.gps_address?.lines || [],
+          latitude:
+            activeReport?.gps_latitude ??
+            activeReport?.ai_document_metadata?.gps_latitude ??
+            primaryInputReport?.gps_latitude ??
+            primaryInputReport?.ai_document_metadata?.gps_latitude ??
+            null,
+          longitude:
+            activeReport?.gps_longitude ??
+            activeReport?.ai_document_metadata?.gps_longitude ??
+            primaryInputReport?.gps_longitude ??
+            primaryInputReport?.ai_document_metadata?.gps_longitude ??
+            null
         }}
         tagName={processedBy.trim() || activeUser?.name || driverName.trim() || 'Warehouse Staff'}
         multiple={true}

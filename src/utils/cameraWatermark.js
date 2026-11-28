@@ -1,5 +1,24 @@
 import { formatCameraTimestamp } from './rmaHelpers';
 
+const watermarkedFiles = new WeakSet();
+
+/**
+ * Marks a File/Blob instance as already watermarked so callers do not double-stamp it.
+ */
+export function markFileWatermarked(fileOrBlob) {
+  if (fileOrBlob && typeof fileOrBlob === 'object') {
+    watermarkedFiles.add(fileOrBlob);
+  }
+  return fileOrBlob;
+}
+
+/**
+ * Checks whether a File/Blob was already watermarked in-session.
+ */
+export function isFileWatermarked(fileOrBlob) {
+  return Boolean(fileOrBlob && typeof fileOrBlob === 'object' && watermarkedFiles.has(fileOrBlob));
+}
+
 /**
  * Wraps long text lines to fit within maxWidth on a 2D canvas.
  */
@@ -169,10 +188,10 @@ export async function stampWatermarkOnImage(fileOrBlob, options = {}) {
     if (!outBlob) return fileOrBlob;
 
     const origName = String(fileOrBlob.name || 'capture.jpg').replace(/\.[^.]+$/, '');
-    return new File([outBlob], `${origName}.jpg`, {
+    return markFileWatermarked(new File([outBlob], `${origName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
-    });
+    }));
   } catch {
     return fileOrBlob;
   } finally {
@@ -186,7 +205,11 @@ export async function stampWatermarkOnFiles(filesInput, options = {}) {
   const list = Array.from(filesInput || []).filter(Boolean);
   const out = [];
   for (const file of list) {
-    out.push(await stampWatermarkOnImage(file, options));
+    if (isFileWatermarked(file)) {
+      out.push(file);
+    } else {
+      out.push(await stampWatermarkOnImage(file, options));
+    }
   }
   return out;
 }

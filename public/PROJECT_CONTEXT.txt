@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-28T01:32:53.105Z
+Generated At: 2026-11-28T03:02:54.871Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -79,43 +79,6 @@ rma-portal-v2/
 │   │   ├── MANUAL_QA_TESTING_CHECKLIST.md
 │   │   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
 ├── playwright-report/
-│   │   ├── data/
-│   │   │   │   ├── 234f1d567a55a36fb772fe8efdaab9a6e2d583c0.png
-│   │   │   │   ├── 2638423e90fc9930932446410510b6a4c6cad660.md
-│   │   │   │   ├── 272dd1918ba110b52441cb5f9a5f852dcb27d938.zip
-│   │   │   │   ├── 433adc95c461553a1fc63f777d3e201ff1704d84.md
-│   │   │   │   ├── 48addf35822ca78df541ab176ea9babe8208ea20.png
-│   │   │   │   ├── 677bdbaea57812bb998bf73fea4f8e5f7b1603b7.zip
-│   │   │   │   ├── 96e6740e965c61941135447b4ca6a714b9ca5d20.png
-│   │   │   │   ├── 9bbf78656b8c05654e8ca6411fa862c3bb62d798.zip
-│   │   │   │   ├── a1afe52ed2b713983fe7e50b81455c0c6c4a728b.png
-│   │   │   │   ├── a64878d05536b1d62c616166b5d9e2916b5e223c.png
-│   │   │   │   ├── aded4e3d1b42de37983c85b2c6347566dc72c11a.md
-│   │   │   │   ├── b5d9c03d62ddf9bca8bc27a9e27fc9617a2e950c.md
-│   │   │   │   ├── bf3694f81cd556fd3999ff1cf3d06bfaeeee2b81.zip
-│   │   │   │   ├── c18101cd1bafebd1789d66af37e1bb2f9e428622.md
-│   │   │   │   └── d27315f390ecb00ef8c8aa77912e2ca1304c5b8d.zip
-│   │   ├── trace/
-│   │   │   │   ├── assets/
-│   │   │   │   │   │   ├── codeMirrorModule-DNqxPF-E.js
-│   │   │   │   │   │   ├── defaultSettingsView-BQT9Z6FV.js
-│   │   │   │   │   │   ├── rolldown-runtime-QTnfLwEv.js
-│   │   │   │   │   │   └── urlMatch-Cgl6axSs.js
-│   │   │   │   ├── codeMirrorModule.-QdMvsKi.css
-│   │   │   │   ├── codicon.DCmgc-ay.ttf
-│   │   │   │   ├── defaultSettingsView.C8BeHuxd.css
-│   │   │   │   ├── index.B_TqY17P.css
-│   │   │   │   ├── index.BY2vkw8A.js
-│   │   │   │   ├── index.html
-│   │   │   │   ├── manifest.webmanifest
-│   │   │   │   ├── playwright-logo.svg
-│   │   │   │   ├── snapshot.-ChLTbql.js
-│   │   │   │   ├── snapshot.html
-│   │   │   │   ├── sw.bundle.js
-│   │   │   │   ├── uiMode.CyMfwkXJ.css
-│   │   │   │   ├── uiMode.DuLwZHRf.js
-│   │   │   │   ├── uiMode.html
-│   │   │   │   └── xtermModule.kHJ-D0s7.css
 │   │   └── index.html
 ├── public/
 │   │   └── PROJECT_CONTEXT.txt
@@ -217,26 +180,6 @@ rma-portal-v2/
 │   │   ├── main.jsx
 │   │   └── supabaseClient.js
 ├── test-results/
-│   │   ├── 01-public-intake-Suite-01--39201-tion-QR-studio-resize-print/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 02-admin-catalog-invites-S-a54e8-rs-copy-barcode-bulk-delete/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 02-admin-catalog-invites-S-f8087-filters-email-revoke-delete/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 04-quick-processing-widget-7cae6-dit-Memo-launch-Audit-Trail/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
-│   │   ├── 06-portal-qr-scanner-wizar-0d26c-and-blocks-cross-mode-scans/
-│   │   │   │   ├── error-context.md
-│   │   │   │   ├── test-failed-1.png
-│   │   │   │   └── trace.zip
 │   │   └── .last-run.json
 ├── tests/
 │   │   ├── .auth/
@@ -19559,13 +19502,13 @@ export default function App() {
 
   return (
     <div className={isAdminView && currentUser
-      ? 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 overflow-x-hidden box-border'
-      : 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border'
+      ? 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200 overflow-x-hidden box-border print:bg-white'
+      : 'min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border print:p-0 print:bg-white'
     }>
       {/* Dynamic container width: spacious centered card for public reporter (max-w-2xl) and full-width enterprise workspace for admin */}
       <div id="app-main-view-container" className={isAdminView && currentUser
         ? 'w-full min-w-0 box-border'
-        : `${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`
+        : `${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border print:max-w-none print:space-y-0`
       }>
 
         {/* ================================================================= */}
@@ -19585,10 +19528,10 @@ export default function App() {
               onToast={showToast}
             />
           ) : (
-            <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="space-y-4 animate-in fade-in duration-200 print:space-y-0">
 
             {/* Top Navigation Bar: Station Branding, Device Lock & Theme Control */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
+            <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
               <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
                 <div className="p-2 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 shrink-0">
                   {gateSession?.type === 'internal_warehouse' ? <Building2 className="w-4 h-4" /> : <Package className="w-4 h-4" />}
@@ -19675,7 +19618,7 @@ export default function App() {
             {portalScanAlert && (
               <div
                 role="alert"
-                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${portalScanAlert.type === 'error'
+                className={`print:hidden p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${portalScanAlert.type === 'error'
                   ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
                   : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
                   }`}
@@ -19706,7 +19649,7 @@ export default function App() {
               const p = new URLSearchParams(window.location.search);
               return p.has('token') || Boolean(gateSession);
             })() && (
-                <div className={`p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
+                <div className={`print:hidden p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
                   ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
                   : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
                   }`}>
@@ -19798,7 +19741,7 @@ export default function App() {
               )}
 
             {/* Fluid Header Typography */}
-            <div className="text-center space-y-1.5 pb-1">
+            <div className="print:hidden text-center space-y-1.5 pb-1">
               <h1 className="text-fluid-title font-black text-slate-900 dark:text-white tracking-tight">
                 Report Item for Return
               </h1>
@@ -19809,18 +19752,18 @@ export default function App() {
 
             {/* Submission Success Screen with Full Dark Mode Support */}
             {submitSuccessReport ? (
-              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-5 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
-                <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-5 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95 print:border-0 print:shadow-none print:p-0 print:bg-transparent">
+                <div className="print:hidden w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
                   <CheckCircle className="w-8 h-8" />
                 </div>
-                <div>
+                <div className="print:hidden">
                   <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">Return Report Filed!</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Your report has been logged and the inventory team has been notified.
                   </p>
                 </div>
 
-                <div className="p-3.5 sm:p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
+                <div className="print:hidden p-3.5 sm:p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
                   <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                     <span className="text-slate-500 dark:text-slate-400">RMA Number:</span>
                     <strong className="font-mono text-emerald-800 dark:text-emerald-300 text-sm">{submitSuccessReport.rmaNumber}</strong>
@@ -19882,7 +19825,7 @@ export default function App() {
                 </div>
 
                 {/* Generated RMA QR Code Box Sticker Card */}
-                <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-3.5 sm:gap-4 text-left shadow-xs">
+                <div id="public-success-qr-card" className="p-3.5 sm:p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-3.5 sm:gap-4 text-left shadow-xs print:border-black print:shadow-none print:mx-auto print:max-w-md print:bg-white">
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
                       id="filed-report-qr-svg"
@@ -19953,14 +19896,14 @@ export default function App() {
                       </div>
                     </div>
 
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                    <p className="print:hidden text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                       Download QR (PNG) or resize &amp; print directly onto paper/labels for instant warehouse intake scanning.
                     </p>
                   </div>
                 </div>
 
                 {/* Action Buttons: Save QR (PNG), Resize / Print QR, Report Another */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <div className="print:hidden grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
                     onClick={async () => {
@@ -20048,7 +19991,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+              <form onSubmit={handleSubmitReport} className="print:hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
 
                 {/* Authorized Return Identity & Live Session Timer Banner */}
                 {gateSession && (
@@ -21156,7 +21099,7 @@ export default function App() {
 
               <div className="flex-1 min-w-0 flex flex-col">
                 {/* Slim Enterprise Sticky Top Utility Bar */}
-                <header className="sticky top-0 z-20 min-h-14 py-1.5 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                <header className="print:hidden sticky top-0 z-20 min-h-14 py-1.5 px-3 sm:px-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <button
                       type="button"
@@ -21237,7 +21180,7 @@ export default function App() {
                 <main className="flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6 space-y-4">
 
                   {/* Compact 5-Card Enterprise KPI Strip (clickable shortcuts into key operational routes) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
+                  <div className="print:hidden grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
                     {/* KPI 1: Saved Products */}
                     <div
                       onClick={() => setAdminActiveTab('products')}
@@ -21347,7 +21290,7 @@ export default function App() {
                     normalizedTab === 'supplier_claims' ||
                     normalizedTab === 'sandbox'
                   ) && (
-                    <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
+                    <div className="print:hidden bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
                       <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
                           WMS / ERP Sync
@@ -22403,7 +22346,7 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed top-[68px] right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="print:hidden fixed top-[68px] right-4 left-4 sm:left-auto sm:max-w-sm z-[120] pointer-events-none animate-in fade-in slide-in-from-top-3">
           <div className={`pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
             : toastMessage.type === 'warning'
@@ -22506,7 +22449,7 @@ export default function App() {
       {/* Full Reporter Explanation / Notes Viewer Modal */}
       {viewingExplanationModal && (
         <div
-          className="fixed inset-0 z-[110] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          className="print:hidden fixed inset-0 z-[110] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
           onClick={() => setViewingExplanationModal(null)}
         >
           <div
@@ -23277,7 +23220,7 @@ export default function AdminSidebar({
       {/* Desktop Sticky Collapsible Rail */}
       <aside
         data-testid="admin-sidebar-desktop"
-        className={`hidden lg:block sticky top-0 h-dvh shrink-0 transition-all duration-200 z-30 ${
+        className={`hidden lg:block sticky top-0 h-dvh shrink-0 transition-all duration-200 z-30 print:hidden ${
           isCollapsed ? 'w-[72px]' : 'w-[236px] 2xl:w-64'
         }`}
       >
@@ -23288,7 +23231,7 @@ export default function AdminSidebar({
       {isMobileOpen && (
         <div
           data-testid="admin-sidebar-mobile-drawer"
-          className="fixed inset-0 z-50 lg:hidden flex animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 lg:hidden flex animate-in fade-in duration-150 print:hidden"
         >
           <div
             className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
@@ -24404,9 +24347,10 @@ export default function ArchiveAndTrashTab({
 
 --- START FILE: src/components/CameraCaptureModal.jsx ---
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Camera, RefreshCw, Upload, X, MapPin, CheckCircle2, SwitchCamera, AlertCircle } from 'lucide-react';
 import { formatCameraTimestamp, getGpsCoordinatesText, getGpsAddressDisplay } from '../utils/rmaHelpers';
-import { drawWatermarkOverlay, stampWatermarkOnImage } from '../utils/cameraWatermark';
+import { drawWatermarkOverlay, stampWatermarkOnImage, markFileWatermarked } from '../utils/cameraWatermark';
 
 export default function CameraCaptureModal({
   isOpen,
@@ -24422,6 +24366,7 @@ export default function CameraCaptureModal({
   const streamRef = useRef(null);
 
   const [facingMode, setFacingMode] = useState('environment');
+  const [retryTick, setRetryTick] = useState(0);
   const [liveTime, setLiveTime] = useState(() => formatCameraTimestamp(new Date()));
   const [isStarting, setIsStarting] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -24507,22 +24452,8 @@ export default function CameraCaptureModal({
     };
   }, [isOpen, localGeo.address, localGeo.latitude, localGeo.longitude]);
 
-  // Start / switch MediaDevices camera stream
+  // Start / switch MediaDevices camera stream with progressive constraint fallbacks
   useEffect(() => {
-    if (!isOpen) {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => {
-          try { t.stop(); } catch {}
-        });
-        streamRef.current = null;
-      }
-      return undefined;
-    }
-
-    let cancelled = false;
-    setIsStarting(true);
-    setCameraError('');
-
     const stopCurrent = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => {
@@ -24530,6 +24461,46 @@ export default function CameraCaptureModal({
         });
         streamRef.current = null;
       }
+      if (videoRef.current) {
+        try { videoRef.current.srcObject = null; } catch {}
+      }
+    };
+
+    if (!isOpen) {
+      stopCurrent();
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsStarting(true);
+    setCameraError('');
+
+    const openStreamWithFallback = async () => {
+      const candidates = [
+        {
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        },
+        { video: { facingMode }, audio: false },
+        { video: true, audio: false }
+      ];
+
+      let lastErr = null;
+      for (const constraints of candidates) {
+        try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          lastErr = err;
+          if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+            throw err;
+          }
+        }
+      }
+      throw lastErr || new Error('Unable to access camera stream.');
     };
 
     const startCamera = async () => {
@@ -24540,14 +24511,7 @@ export default function CameraCaptureModal({
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
+        const stream = await openStreamWithFallback();
         if (cancelled) {
           stream.getTracks().forEach((t) => {
             try { t.stop(); } catch {}
@@ -24555,17 +24519,30 @@ export default function CameraCaptureModal({
           return;
         }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          try { await videoRef.current.play(); } catch {}
+        const videoEl = videoRef.current;
+        if (videoEl) {
+          videoEl.muted = true;
+          videoEl.playsInline = true;
+          videoEl.setAttribute('playsinline', '');
+          videoEl.setAttribute('muted', '');
+          videoEl.srcObject = stream;
+          try {
+            await videoEl.play();
+          } catch (playErr) {
+            if (playErr?.name !== 'AbortError') {
+              console.warn('Camera preview play notice:', playErr);
+            }
+          }
         }
-        setIsStarting(false);
+        if (!cancelled) {
+          setIsStarting(false);
+        }
       } catch (err) {
         if (!cancelled) {
           setCameraError(
             err?.name === 'NotAllowedError'
-              ? 'Camera permission denied. Allow browser camera access or use "Choose / Native Camera" below (watermark stamp still applies).'
-              : 'Live viewfinder unavailable on this device/camera. Use "Choose / Native Camera" below (watermark stamp still applies).'
+              ? 'Camera permission denied. Allow browser camera access or use "Select Image (Auto-Stamped)" below (watermark stamp still applies).'
+              : 'Live viewfinder unavailable on this device/camera. Use "Select Image (Auto-Stamped)" below (watermark stamp still applies).'
           );
           setIsStarting(false);
         }
@@ -24578,7 +24555,7 @@ export default function CameraCaptureModal({
       cancelled = true;
       stopCurrent();
     };
-  }, [isOpen, facingMode]);
+  }, [isOpen, facingMode, retryTick]);
 
   if (!isOpen) return null;
 
@@ -24615,6 +24592,7 @@ export default function CameraCaptureModal({
           type: 'image/jpeg',
           lastModified: Date.now()
         });
+        markFileWatermarked(file);
         await onCapture([file]);
       }
     } catch (err) {
@@ -24645,9 +24623,10 @@ export default function CameraCaptureModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in"
+      data-testid="camera-capture-modal"
+      className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -24685,29 +24664,37 @@ export default function CameraCaptureModal({
 
         {/* Viewfinder */}
         <div className="relative bg-black w-full flex-1 min-h-[300px] sm:min-h-[340px] max-h-[64dvh] flex items-center justify-center overflow-hidden">
-          {!cameraError ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={cameraError ? 'hidden' : 'w-full h-full object-cover'}
+          />
+          {cameraError && (
             <div className="p-6 text-center max-w-sm space-y-3">
               <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
               <p className="text-xs text-slate-200 leading-relaxed">{cameraError}</p>
-              <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black cursor-pointer shadow-md">
-                <Upload className="w-3.5 h-3.5" />
-                <span>Select Image (Auto-Stamped)</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple={multiple}
-                  onChange={handleFallbackFiles}
-                  className="hidden"
-                />
-              </label>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRetryTick((prev) => prev + 1)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold cursor-pointer shadow-md"
+                >
+                  Retry Camera
+                </button>
+                <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black cursor-pointer shadow-md">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Select Image (Auto-Stamped)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple={multiple}
+                    onChange={handleFallbackFiles}
+                    className="hidden"
+                  />
+                </label>
+              </div>
             </div>
           )}
 
@@ -24782,6 +24769,8 @@ export default function CameraCaptureModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }
 
 --- END FILE: src/components/CameraCaptureModal.jsx ---
@@ -33783,7 +33772,7 @@ export default function GatekeeperPinModal({
   const isSupplier = validationResult?.invite?.stream_type === 'supplier_outbound';
 
   return (
-    <div className="fixed inset-0 h-dvh w-screen z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
+    <div className="fixed inset-0 h-dvh w-screen z-[100] print:hidden flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden p-6 sm:p-8 space-y-6 text-center">
 
         {/* 1. Loading State */}
@@ -37912,6 +37901,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatSaveFileTimestamp } from '../utils/rmaHelpers';
 
@@ -37977,7 +37967,12 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
       });
     } catch (err) {
       console.error('Error printing poster:', err);
-      window.print();
+      printIsolatedElement({
+        elementId: 'portal-access-qr-card',
+        documentTitle: `RMA-Public-Reporting-Poster ${formatSaveFileTimestamp(new Date())}`,
+        pageSize: 'letter portrait',
+        pageMargin: '0.35in'
+      });
     } finally {
       setIsPrinting(false);
     }
@@ -38024,7 +38019,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
         <div className="p-4 sm:p-6 space-y-5 overflow-y-auto overscroll-contain flex-1">
           
           {/* Main Card: QR Code & Live Portal URL */}
-          <div className="p-5 sm:p-6 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col items-center text-center space-y-4">
+          <div id="portal-access-qr-card" className="p-5 sm:p-6 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col items-center text-center space-y-4">
             
             {/* Tag Badge */}
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
@@ -44134,6 +44129,7 @@ export default function QuickRMAActionModal({
 
 --- START FILE: src/components/ReturnQRModal.jsx ---
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   X, Printer, QrCode, ShieldCheck, CheckCircle2, AlertTriangle,
@@ -44666,6 +44662,31 @@ export default function ReturnQRModal({
     };
   }, []);
 
+  const isModalActiveForPrint = Boolean(isOpen && cards.length > 0);
+  const pageWidthMmForStyle = effectivePaper.widthMm;
+  const pageHeightMmForStyle = effectivePaper.heightMm;
+
+  // Isolate browser/Chrome Ctrl+P (@media print) strictly to #rma-qr-print-portal while this modal is open
+  useEffect(() => {
+    if (!isModalActiveForPrint || typeof document === 'undefined') return undefined;
+    document.body.classList.add('is-printing-qr-modal');
+
+    const styleId = 'rma-qr-dynamic-page-style';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `@media print { @page { size: ${pageWidthMmForStyle}mm ${pageHeightMmForStyle}mm; margin: 0; } }`;
+
+    return () => {
+      document.body.classList.remove('is-printing-qr-modal');
+      const existing = document.getElementById(styleId);
+      if (existing) existing.remove();
+    };
+  }, [isModalActiveForPrint, pageWidthMmForStyle, pageHeightMmForStyle]);
+
   // Safe conditional return AFTER all hooks
   if (!isOpen || cards.length === 0) return null;
 
@@ -44912,12 +44933,13 @@ export default function ReturnQRModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[96vh] print:max-h-none print:border-0 print:shadow-none">
+  const modalContent = (
+    <div id="rma-qr-print-portal" className="rma-qr-print-portal">
+      <div className="rma-qr-modal-backdrop fixed inset-0 z-[130] flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0 print:block">
+        <div className="rma-qr-modal-shell bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[96vh] print:max-h-none print:border-0 print:shadow-none print:block">
 
         {/* Modal Header */}
-        <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden">
+        <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden no-print-qr">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center shrink-0">
               <QrCode className="w-4 h-4 text-blue-400" />
@@ -44965,7 +44987,7 @@ export default function ReturnQRModal({
         </div>
 
         {/* Private Portal Scan Security Notice */}
-        <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden">
+        <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden no-print-qr">
           <div className="flex items-center gap-1.5 font-semibold min-w-0">
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>Private Portal QR: Standard cameras/Google Lens cannot open links — scan inside RMA Admin Scanner.</span>
@@ -44974,9 +44996,9 @@ export default function ReturnQRModal({
         </div>
 
         {/* Single Unified Scrollable Body (Toolbar + Paper Preview Canvas — prevents nested double scrollbars on mobile) */}
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col print:overflow-visible">
+        <div className="rma-qr-modal-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col print:overflow-visible print:block">
         {/* Dynamic Paper Size, Page Packing & Per-QR Resize Toolbar */}
-        <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden">
+        <div className="shrink-0 px-3 sm:px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden no-print-qr">
 
           {/* Row 1: Dynamic Paper Size + Orientation + Margins + Sheet Layout */}
           <div className="flex flex-wrap items-center gap-2">
@@ -45340,7 +45362,7 @@ export default function ReturnQRModal({
         {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
         <div
           ref={canvasAreaRef}
-          className="flex-1 p-3 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible"
+          className="rma-qr-modal-canvas-wrap flex-1 p-3 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible"
         >
           <div
             id="rma-qr-batch-sheet-root"
@@ -45598,7 +45620,7 @@ export default function ReturnQRModal({
 
         {/* Status Toast */}
         {downloadNotice && (
-          <div className={`shrink-0 mx-4 sm:mx-6 mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 ${
+          <div className={`shrink-0 mx-4 sm:mx-6 mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 print:hidden no-print-qr ${
             downloadNotice.type === 'success'
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700'
               : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700'
@@ -45609,7 +45631,7 @@ export default function ReturnQRModal({
         )}
 
         {/* Unified Action Footer: Strictly "Save QR (PNG)" and "Print QR" / "Print N QRs" */}
-        <div className="shrink-0 p-3 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 print:hidden">
+        <div className="shrink-0 p-3 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 print:hidden no-print-qr">
           <div className="contents sm:flex sm:flex-wrap sm:items-center sm:gap-2">
             <button
               type="button"
@@ -45649,9 +45671,12 @@ export default function ReturnQRModal({
             <span>Done</span>
           </button>
         </div>
+        </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }
 
 --- END FILE: src/components/ReturnQRModal.jsx ---
@@ -45964,7 +45989,7 @@ export default function RmaEmailEditorView({
   const isTestEnv = Boolean(gateSession?.is_test || /^RMA-TEST-/i.test(activeRmaNumber));
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-200">
+    <div className="space-y-4 animate-in fade-in duration-200 print:hidden">
       {/* Focused Editor Header Bar (Zero Admin Buttons/Tabs) */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -54613,8 +54638,20 @@ export default function SimpleSupplierRtvWizardModal({
         subtitle="Stamps live PHT timestamp, clear GPS street/city address & processor tag"
         gpsLocation={{
           address: getGpsAddressDisplay(activeReport) || getGpsAddressDisplay(primaryInputReport),
-          latitude: activeReport?.gps_latitude ?? primaryInputReport?.gps_latitude ?? null,
-          longitude: activeReport?.gps_longitude ?? primaryInputReport?.gps_longitude ?? null
+          addressParts: activeReport?.ai_document_metadata?.gps_address || primaryInputReport?.ai_document_metadata?.gps_address || null,
+          addressLines: activeReport?.ai_document_metadata?.gps_address?.lines || primaryInputReport?.ai_document_metadata?.gps_address?.lines || [],
+          latitude:
+            activeReport?.gps_latitude ??
+            activeReport?.ai_document_metadata?.gps_latitude ??
+            primaryInputReport?.gps_latitude ??
+            primaryInputReport?.ai_document_metadata?.gps_latitude ??
+            null,
+          longitude:
+            activeReport?.gps_longitude ??
+            activeReport?.ai_document_metadata?.gps_longitude ??
+            primaryInputReport?.gps_longitude ??
+            primaryInputReport?.ai_document_metadata?.gps_longitude ??
+            null
         }}
         tagName={processedBy.trim() || activeUser?.name || driverName.trim() || 'Warehouse Staff'}
         multiple={true}
@@ -61785,13 +61822,13 @@ export function useIsDesktopMd() {
 }
 
 /* ========================================================================= */
-/* DEDICATED HIGH-RESOLUTION PRINT ISOLATION                                */
-/* Targets high-resolution poster / label exclusively; guarantees strict 1-page output */
+/* DEDICATED HIGH-RESOLUTION & QR MODAL PRINT ISOLATION                      */
+/* Guarantees only the target poster, label, or QR sheet prints cleanly      */
 /* ========================================================================= */
 @media print {
   @page {
     size: letter portrait;
-    margin: 4mm !important;
+    margin: 4mm;
   }
 
   html, body {
@@ -61801,6 +61838,90 @@ export function useIsDesktopMd() {
     color: #000000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  body.is-printing-qr-modal {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Completely suppress #root, intake forms, navbars, banners & other overlays when QR modal is open */
+  body.is-printing-qr-modal > *:not(#rma-qr-print-portal):not(#app-isolated-print-iframe) {
+    display: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-print-portal,
+  body.is-printing-qr-modal .rma-qr-modal-backdrop,
+  body.is-printing-qr-modal .rma-qr-modal-shell,
+  body.is-printing-qr-modal .rma-qr-modal-scroll,
+  body.is-printing-qr-modal .rma-qr-modal-canvas-wrap {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    display: block !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-print-portal .no-print-qr,
+  body.is-printing-qr-modal #rma-qr-print-portal .print\:hidden {
+    display: none !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root {
+    --u: 1mm !important;
+    display: block !important;
+    gap: 0 !important;
+    margin: 0 auto !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page {
+    position: relative !important;
+    margin: 0 auto !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page:not(:last-child) {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  body.is-printing-qr-modal #rma-qr-batch-sheet-root .rma-print-page:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  body.is-printing-qr-modal .rma-qr-card,
+  body.is-printing-qr-modal .rma-qr-card * {
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+
+  body.is-printing-qr-modal .rma-qr-card {
+    outline: none !important;
+    background: #ffffff !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   body.is-printing-highres {
@@ -73086,6 +73207,25 @@ export const rmaApi = {
 --- START FILE: src/utils/cameraWatermark.js ---
 import { formatCameraTimestamp } from './rmaHelpers';
 
+const watermarkedFiles = new WeakSet();
+
+/**
+ * Marks a File/Blob instance as already watermarked so callers do not double-stamp it.
+ */
+export function markFileWatermarked(fileOrBlob) {
+  if (fileOrBlob && typeof fileOrBlob === 'object') {
+    watermarkedFiles.add(fileOrBlob);
+  }
+  return fileOrBlob;
+}
+
+/**
+ * Checks whether a File/Blob was already watermarked in-session.
+ */
+export function isFileWatermarked(fileOrBlob) {
+  return Boolean(fileOrBlob && typeof fileOrBlob === 'object' && watermarkedFiles.has(fileOrBlob));
+}
+
 /**
  * Wraps long text lines to fit within maxWidth on a 2D canvas.
  */
@@ -73255,10 +73395,10 @@ export async function stampWatermarkOnImage(fileOrBlob, options = {}) {
     if (!outBlob) return fileOrBlob;
 
     const origName = String(fileOrBlob.name || 'capture.jpg').replace(/\.[^.]+$/, '');
-    return new File([outBlob], `${origName}.jpg`, {
+    return markFileWatermarked(new File([outBlob], `${origName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
-    });
+    }));
   } catch {
     return fileOrBlob;
   } finally {
@@ -73272,7 +73412,11 @@ export async function stampWatermarkOnFiles(filesInput, options = {}) {
   const list = Array.from(filesInput || []).filter(Boolean);
   const out = [];
   for (const file of list) {
-    out.push(await stampWatermarkOnImage(file, options));
+    if (isFileWatermarked(file)) {
+      out.push(file);
+    } else {
+      out.push(await stampWatermarkOnImage(file, options));
+    }
   }
   return out;
 }
@@ -78243,8 +78387,8 @@ export function printIsolatedElement({
     ${serializedCss ? `<style>\n${serializedCss}\n</style>` : ''}
     <style>
       @page {
-        size: ${pageSize} !important;
-        margin: 0 !important;
+        size: ${pageSize};
+        margin: 0;
       }
       *, *::before, *::after {
         box-sizing: border-box !important;

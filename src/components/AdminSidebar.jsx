@@ -349,7 +349,7 @@ export default function AdminSidebar({
       {/* Desktop Sticky Collapsible Rail */}
       <aside
         data-testid="admin-sidebar-desktop"
-        className={`hidden lg:block sticky top-0 h-dvh shrink-0 transition-all duration-200 z-30 ${
+        className={`hidden lg:block sticky top-0 h-dvh shrink-0 transition-all duration-200 z-30 print:hidden ${
           isCollapsed ? 'w-[72px]' : 'w-[236px] 2xl:w-64'
         }`}
       >
@@ -360,7 +360,7 @@ export default function AdminSidebar({
       {isMobileOpen && (
         <div
           data-testid="admin-sidebar-mobile-drawer"
-          className="fixed inset-0 z-50 lg:hidden flex animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 lg:hidden flex animate-in fade-in duration-150 print:hidden"
         >
           <div
             className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"

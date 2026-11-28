@@ -17,6 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatSaveFileTimestamp } from '../utils/rmaHelpers';
 
@@ -82,7 +83,12 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
       });
     } catch (err) {
       console.error('Error printing poster:', err);
-      window.print();
+      printIsolatedElement({
+        elementId: 'portal-access-qr-card',
+        documentTitle: `RMA-Public-Reporting-Poster ${formatSaveFileTimestamp(new Date())}`,
+        pageSize: 'letter portrait',
+        pageMargin: '0.35in'
+      });
     } finally {
       setIsPrinting(false);
     }
@@ -129,7 +135,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
         <div className="p-4 sm:p-6 space-y-5 overflow-y-auto overscroll-contain flex-1">
           
           {/* Main Card: QR Code & Live Portal URL */}
-          <div className="p-5 sm:p-6 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col items-center text-center space-y-4">
+          <div id="portal-access-qr-card" className="p-5 sm:p-6 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col items-center text-center space-y-4">
             
             {/* Tag Badge */}
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
