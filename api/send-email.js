@@ -8,11 +8,17 @@ import {
 import { supabase } from './_lib/supabase.js';
 import {
   createSmtpTransport,
+  DEFAULT_EMAIL_RECIPIENTS,
   DEFAULT_SANDBOX_EMAIL,
   normalizeSandboxEmail,
   formatTestEmailSubject,
   getDiagnosticHelp
 } from './_lib/smtpMailer.js';
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  parseSupplierDirectoryValue
+} from '../src/utils/supplierDirectoryHelpers.js';
 
 export default async function handler(req, res) {
   // CORS configuration
@@ -106,6 +112,7 @@ export default async function handler(req, res) {
       isTestMode = false,
       isTestModeExplicitRecipients = false,
       emailType = '',
+      excludedSupplierEmails = [],
       attachments = []
     } = payload || {};
 
@@ -223,6 +230,46 @@ export default async function handler(req, res) {
       finalHtml = testBanner + finalHtml;
       finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> TO: ${finalTo}${finalCc.length ? ` | CC: ${finalCc.join(', ')}` : ''} | Sandbox: ${resolvedSandboxEmail}]\n\n${finalText}`;
       console.log(`🧪 [TEST MODE] Dispatched safely via SMTP to ${finalTo} (CC: ${finalCc.join(', ') || 'none'})`);
+    }
+
+    // Strict defense-in-depth guard: Scrap / Auto-Dispose emails must NEVER go to external suppliers
+    const isScrapDispatch =
+      String(emailType || '').trim().toLowerCase() === 'rma_scrapped' ||
+      /\[(?:rma scrapped|auto-disposed)\b/i.test(String(finalSubject || ''));
+    if (isScrapDispatch) {
+      const blockedSupplierSet = new Set(normalizeEmailArray(excludedSupplierEmails));
+      try {
+        const { data: dirRows } = await supabase
+          .from('rma_settings')
+          .select('key, value')
+          .in('key', [SUPPLIER_DIRECTORY_SETTINGS_KEY, TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY]);
+        for (const row of dirRows || []) {
+          parseSupplierDirectoryValue(row?.value).forEach((entry) => {
+            normalizeEmailArray(entry?.email_to).forEach((e) => blockedSupplierSet.add(e));
+            normalizeEmailArray(entry?.email_cc).forEach((e) => blockedSupplierSet.add(e));
+          });
+        }
+      } catch {}
+
+      if (blockedSupplierSet.size > 0) {
+        const normalizedToSandboxFallback = normalizeSandboxEmail(payload?.sandboxEmail || DEFAULT_SANDBOX_EMAIL);
+        const allowSafeTestSandbox = (e) => isTestMode && e === normalizedToSandboxFallback;
+        const currentToArr = normalizeEmailArray(finalTo);
+        const strippedToArr = currentToArr.filter((e) => !blockedSupplierSet.has(e) || allowSafeTestSandbox(e));
+        const strippedCcArr = (Array.isArray(finalCc) ? finalCc : []).filter(
+          (e) => (!blockedSupplierSet.has(e) || allowSafeTestSandbox(e)) && !strippedToArr.includes(e)
+        );
+        if (strippedToArr.length > 0) {
+          finalTo = strippedToArr.join(', ');
+          finalCc = strippedCcArr;
+        } else {
+          const fallbackEmail = isTestMode
+            ? normalizedToSandboxFallback
+            : (DEFAULT_EMAIL_RECIPIENTS?.to || 'azgodev@gmail.com');
+          finalTo = fallbackEmail;
+          finalCc = strippedCcArr.filter((e) => e !== fallbackEmail);
+        }
+      }
     }
 
     const mailOptions = {

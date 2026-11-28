@@ -60,17 +60,22 @@ export default function SupplierInput({
 
   const cleanValue = String(value || '').trim();
   const cleanLower = cleanValue.toLowerCase();
+  const isSyntheticSupplierLabel = (label) =>
+    /^(multiple\s+suppliers|pending\s+assignment|unknown|unassigned)/i.test(String(label || '').trim());
 
-  // Find matches that contain the query
-  const matchingSuppliers = knownSuppliers.filter(s => {
+  // Find real supplier matches (never suggest synthetic labels like "Multiple Suppliers (...)")
+  const matchingSuppliers = knownSuppliers.filter((s) => {
+    if (isSyntheticSupplierLabel(s)) return false;
     if (!cleanLower) return true;
     return s.toLowerCase().includes(cleanLower);
   });
 
   // Check if there is a primary suggestion that doesn't exactly match what was typed
-  const topSuggestion = matchingSuppliers.find(
-    s => s.toLowerCase() !== cleanLower && s.toLowerCase().startsWith(cleanLower)
-  ) || matchingSuppliers.find(s => s.toLowerCase() !== cleanLower);
+  const topSuggestion = cleanValue && !isSyntheticSupplierLabel(cleanValue)
+    ? (matchingSuppliers.find(
+        s => s.toLowerCase() !== cleanLower && s.toLowerCase().startsWith(cleanLower)
+      ) || matchingSuppliers.find(s => s.toLowerCase() !== cleanLower))
+    : null;
 
   const handleSelect = (supplier) => {
     onChange(supplier);

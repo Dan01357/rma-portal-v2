@@ -71,6 +71,8 @@ export default function RmaEmailEditorView({
 
   // Editable form fields matching QuickRMAActionModal Edit Details & Commercial Documents
   const [supplierName, setSupplierName] = useState('');
+  const [supplierEmailTo, setSupplierEmailTo] = useState('');
+  const [supplierEmailCc, setSupplierEmailCc] = useState('');
   const [productName, setProductName] = useState('');
   const [skuCode, setSkuCode] = useState('');
   const [barcode, setBarcode] = useState('');
@@ -138,6 +140,9 @@ export default function RmaEmailEditorView({
       };
     });
     setSupplierName(mappedItems.length > 1 ? summarizeBatchSuppliers(mappedItems, isMixedSuppliersSummary(repSup) ? '' : repSup) : repSup);
+    const fu = rep.ai_document_metadata?.follow_up || {};
+    setSupplierEmailTo(String(fu.supplier_email_to || rep.supplier_email_to || '').trim());
+    setSupplierEmailCc(String(fu.supplier_email_cc || rep.supplier_email_cc || '').trim());
     setProductName(rep.name || '');
     setSkuCode(rep.code || '');
     setBarcode(rep.barcode || '');
@@ -259,6 +264,10 @@ export default function RmaEmailEditorView({
           rma_number: activeRmaNumber,
           updates: {
             supplier_name: computedBatchSupplier,
+            ...(manifestItems.length <= 1 ? {
+              supplier_email_to: supplierEmailTo.trim(),
+              supplier_email_cc: supplierEmailCc.trim()
+            } : {}),
             name: productName.trim(),
             code: skuCode.trim(),
             quantity: computedBatchQty,
@@ -624,6 +633,30 @@ export default function RmaEmailEditorView({
                   ))}
                 </datalist>
               </div>
+              {manifestItems.length <= 1 && (
+                <>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Supplier Email (To)</label>
+                    <input
+                      type="text"
+                      value={supplierEmailTo}
+                      onChange={(e) => setSupplierEmailTo(e.target.value)}
+                      placeholder="claims@supplier.com"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Supplier Email (CC)</label>
+                    <input
+                      type="text"
+                      value={supplierEmailCc}
+                      onChange={(e) => setSupplierEmailCc(e.target.value)}
+                      placeholder="Optional CC emails"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </>
+              )}
               {loadedReport?.rma_type !== 'supplier_outbound' && (
                 <div>
                   <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Store / Customer Branch</label>
@@ -732,6 +765,17 @@ export default function RmaEmailEditorView({
                           });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Email (To)</label>
+                      <input
+                        type="text"
+                        aria-label={`Item #${idx + 1} Supplier Email`}
+                        value={it.supplier_email_to || ''}
+                        onChange={(e) => handleUpdateManifestRow(idx, { supplier_email_to: e.target.value })}
+                        placeholder="claims@supplier.com"
+                        className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
                     <div>

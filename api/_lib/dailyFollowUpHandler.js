@@ -13,7 +13,8 @@ import {
   isTestRecord,
   isManifestSubItem,
   extractDistinctSuppliersFromItems,
-  isMixedSuppliersSummary
+  isMixedSuppliersSummary,
+  getReportManifestItems
 } from '../../src/utils/rmaHelpers.js';
 import {
   FOLLOW_UP_MAX_DAYS,
@@ -24,10 +25,18 @@ import {
   getManilaTimeHhmm,
   hasReachedManilaSchedule,
   splitEmailStringOrList,
+  normalizeSupplierGroupKey,
+  lookupSupplierDirectoryContact,
   computeFourStepWorkflow,
+  groupReportItemsBySupplierForFollowUp,
+  buildFollowUpEmailSubject,
   buildFollowUpEmailContent,
   buildAutoDisposedEmailContent
 } from '../../src/utils/followUpWorkflow.js';
+import {
+  buildRmaAlertFilename,
+  buildRmaAlertXlsxAttachment
+} from '../../src/utils/rmaAlertXlsx.js';
 
 import {
   SUPPLIER_DIRECTORY_SETTINGS_KEY,
@@ -264,17 +273,67 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
   const defaultCc = Array.isArray(DEFAULT_EMAIL_RECIPIENTS?.cc) ? DEFAULT_EMAIL_RECIPIENTS.cc : [];
 
   const newRmaProfile = recipientsByType?.new_rma || legacyRecipients || {};
-  const rawNewRmaTo = splitEmailStringOrList(newRmaProfile?.to);
+  const rawNewRmaTo = splitEmailStringOrList(newRmaProfile?.to ?? newRmaProfile?.toList ?? newRmaProfile?.toEmail);
   const newRmaToList = rawNewRmaTo.length > 0 ? rawNewRmaTo : splitEmailStringOrList(defaultTo);
-  const rawNewRmaCc = splitEmailStringOrList(newRmaProfile?.cc);
+  const rawNewRmaCc = splitEmailStringOrList(newRmaProfile?.cc ?? newRmaProfile?.ccList ?? newRmaProfile?.baseCcList);
   const newRmaCcList = (rawNewRmaCc.length > 0 || rawNewRmaTo.length > 0 ? rawNewRmaCc : splitEmailStringOrList(defaultCc))
     .filter((e) => !newRmaToList.includes(e));
 
+  const rmaScrappedProfile = recipientsByType?.rma_scrapped || {};
+  const rmaScrappedTo = splitEmailStringOrList(rmaScrappedProfile?.to ?? rmaScrappedProfile?.toList ?? rmaScrappedProfile?.toEmail);
+  const rmaScrappedCc = splitEmailStringOrList(rmaScrappedProfile?.cc ?? rmaScrappedProfile?.ccList);
+
   const followUpProfile = recipientsByType?.supplier_followup || {};
-  const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to ?? followUpProfile?.toList);
+  const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to ?? followUpProfile?.toList ?? followUpProfile?.toEmail);
   const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc ?? followUpProfile?.ccList);
   const liveDirectoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
   const testDirectoryMap = buildDirectoryLookupMap(settingsMap.get(TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY));
+
+  // Helper: collect all known external supplier emails for a report so scrap/auto-dispose emails NEVER reach suppliers
+  const collectReportSupplierEmailsSet = (report, allRows = [], catalogProducts = [], activeDirMap = null) => {
+    const blocked = new Set();
+    const addRaw = (raw) => splitEmailStringOrList(raw).forEach((e) => blocked.add(e));
+    const addFromRow = (row) => {
+      if (!row) return;
+      addRaw(row.supplier_email_to);
+      addRaw(row.supplier_email_cc);
+      const rMeta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object')
+        ? row.ai_document_metadata
+        : {};
+      const rPickup = (rMeta.supplier_pickup && typeof rMeta.supplier_pickup === 'object') ? rMeta.supplier_pickup : {};
+      const rFu = (rMeta.follow_up && typeof rMeta.follow_up === 'object') ? rMeta.follow_up : {};
+      addRaw(rPickup.supplier_email_to);
+      addRaw(rPickup.supplier_email_cc);
+      addRaw(rFu.supplier_email_to);
+      addRaw(rFu.supplier_email_cc);
+      if (rFu.by_supplier && typeof rFu.by_supplier === 'object') {
+        Object.values(rFu.by_supplier).forEach((ent) => {
+          addRaw(ent?.supplier_email_to);
+          addRaw(ent?.supplier_email_cc);
+        });
+      }
+      if (rFu.item_emails && typeof rFu.item_emails === 'object') {
+        Object.values(rFu.item_emails).forEach((ent) => {
+          addRaw(ent?.supplier_email_to);
+          addRaw(ent?.supplier_email_cc);
+        });
+      }
+      getReportManifestItems(row, allRows).forEach((it) => {
+        addRaw(it?.supplier_email_to);
+        addRaw(it?.supplier_email_cc);
+      });
+    };
+    addFromRow(report);
+    (allRows || []).forEach(addFromRow);
+    [activeDirMap, liveDirectoryMap, testDirectoryMap].forEach((dMap) => {
+      if (!dMap) return;
+      dMap.forEach((dirHit) => {
+        (dirHit.emailToList || []).forEach((e) => blocked.add(e));
+        (dirHit.emailCcList || []).forEach((e) => blocked.add(e));
+      });
+    });
+    return blocked;
+  };
 
   // Isolated Test Mode recipient profiles (never leaks Live recipients or Live defaults)
   const testGlobalRecipients = settingsMap.get(TEST_EMAIL_RECIPIENTS_KEY);
@@ -385,13 +444,25 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
     for (const report of candidates) {
       const rmaNumber = report.rma_number || String(report.id);
       const effectiveTestRecord = Boolean(laneIsTestMode || isTestRecord(report));
+      const activeDirRaw = settingsMap.get(effectiveTestRecord ? TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY : SUPPLIER_DIRECTORY_KEY);
+      const activeDirMap = effectiveTestRecord ? testDirectoryMap : liveDirectoryMap;
+
       const wf = computeFourStepWorkflow(report, catalogProducts, {
         now: nowDate,
         customerFollowUpDefaultEnabled,
-        testStepIntervalSeconds: effectiveTestRecord ? laneStepSeconds : 0
+        testStepIntervalSeconds: effectiveTestRecord ? laneStepSeconds : 0,
+        directory: activeDirRaw
       });
 
-      if (wf.isClosed) {
+      const supplierGroups = groupReportItemsBySupplierForFollowUp(report, activeRows, catalogProducts, {
+        now: nowDate,
+        customerFollowUpDefaultEnabled,
+        testStepIntervalSeconds: effectiveTestRecord ? laneStepSeconds : 0,
+        directory: activeDirRaw
+      });
+      const openGroups = supplierGroups.filter((g) => !g.workflow.isClosed);
+
+      if (wf.isClosed || (supplierGroups.length > 0 && openGroups.length === 0)) {
         if (targetRmaNumber) {
           skippedItems.push({ rmaNumber, reason: 'CASE_ALREADY_CLOSED' });
         }
@@ -399,13 +470,32 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
       }
 
       // Check Auto-Dispose (> 10 days or > 10 simulated intervals in accelerated Test Mode) first
-      if (wf.isExpiredAfter10Days && !wf.isAutoDisposed) {
+      const shouldAutoDispose = !wf.isAutoDisposed && (
+        wf.isExpiredAfter10Days ||
+        (openGroups.length > 0 && openGroups.every((g) => g.workflow.isExpiredAfter10Days))
+      );
+      if (shouldAutoDispose) {
         const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
           ? report.ai_document_metadata
           : {};
         const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
           ? existingMeta.follow_up
           : {};
+
+        const nextBySupDispose = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object')
+          ? { ...prevFollowUp.by_supplier }
+          : {};
+        supplierGroups.forEach((g) => {
+          if (!g.workflow.isClosed) {
+            nextBySupDispose[g.supplierKey] = {
+              ...(nextBySupDispose[g.supplierKey] || {}),
+              supplier_name: g.supplierName,
+              auto_disposed_at: nowIso,
+              case_closed_at: nowIso,
+              case_status: 'auto_disposed_after_10_days'
+            };
+          }
+        });
 
         const nextMeta = {
           ...existingMeta,
@@ -418,7 +508,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
             started_at: wf.startedAtIso,
             auto_disposed_at: nowIso,
             case_closed_at: nowIso,
-            case_status: 'auto_disposed_after_10_days'
+            case_status: 'auto_disposed_after_10_days',
+            ...(Object.keys(nextBySupDispose).length > 0 ? { by_supplier: nextBySupDispose } : {})
           }
         };
 
@@ -447,22 +538,46 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
           audit_trail: nextAudit
         };
 
+        // Strictly internal employee recipients ONLY — never send Auto-Dispose / Scrap notices to external suppliers
+        const blockedSupplierEmails = collectReportSupplierEmailsSet(report, activeRows, catalogProducts, activeDirMap);
+        const testScrappedProf = effectiveTestRecord ? (testRecipientsByType?.rma_scrapped || {}) : {};
+        const testHasCustomScrapped = effectiveTestRecord && Boolean(
+          splitEmailStringOrList(testScrappedProf?.toList ?? testScrappedProf?.toEmail ?? testScrappedProf?.to).length > 0
+        );
+        const testDisposeRec = effectiveTestRecord
+          ? resolveTestRecipients(testHasCustomScrapped ? 'rma_scrapped' : 'new_rma')
+          : null;
+
+        const rawDisposeTo = effectiveTestRecord
+          ? testDisposeRec.toList
+          : (rmaScrappedTo.length > 0 ? rmaScrappedTo : newRmaToList);
+        const rawDisposeCc = effectiveTestRecord
+          ? testDisposeRec.ccList
+          : Array.from(new Set([
+              ...(rmaScrappedCc.length > 0 || rmaScrappedTo.length > 0 ? rmaScrappedCc : newRmaCcList),
+              ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
+            ]));
+
+        const safeToFiltered = rawDisposeTo.filter((e) => !blockedSupplierEmails.has(e));
+        const finalTo = safeToFiltered.length > 0
+          ? safeToFiltered
+          : (effectiveTestRecord
+              ? [sandboxEmail].filter((e) => !blockedSupplierEmails.has(e) || e === sandboxEmail)
+              : (newRmaToList.filter((e) => !blockedSupplierEmails.has(e)).length > 0
+                  ? newRmaToList.filter((e) => !blockedSupplierEmails.has(e))
+                  : splitEmailStringOrList(defaultTo).filter((e) => !blockedSupplierEmails.has(e))));
+        const finalCc = rawDisposeCc.filter((e) => !blockedSupplierEmails.has(e) && !finalTo.includes(e));
+
         const emailPayload = buildAutoDisposedEmailContent({
           report: updatedReportPreview,
           allReports: activeRows,
           catalogProducts,
           workflow: wf,
+          actualRecipients: { toList: finalTo, ccList: finalCc },
           isTestMode: effectiveTestRecord,
           sandboxEmail,
           now: nowDate
         });
-
-        const testDisposeRec = effectiveTestRecord ? resolveTestRecipients('new_rma') : null;
-        const finalTo = effectiveTestRecord ? testDisposeRec.toList : newRmaToList;
-        const finalCc = effectiveTestRecord
-          ? testDisposeRec.ccList
-          : Array.from(new Set([...newRmaCcList, ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])]))
-              .filter((e) => !finalTo.includes(e));
 
         try {
           if (!dryRun) {
@@ -518,182 +633,296 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null, deps =
         continue;
       }
 
-      if (!wf.isCountdownActive || wf.calendarDay > FOLLOW_UP_MAX_DAYS) {
-        if (targetRmaNumber) {
+      // Always merge saved `new_rma` internal recipients + `supplier_followup` ("Extra Internal CCs") in BOTH Live & Test Modes
+      const overrideTo = splitEmailStringOrList(body.overrideToEmail ?? body.overrideTo ?? body.to);
+      const overrideCc = splitEmailStringOrList(body.overrideCcEmail ?? body.overrideCc ?? body.cc);
+      const explicitTestOverride = Boolean(effectiveTestRecord && body.isTestModeExplicitRecipients);
+      const explicitTestTo = explicitTestOverride ? splitEmailStringOrList(body.toList ?? body.to) : overrideTo;
+      const explicitTestCc = explicitTestOverride ? splitEmailStringOrList(body.ccList ?? body.cc) : overrideCc;
+
+      const testFollowUpProf = testRecipientsByType?.supplier_followup || {};
+      const testNewRmaProf = testRecipientsByType?.new_rma || {};
+      const testGlobalTo = splitEmailStringOrList(testGlobalRecipients?.toList ?? testGlobalRecipients?.toEmail);
+      const testGlobalCc = splitEmailStringOrList(testGlobalRecipients?.baseCcList ?? testGlobalRecipients?.ccList);
+
+      const testMergedInternalTo = Array.from(new Set([
+        ...splitEmailStringOrList(testFollowUpProf?.toList ?? testFollowUpProf?.toEmail ?? testFollowUpProf?.to),
+        ...splitEmailStringOrList(testNewRmaProf?.toList ?? testNewRmaProf?.toEmail ?? testNewRmaProf?.to)
+      ]));
+      const testInternalTo = testMergedInternalTo.length > 0
+        ? testMergedInternalTo
+        : (testGlobalTo.length > 0 ? testGlobalTo : [sandboxEmail]);
+      const testInternalCc = Array.from(new Set([
+        ...splitEmailStringOrList(testFollowUpProf?.ccList ?? testFollowUpProf?.cc),
+        ...splitEmailStringOrList(testNewRmaProf?.ccList ?? testNewRmaProf?.cc),
+        ...testGlobalCc
+      ]));
+
+      const liveInternalTo = Array.from(new Set([
+        ...followUpProfileTo,
+        ...newRmaToList
+      ]));
+      const liveInternalCc = Array.from(new Set([
+        ...followUpProfileCc,
+        ...newRmaCcList,
+        ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
+      ]));
+
+      const isBatchMultiSupplier = supplierGroups.length > 1 || Boolean(report.is_parent);
+      const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+        ? report.ai_document_metadata
+        : {};
+      const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+        ? existingMeta.follow_up
+        : {};
+      const nextBySupplier = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object')
+        ? { ...prevFollowUp.by_supplier }
+        : {};
+      const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
+      const nextAudit = [...existingAudit];
+      let reportSentAnyGroup = false;
+      let maxSentSimDay = Number(prevFollowUp.last_sent_sim_day ?? -1);
+      let maxSentDay = Number(prevFollowUp.last_sent_day ?? -1);
+      let totalParentSentCount = Number(prevFollowUp.sent_count || 0);
+      let nextParentSimDays = Array.isArray(prevFollowUp.sent_sim_days) ? [...prevFollowUp.sent_sim_days] : [];
+
+      for (const group of openGroups) {
+        const gWf = group.workflow;
+
+        if (!gWf.isCountdownActive || gWf.calendarDay > FOLLOW_UP_MAX_DAYS) {
+          if (targetRmaNumber) {
+            skippedItems.push({
+              rmaNumber,
+              supplierName: group.supplierName,
+              reason: !gWf.followUpEnabled ? 'FOLLOW_UP_DISABLED' : 'OUTSIDE_COUNTDOWN_WINDOW'
+            });
+          }
+          continue;
+        }
+
+        if (gWf.isAcceleratedTestSla && gWf.calendarDay === 0 && !force) {
           skippedItems.push({
             rmaNumber,
-            reason: !wf.followUpEnabled ? 'FOLLOW_UP_DISABLED' : 'OUTSIDE_COUNTDOWN_WINDOW'
+            supplierName: group.supplierName,
+            reason: 'WAITING_FOR_SIMULATED_DAY_1',
+            nextStepInSeconds: gWf.nextStepInSeconds
           });
+          continue;
         }
-        continue;
-      }
 
-      // In Accelerated Test Mode, wait cleanly until simulated Day 1 arrives (unless force=true for single-item inspection)
-      if (wf.isAcceleratedTestSla && wf.calendarDay === 0 && !force) {
-        skippedItems.push({
-          rmaNumber,
-          reason: 'WAITING_FOR_SIMULATED_DAY_1',
-          nextStepInSeconds: wf.nextStepInSeconds
+        if (gWf.alreadySentToday && !force) {
+          skippedItems.push({
+            rmaNumber,
+            supplierName: group.supplierName,
+            reason: gWf.isAcceleratedTestSla ? 'ALREADY_SENT_SIMULATED_STEP' : 'ALREADY_SENT_TODAY',
+            lastSentPhtDate: gWf.lastSentPhtDate,
+            lastSentSimDay: gWf.lastSentSimDay
+          });
+          continue;
+        }
+
+        const dirContact = (!group.isUnassignedBucket && activeDirMap.get(normalizeDirKey(group.supplierName))) || null;
+        const groupSupplierTo = Array.from(new Set([
+          ...group.toEmails,
+          ...(dirContact?.emailToList || [])
+        ]));
+        const groupSupplierCc = Array.from(new Set([
+          ...group.ccEmails,
+          ...(dirContact?.emailCcList || [])
+        ])).filter((e) => !groupSupplierTo.includes(e));
+
+        const baseInternalTo = effectiveTestRecord ? testInternalTo : liveInternalTo;
+        const baseInternalCc = effectiveTestRecord ? testInternalCc : liveInternalCc;
+
+        let finalTo = [];
+        let finalCc = [];
+        let internalOnly = false;
+
+        if (explicitTestOverride && explicitTestTo.length > 0) {
+          finalTo = explicitTestTo;
+          finalCc = Array.from(new Set([...explicitTestCc, ...baseInternalTo, ...baseInternalCc]))
+            .filter((e) => !finalTo.includes(e));
+          internalOnly = groupSupplierTo.length === 0;
+        } else if (overrideTo.length > 0) {
+          finalTo = overrideTo;
+          finalCc = Array.from(new Set([...overrideCc, ...groupSupplierCc, ...baseInternalTo, ...baseInternalCc]))
+            .filter((e) => !finalTo.includes(e));
+          internalOnly = groupSupplierTo.length === 0;
+        } else if (groupSupplierTo.length > 0) {
+          finalTo = groupSupplierTo;
+          finalCc = Array.from(new Set([...groupSupplierCc, ...baseInternalTo, ...baseInternalCc]))
+            .filter((e) => !finalTo.includes(e));
+          internalOnly = false;
+        } else {
+          internalOnly = true;
+          finalTo = baseInternalTo.length > 0 ? baseInternalTo : baseInternalCc;
+          finalCc = baseInternalCc.filter((e) => !finalTo.includes(e));
+        }
+
+        if (finalTo.length === 0) {
+          skippedItems.push({ rmaNumber, supplierName: group.supplierName, reason: 'NO_RECIPIENTS' });
+          continue;
+        }
+
+        const effectiveGroup = {
+          ...group,
+          toEmails: groupSupplierTo,
+          ccEmails: groupSupplierCc,
+          supplierEmailTo: groupSupplierTo.join(', '),
+          supplierEmailCc: groupSupplierCc.join(', '),
+          internalOnly
+        };
+
+        const subjectForFilename = buildFollowUpEmailSubject({
+          report,
+          supplierName: group.supplierName,
+          calendarDay: gWf.calendarDay,
+          isTestMode: effectiveTestRecord,
+          internalOnly,
+          now: nowDate
         });
-        continue;
-      }
+        const attachFilename = buildRmaAlertFilename(subjectForFilename, nowDate);
 
-      if (wf.alreadySentToday && !force) {
-        skippedItems.push({
-          rmaNumber,
-          reason: wf.isAcceleratedTestSla ? 'ALREADY_SENT_SIMULATED_STEP' : 'ALREADY_SENT_TODAY',
-          lastSentPhtDate: wf.lastSentPhtDate,
-          lastSentSimDay: wf.lastSentSimDay
+        const emailPayload = buildFollowUpEmailContent({
+          report,
+          allReports: activeRows,
+          catalogProducts,
+          workflow: gWf,
+          supplierGroup: effectiveGroup,
+          actualRecipients: { toList: finalTo, ccList: finalCc },
+          internalOnly,
+          attachFilename,
+          isTestMode: effectiveTestRecord,
+          sandboxEmail,
+          now: nowDate
         });
-        continue;
-      }
 
-      const activeDirectoryMap = effectiveTestRecord ? testDirectoryMap : liveDirectoryMap;
-      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && activeDirectoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
-      const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
-      const itemDirTo = [];
-      const itemDirCc = [];
-      const perItemTo = [];
-      const perItemCc = [];
-      if (Array.isArray(report.items)) {
-        for (const it of report.items) {
-          splitEmailStringOrList(it?.supplier_email_to ?? it?.email_to).forEach((e) => perItemTo.push(e));
-          splitEmailStringOrList(it?.supplier_email_cc ?? it?.email_cc).forEach((e) => perItemCc.push(e));
-        }
-      }
-      for (const sup of itemSuppliers) {
-        const match = activeDirectoryMap.get(normalizeDirKey(sup));
-        if (match) {
-          match.emailToList.forEach((e) => itemDirTo.push(e));
-          match.emailCcList.forEach((e) => itemDirCc.push(e));
-        }
-      }
-      const overrideTo = splitEmailStringOrList(body.overrideToEmail);
-      const aggregatedSupplierTo = Array.from(new Set([
-        ...wf.party.toEmails,
-        ...perItemTo,
-        ...(dirContact?.emailToList || []),
-        ...itemDirTo
-      ]));
-      const liveTo = overrideTo.length > 0
-        ? overrideTo
-        : (aggregatedSupplierTo.length > 0 ? aggregatedSupplierTo : followUpProfileTo);
+        const xlsxAttachment = buildRmaAlertXlsxAttachment(report, {
+          allReports: activeRows,
+          supplierGroup: effectiveGroup,
+          forceManifestTable: isBatchMultiSupplier,
+          subject: emailPayload.subject,
+          filename: attachFilename,
+          resolvedRecipients: { toList: finalTo, ccList: finalCc }
+        });
 
-      if (!effectiveTestRecord && liveTo.length === 0) {
-        skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
-        continue;
-      }
-
-      const testFollowUpRec = effectiveTestRecord
-        ? resolveTestRecipients('supplier_followup', {
-            overrideTo: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.toList ?? body.to) : overrideTo,
-            overrideCc: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.ccList ?? body.cc) : []
-          })
-        : null;
-
-      const finalTo = effectiveTestRecord ? testFollowUpRec.toList : liveTo;
-      const finalCc = effectiveTestRecord
-        ? testFollowUpRec.ccList
-        : Array.from(
-            new Set([
-              ...wf.party.ccEmails,
-              ...perItemCc,
-              ...(dirContact?.emailCcList || []),
-              ...itemDirCc,
-              ...followUpProfileTo,
-              ...followUpProfileCc,
-              ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
-            ])
-          ).filter((e) => !finalTo.includes(e));
-
-      const emailPayload = buildFollowUpEmailContent({
-        report,
-        allReports: activeRows,
-        catalogProducts,
-        workflow: wf,
-        isTestMode: effectiveTestRecord,
-        sandboxEmail,
-        now: nowDate
-      });
-
-      try {
-        if (!dryRun) {
-          if (transporter && finalTo.length > 0) {
+        try {
+          if (!dryRun && transporter && finalTo.length > 0) {
             await transporter.sendMail({
               from: `Pingcon Marketing RMA <${smtpUser}>`,
               to: finalTo.join(', '),
               ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
               subject: emailPayload.subject,
               html: emailPayload.html,
-              text: emailPayload.text
+              text: emailPayload.text,
+              attachments: xlsxAttachment?.content ? [{
+                filename: xlsxAttachment.filename,
+                content: Buffer.from(xlsxAttachment.content, 'base64'),
+                contentType: xlsxAttachment.contentType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+              }] : []
             });
           }
 
-          const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-            ? report.ai_document_metadata
-            : {};
-          const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
-            ? existingMeta.follow_up
-            : {};
+          if (!dryRun) {
+            reportSentAnyGroup = true;
+            const prevSupMeta = (nextBySupplier[group.supplierKey] && typeof nextBySupplier[group.supplierKey] === 'object')
+              ? nextBySupplier[group.supplierKey]
+              : {};
+            const prevSupSimDays = Array.isArray(prevSupMeta.sent_sim_days) ? prevSupMeta.sent_sim_days : [];
+            const sameSupSimCfg = Number(prevSupMeta.last_sent_sim_interval_sec || 0) === gWf.testStepIntervalSeconds;
+            const nextSupSimDays = gWf.isAcceleratedTestSla
+              ? Array.from(new Set([...(sameSupSimCfg ? prevSupSimDays : []), gWf.calendarDay])).slice(-15)
+              : prevSupSimDays;
 
-          const prevSimDays = Array.isArray(prevFollowUp.sent_sim_days) ? prevFollowUp.sent_sim_days : [];
-          const sameSimCfg = Number(prevFollowUp.last_sent_sim_interval_sec || 0) === wf.testStepIntervalSeconds;
-          const nextSimDays = wf.isAcceleratedTestSla
-            ? Array.from(new Set([...(sameSimCfg ? prevSimDays : []), wf.calendarDay])).slice(-15)
-            : prevSimDays;
-
-          const nextMeta = {
-            ...existingMeta,
-            follow_up: {
-              ...prevFollowUp,
+            nextBySupplier[group.supplierKey] = {
+              ...prevSupMeta,
+              supplier_name: group.supplierName,
+              supplier_key: group.supplierKey,
+              supplier_email_to: groupSupplierTo.join(', '),
+              supplier_email_cc: groupSupplierCc.join(', '),
+              line_refs: group.parentLineRefs,
               enabled: true,
-              started_at: wf.startedAtIso,
+              started_at: gWf.startedAtIso,
               last_sent_at: nowIso,
               last_sent_pht_date: todayManila,
-              last_sent_day: wf.calendarDay,
-              ...(wf.isAcceleratedTestSla ? {
-                last_sent_sim_day: wf.calendarDay,
-                last_sent_sim_interval_sec: wf.testStepIntervalSeconds,
-                sent_sim_days: nextSimDays
+              last_sent_day: gWf.calendarDay,
+              ...(gWf.isAcceleratedTestSla ? {
+                last_sent_sim_day: gWf.calendarDay,
+                last_sent_sim_interval_sec: gWf.testStepIntervalSeconds,
+                sent_sim_days: nextSupSimDays
               } : {}),
-              sent_count: wf.sentCount + 1
-            }
-          };
+              sent_count: Number(prevSupMeta.sent_count || 0) + 1
+            };
 
-          const simNoteTag = wf.isAcceleratedTestSla
-            ? ` [Simulated @ ${wf.testStepIntervalSeconds}s/day]`
-            : '';
-          const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
-          const nextAudit = [
-            ...existingAudit,
-            {
+            maxSentDay = Math.max(maxSentDay, gWf.calendarDay);
+            if (gWf.isAcceleratedTestSla) {
+              maxSentSimDay = Math.max(maxSentSimDay, gWf.calendarDay);
+              const sameParentSimCfg = Number(prevFollowUp.last_sent_sim_interval_sec || 0) === gWf.testStepIntervalSeconds;
+              nextParentSimDays = Array.from(new Set([...(sameParentSimCfg ? nextParentSimDays : []), gWf.calendarDay])).slice(-15);
+            }
+            totalParentSentCount += 1;
+
+            const simNoteTag = gWf.isAcceleratedTestSla
+              ? ` [Simulated @ ${gWf.testStepIntervalSeconds}s/day]`
+              : '';
+            nextAudit.push({
               timestamp: nowIso,
               action: 'FOLLOWUP_EMAIL_SENT',
               stage: 'FOLLOW_UP',
               actor: auth.actor || 'Daily Follow-Up Scheduler',
-              note: `Sent Day ${wf.calendarDay} of ${FOLLOW_UP_MAX_DAYS} follow-up to ${finalTo.join(', ')}${finalCc.length ? ` (CC: ${finalCc.join(', ')})` : ''}${simNoteTag}`
-            }
-          ];
+              note: `Sent Day ${gWf.calendarDay} of ${FOLLOW_UP_MAX_DAYS} follow-up (${group.supplierName}${internalOnly ? ' — Internal Reminder' : ''}) to ${finalTo.join(', ')}${finalCc.length ? ` (CC: ${finalCc.join(', ')})` : ''}${simNoteTag}`
+            });
+          }
 
-          await safeUpdateRmaReport(report.id, {
-            ai_document_metadata: nextMeta,
-            audit_trail: nextAudit
-          }, db);
+          followUpsSent.push({
+            rmaNumber,
+            supplierKey: group.supplierKey,
+            supplierName: group.supplierName,
+            lineRefs: group.parentLineRefs,
+            internalOnly,
+            attachmentFilename: xlsxAttachment.filename,
+            calendarDay: gWf.calendarDay,
+            isAcceleratedTestSla: gWf.isAcceleratedTestSla,
+            testStepIntervalSeconds: gWf.testStepIntervalSeconds,
+            to: finalTo,
+            cc: finalCc,
+            subject: emailPayload.subject,
+            dryRun
+          });
+        } catch (err) {
+          errors.push({
+            rmaNumber,
+            supplierName: group.supplierName,
+            step: 'send_followup',
+            message: err?.message || 'Failed sending follow-up'
+          });
         }
+      }
 
-        followUpsSent.push({
-          rmaNumber,
-          supplierName: wf.party.supplierName,
-          calendarDay: wf.calendarDay,
-          isAcceleratedTestSla: wf.isAcceleratedTestSla,
-          testStepIntervalSeconds: wf.testStepIntervalSeconds,
-          to: finalTo,
-          cc: finalCc,
-          subject: emailPayload.subject,
-          dryRun
-        });
-      } catch (err) {
-        errors.push({ rmaNumber, step: 'send_followup', message: err?.message || 'Failed sending follow-up' });
+      if (!dryRun && reportSentAnyGroup) {
+        const nextMeta = {
+          ...existingMeta,
+          follow_up: {
+            ...prevFollowUp,
+            enabled: true,
+            started_at: wf.startedAtIso,
+            last_sent_at: nowIso,
+            last_sent_pht_date: todayManila,
+            last_sent_day: maxSentDay >= 0 ? maxSentDay : wf.calendarDay,
+            ...(wf.isAcceleratedTestSla ? {
+              last_sent_sim_day: maxSentSimDay >= 0 ? maxSentSimDay : wf.calendarDay,
+              last_sent_sim_interval_sec: wf.testStepIntervalSeconds,
+              sent_sim_days: nextParentSimDays
+            } : {}),
+            sent_count: totalParentSentCount,
+            by_supplier: nextBySupplier
+          }
+        };
+
+        await safeUpdateRmaReport(report.id, {
+          ai_document_metadata: nextMeta,
+          audit_trail: nextAudit
+        }, db);
       }
     }
 

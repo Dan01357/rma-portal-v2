@@ -43,7 +43,7 @@ import { notificationService } from '../services/notificationService';
 import { supplierDirectoryService } from '../services/supplierDirectoryService';
 import SupplierFollowUpModal from './SupplierFollowUpModal';
 import FollowUpTimelineCard from './FollowUpTimelineCard';
-import { getCleanHumanWorkflowStatus } from '../utils/followUpWorkflow';
+import { getCleanHumanWorkflowStatus, normalizeSupplierGroupKey } from '../utils/followUpWorkflow';
 import {
   isSplitChildTicket,
   isSplitParentTicket,
@@ -994,11 +994,16 @@ export default function QuickRMAActionModal({
     }
     const sup = String(item.supplierName || item.supplier_name || item.supplier || '').trim();
     if (sup && !/^(pending assignment|unassigned|warehouse|n\/a)$/i.test(sup)) {
+      const prevSupKey = normalizeSupplierGroupKey(adminSupplierName);
+      const nextSupKey = normalizeSupplierGroupKey(sup);
       setAdminSupplierName(sup);
       const dirMatch = supplierDirectoryService.findBySupplierName(sup, { isTestMode: Boolean(report && isTestRecord(report)) });
       if (dirMatch) {
-        setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
-        setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+        setAdminSupplierEmailTo((prev) => (prevSupKey !== nextSupKey || !prev.trim()) ? (dirMatch.email_to || '') : prev);
+        setAdminSupplierEmailCc((prev) => (prevSupKey !== nextSupKey || !prev.trim()) ? (dirMatch.email_cc || '') : prev);
+      } else if (prevSupKey !== nextSupKey) {
+        setAdminSupplierEmailTo('');
+        setAdminSupplierEmailCc('');
       }
     }
     if (item.unitName || item.unit_name) {
@@ -1172,6 +1177,10 @@ export default function QuickRMAActionModal({
       const prevFu = (baseMeta.follow_up && typeof baseMeta.follow_up === 'object') ? baseMeta.follow_up : {};
       const prevPu = (baseMeta.supplier_pickup && typeof baseMeta.supplier_pickup === 'object') ? baseMeta.supplier_pickup : {};
 
+      const bySupplierMap = (prevFu.by_supplier && typeof prevFu.by_supplier === 'object')
+        ? { ...prevFu.by_supplier }
+        : {};
+
       if (!isManifestReport) {
         updates.expiry_date = cleanExpiry;
         if (adminProductName.trim()) updates.name = adminProductName.trim();
@@ -1186,11 +1195,25 @@ export default function QuickRMAActionModal({
           updates.supplier_name = cleanSupplier;
         }
 
-        if (isSupplierEditStream && (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc)) {
+        if (isSupplierEditStream || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+          const singleSupKey = normalizeSupplierGroupKey(cleanSupplier || report.supplier_name);
+          if (singleSupKey !== '__unassigned__') {
+            bySupplierMap[singleSupKey] = {
+              ...(bySupplierMap[singleSupKey] || {}),
+              supplier_name: cleanSupplier || report.supplier_name,
+              supplier_key: singleSupKey,
+              supplier_email_to: cleanSupplierEmailTo,
+              supplier_email_cc: cleanSupplierEmailCc,
+              email_cleared: !cleanSupplierEmailTo
+            };
+          }
           baseMeta.follow_up = {
             ...prevFu,
+            ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
             supplier_email_to: cleanSupplierEmailTo,
-            supplier_email_cc: cleanSupplierEmailCc
+            supplier_email_cc: cleanSupplierEmailCc,
+            supplier_email_cleared: !cleanSupplierEmailTo,
+            by_supplier: bySupplierMap
           };
           if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
             baseMeta.supplier_pickup = {
@@ -1201,7 +1224,7 @@ export default function QuickRMAActionModal({
             };
           }
           updates.ai_document_metadata = baseMeta;
-        } else if (!isSupplierEditStream && cleanSupplier && Object.keys(prevPu).length > 0 && !isMixedSuppliersSummary(cleanSupplier)) {
+        } else if (cleanSupplier && Object.keys(prevPu).length > 0 && !isMixedSuppliersSummary(cleanSupplier)) {
           baseMeta.supplier_pickup = {
             ...prevPu,
             supplier_name: cleanSupplier
@@ -1261,21 +1284,31 @@ export default function QuickRMAActionModal({
             ? (cleanExpiry || (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null))
             : (it.expiry_date ? String(it.expiry_date).slice(0, 10) : null);
           const itemEmailTo = isSingleOverlay
-            ? (isSupplierEditStream ? String(cleanSupplierEmailTo || it.supplier_email_to || '').trim() : String(it.supplier_email_to || '').trim())
+            ? String(cleanSupplierEmailTo).trim()
             : String(it.supplier_email_to || '').trim();
           const itemEmailCc = isSingleOverlay
-            ? (isSupplierEditStream ? String(cleanSupplierEmailCc || it.supplier_email_cc || '').trim() : String(it.supplier_email_cc || '').trim())
+            ? String(cleanSupplierEmailCc).trim()
             : String(it.supplier_email_cc || '').trim();
 
-          const itemKey = String(it.id || it.barcode || idx);
-          if (isSupplierEditStream && (itemEmailTo || itemEmailCc || itemEmailsMap[itemKey])) {
-            itemEmailsMap[itemKey] = {
+          const itemKey = String(it.id || it.item_id || `line_${idx + 1}`);
+          itemEmailsMap[itemKey] = {
+            supplier_name: itemSup,
+            supplier_email_to: itemEmailTo,
+            supplier_email_cc: itemEmailCc,
+            email_cleared: !itemEmailTo
+          };
+          const itemSupKey = normalizeSupplierGroupKey(itemSup);
+          if (itemSupKey !== '__unassigned__') {
+            bySupplierMap[itemSupKey] = {
+              ...(bySupplierMap[itemSupKey] || {}),
               supplier_name: itemSup,
-              supplier_email_to: itemEmailTo,
-              supplier_email_cc: itemEmailCc
+              supplier_key: itemSupKey,
+              supplier_email_to: itemEmailTo || bySupplierMap[itemSupKey]?.supplier_email_to || '',
+              supplier_email_cc: itemEmailCc || bySupplierMap[itemSupKey]?.supplier_email_cc || '',
+              email_cleared: !itemEmailTo && !bySupplierMap[itemSupKey]?.supplier_email_to
             };
           }
-          if (isSupplierEditStream && isRealSupplierName(itemSup) && (itemEmailTo || itemEmailCc)) {
+          if (isRealSupplierName(itemSup) && (itemEmailTo || itemEmailCc)) {
             dirUpserts.push({
               supplier_name: itemSup,
               supplier_email_to: itemEmailTo,
@@ -1303,6 +1336,7 @@ export default function QuickRMAActionModal({
             supplier: itemSup,
             supplier_email_to: itemEmailTo,
             supplier_email_cc: itemEmailCc,
+            email_cleared: !itemEmailTo,
             ...(resolvedNet !== undefined ? { price: resolvedNet } : {}),
             ...(resolvedVat !== undefined ? { price_with_vat: resolvedVat } : {}),
             expiry_date: itemExpiry
@@ -1336,20 +1370,30 @@ export default function QuickRMAActionModal({
           const sortedExpiries = updatedItems.map((i) => i.expiry_date).filter(Boolean).sort();
           updates.expiry_date = sortedExpiries[0] || null;
 
-          if (isSupplierEditStream) {
-            const distinctTos = Array.from(new Set(updatedItems.map((i) => i.supplier_email_to).filter(Boolean)));
-            const distinctCcs = Array.from(new Set(updatedItems.map((i) => i.supplier_email_cc).filter(Boolean)));
-            baseMeta.follow_up = {
-              ...prevFu,
-              item_emails: itemEmailsMap,
-              ...(distinctTos.length > 0 ? { supplier_email_to: distinctTos.join(', ') } : {}),
-              ...(distinctCcs.length > 0 ? { supplier_email_cc: distinctCcs.join(', ') } : {})
-            };
-            updates.ai_document_metadata = {
-              ...(updates.ai_document_metadata || baseMeta),
-              follow_up: baseMeta.follow_up
-            };
-          }
+          const distinctBatchSupplierKeys = Array.from(new Set(
+            updatedItems.map((i) => normalizeSupplierGroupKey(i.supplier_name)).filter((k) => k !== '__unassigned__')
+          ));
+          const isSingleBatchSupplier = distinctBatchSupplierKeys.length === 1;
+          const distinctTos = Array.from(new Set(updatedItems.map((i) => i.supplier_email_to).filter(Boolean)));
+          const distinctCcs = Array.from(new Set(updatedItems.map((i) => i.supplier_email_cc).filter(Boolean)));
+          baseMeta.follow_up = {
+            ...prevFu,
+            item_emails: itemEmailsMap,
+            by_supplier: bySupplierMap,
+            ...(isSingleBatchSupplier
+              ? {
+                  supplier_email_to: distinctTos.join(', '),
+                  supplier_email_cc: distinctCcs.join(', ')
+                }
+              : {
+                  supplier_email_to: '',
+                  supplier_email_cc: ''
+                })
+          };
+          updates.ai_document_metadata = {
+            ...(updates.ai_document_metadata || baseMeta),
+            follow_up: baseMeta.follow_up
+          };
         }
       }
 
@@ -2105,6 +2149,11 @@ export default function QuickRMAActionModal({
                             <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
                               Batch Line Items ({editableManifestItems.length} Items)
                             </span>
+                            {isSupplierStream && (
+                              <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                                Split Follow-Up &amp; .xlsx sent separately per distinct supplier
+                              </span>
+                            )}
                           </div>
                           <div className="space-y-2.5">
                             {editableManifestItems.map((it, idx) => {
@@ -2234,13 +2283,19 @@ export default function QuickRMAActionModal({
                                         value={it.supplier_name || ''}
                                         onChange={(e) => {
                                           const val = e.target.value;
+                                          const prevKey = normalizeSupplierGroupKey(it.supplier_name);
+                                          const nextKey = normalizeSupplierGroupKey(val);
                                           const dirMatch = supplierDirectoryService.findBySupplierName(val, { isTestMode: Boolean(report && isTestRecord(report)) });
+                                          const emailPatch = {};
+                                          if (!it._emailManuallyEdited || prevKey !== nextKey) {
+                                            emailPatch.supplier_email_to = dirMatch?.email_to || (prevKey !== nextKey ? '' : (it.supplier_email_to || ''));
+                                            emailPatch.supplier_email_cc = dirMatch?.email_cc || (prevKey !== nextKey ? '' : (it.supplier_email_cc || ''));
+                                          }
                                           handleUpdateEditableManifestItem(idx, {
                                             supplier_name: val,
                                             supplierName: val,
                                             supplier: val,
-                                            ...(dirMatch && !String(it.supplier_email_to || '').trim() ? { supplier_email_to: dirMatch.email_to || '' } : {}),
-                                            ...(dirMatch && !String(it.supplier_email_cc || '').trim() ? { supplier_email_cc: dirMatch.email_cc || '' } : {})
+                                            ...emailPatch
                                           });
                                         }}
                                         placeholder="e.g. Suy Sing Commercial Corp"
@@ -2268,7 +2323,7 @@ export default function QuickRMAActionModal({
                                           type="text"
                                           aria-label={`Batch item ${idx + 1} supplier email To`}
                                           value={it.supplier_email_to || ''}
-                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_to: e.target.value })}
+                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_to: e.target.value, _emailManuallyEdited: true })}
                                           placeholder="claims@supplier.com (auto-fills)"
                                           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
                                         />
@@ -2279,7 +2334,7 @@ export default function QuickRMAActionModal({
                                           type="text"
                                           aria-label={`Batch item ${idx + 1} supplier email CC`}
                                           value={it.supplier_email_cc || ''}
-                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_cc: e.target.value })}
+                                          onChange={(e) => handleUpdateEditableManifestItem(idx, { supplier_email_cc: e.target.value, _emailManuallyEdited: true })}
                                           placeholder="coordinator@supplier.com (optional)"
                                           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono bg-slate-50 dark:bg-slate-800"
                                         />
@@ -2458,11 +2513,18 @@ export default function QuickRMAActionModal({
                               value={adminSupplierName}
                               onChange={(e) => {
                                 const nextVal = e.target.value;
+                                const prevKey = normalizeSupplierGroupKey(adminSupplierName);
+                                const nextKey = normalizeSupplierGroupKey(nextVal);
                                 setAdminSupplierName(nextVal);
                                 const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: Boolean(report && isTestRecord(report)) });
                                 if (dirMatch) {
-                                  setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
-                                  setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+                                  if (prevKey !== nextKey || !adminSupplierEmailTo.trim()) {
+                                    setAdminSupplierEmailTo(dirMatch.email_to || '');
+                                    setAdminSupplierEmailCc(dirMatch.email_cc || '');
+                                  }
+                                } else if (prevKey !== nextKey) {
+                                  setAdminSupplierEmailTo('');
+                                  setAdminSupplierEmailCc('');
                                 }
                               }}
                               placeholder="e.g. Suy Sing Commercial Corp"
@@ -3499,6 +3561,7 @@ export default function QuickRMAActionModal({
         isOpen={isFollowUpModalOpen}
         onClose={() => setIsFollowUpModalOpen(false)}
         report={report}
+        allReports={recentReportsList}
         catalogProducts={savedProductsList}
         isTestMode={Boolean(report && isTestRecord(report))}
         currentUser={verifiedAdmin || currentUser}

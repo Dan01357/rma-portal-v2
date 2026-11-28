@@ -15,7 +15,7 @@ import {
   isMixedSuppliersSummary,
   extractDistinctSuppliersFromItems
 } from '../utils/rmaHelpers';
-import { isPlaceholderSupplier } from '../utils/followUpWorkflow';
+import { isPlaceholderSupplier, normalizeSupplierGroupKey } from '../utils/followUpWorkflow';
 import { supplierDirectoryService } from './supplierDirectoryService';
 
 // Serialize Trash / Archive / Restore / Hard-Delete DB read-modify-write operations in FIFO order
@@ -3466,7 +3466,8 @@ export const catalogService = {
   },
 
   /**
-   * Persist Supplier Name, Email (TO/CC), and 10-Calendar-Day Auto Follow-Up toggle for any RMA.
+   * Persist Supplier Name, Email (TO/CC), and 10-Calendar-Day Auto Follow-Up toggle for any RMA
+   * (supports single-item, focused batch item/supplier slice, and multi-supplier batch saves).
    */
   async saveSupplierAndFollowUpSettings(report, payload = {}) {
     const { existing, resolvedId, rmaNumber } = await this._resolveLatestRmaParentRow(report);
@@ -3482,17 +3483,178 @@ export const catalogService = {
     const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
     const nowIso = new Date().toISOString();
 
-    const cleanSupplier = String(payload.supplier_name || '').trim();
-    const toEmailStr = String(payload.supplier_email_to ?? prevFollowUp.supplier_email_to ?? '').trim();
-    const ccEmailStr = String(payload.supplier_email_cc ?? prevFollowUp.supplier_email_cc ?? '').trim();
     const followUpEnabled = payload.followUpEnabled !== undefined
       ? Boolean(payload.followUpEnabled)
       : (prevFollowUp.enabled ?? true);
 
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const nextItemEmails = (prevFollowUp.item_emails && typeof prevFollowUp.item_emails === 'object')
+      ? { ...prevFollowUp.item_emails }
+      : {};
+    const nextBySupplier = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object')
+      ? { ...prevFollowUp.by_supplier }
+      : {};
+
+    const dirUpsertPairs = [];
+    const upsertSupMetaEntry = (supName, toStr, ccStr, opts = {}) => {
+      const cleanS = String(supName || '').trim();
+      const sKey = normalizeSupplierGroupKey(cleanS);
+      if (sKey !== '__unassigned__') {
+        const prevEntry = (nextBySupplier[sKey] && typeof nextBySupplier[sKey] === 'object')
+          ? nextBySupplier[sKey]
+          : {};
+        const mergedEntry = {
+          ...prevEntry,
+          supplier_name: cleanS,
+          supplier_key: sKey,
+          supplier_email_to: toStr,
+          supplier_email_cc: ccStr,
+          email_cleared: !toStr,
+          enabled: followUpEnabled,
+          updated_at: nowIso
+        };
+        if (opts.reopenCase) {
+          delete mergedEntry.case_closed_at;
+          delete mergedEntry.case_status;
+          delete mergedEntry.auto_disposed_at;
+          delete mergedEntry.close_reason;
+        }
+        nextBySupplier[sKey] = mergedEntry;
+        if (cleanS && !this._isPlaceholderSupplier(cleanS) && !isMixedSuppliersSummary(cleanS) && (toStr || ccStr)) {
+          dirUpsertPairs.push({ supplier_name: cleanS, supplier_email_to: toStr, supplier_email_cc: ccStr });
+        }
+      }
+    };
+
+    const hasExplicitBatchArray = Array.isArray(payload.itemUpdates) && payload.itemUpdates.length > 0;
+    const hasFocusedTarget =
+      (payload.targetItemIndex !== undefined && payload.targetItemIndex !== null) ||
+      Boolean(payload.targetItemKey) ||
+      Boolean(payload.targetSupplierKey);
+
+    let nextItemsArr = existingItemsArr.map((it) => ({ ...it }));
+    let cleanSupplier = String(payload.supplier_name || '').trim();
+    let toEmailStr = String(payload.supplier_email_to ?? prevFollowUp.supplier_email_to ?? '').trim();
+    let ccEmailStr = String(payload.supplier_email_cc ?? prevFollowUp.supplier_email_cc ?? '').trim();
+
+    if (hasExplicitBatchArray && nextItemsArr.length > 0) {
+      for (const patchEntry of payload.itemUpdates) {
+        const pSup = String(patchEntry.supplier_name || '').trim();
+        const pTo = String(patchEntry.supplier_email_to ?? '').trim();
+        const pCc = String(patchEntry.supplier_email_cc ?? '').trim();
+        const targetIdxList = [];
+        if (Number.isInteger(patchEntry.itemIndex) && patchEntry.itemIndex >= 0 && patchEntry.itemIndex < nextItemsArr.length) {
+          targetIdxList.push(patchEntry.itemIndex);
+        } else if (Array.isArray(patchEntry.itemIndices)) {
+          patchEntry.itemIndices.forEach((idx) => {
+            if (Number.isInteger(idx) && idx >= 0 && idx < nextItemsArr.length) targetIdxList.push(idx);
+          });
+        } else if (patchEntry.supplierKey) {
+          nextItemsArr.forEach((it, idx) => {
+            const itKey = normalizeSupplierGroupKey(it?.supplier_name || it?.supplierName || '');
+            if (itKey === patchEntry.supplierKey) targetIdxList.push(idx);
+          });
+        }
+        for (const idx of targetIdxList) {
+          const orig = nextItemsArr[idx];
+          const iKey = String(orig.id || orig.item_id || `line_${idx + 1}`).trim();
+          const finalSup = pSup || orig.supplier_name || 'Pending Assignment';
+          nextItemsArr[idx] = {
+            ...orig,
+            supplier_name: finalSup,
+            supplierName: finalSup,
+            supplier: finalSup,
+            supplier_email_to: pTo,
+            supplier_email_cc: pCc,
+            email_cleared: !pTo
+          };
+          nextItemEmails[iKey] = {
+            supplier_name: finalSup,
+            supplier_email_to: pTo,
+            supplier_email_cc: pCc,
+            email_cleared: !pTo
+          };
+        }
+        upsertSupMetaEntry(pSup, pTo, pCc, { reopenCase: payload.reopenCase });
+      }
+      cleanSupplier = summarizeBatchSuppliers(nextItemsArr, '');
+    } else if (hasFocusedTarget && nextItemsArr.length > 1) {
+      const tIdx = Number.isInteger(payload.targetItemIndex) ? payload.targetItemIndex : -1;
+      const tKey = String(payload.targetItemKey || '').trim();
+      const tSupKey = String(payload.targetSupplierKey || '').trim();
+      const applyWholeGroup = payload.applyToSupplierGroup !== false;
+      nextItemsArr = nextItemsArr.map((orig, idx) => {
+        const iKey = String(orig.id || orig.item_id || `line_${idx + 1}`).trim();
+        const origSupKey = normalizeSupplierGroupKey(orig.supplier_name || orig.supplierName || '');
+        const matchesItem = (tIdx >= 0 && idx === tIdx) || (tKey && iKey === tKey);
+        const matchesGroup = applyWholeGroup && tSupKey && origSupKey === tSupKey && origSupKey !== '__unassigned__';
+        if (!matchesItem && !matchesGroup) return orig;
+        const nextSup = cleanSupplier || orig.supplier_name || 'Pending Assignment';
+        nextItemEmails[iKey] = {
+          supplier_name: nextSup,
+          supplier_email_to: toEmailStr,
+          supplier_email_cc: ccEmailStr,
+          email_cleared: !toEmailStr
+        };
+        return {
+          ...orig,
+          supplier_name: nextSup,
+          supplierName: nextSup,
+          supplier: nextSup,
+          supplier_email_to: toEmailStr,
+          supplier_email_cc: ccEmailStr,
+          email_cleared: !toEmailStr
+        };
+      });
+      upsertSupMetaEntry(cleanSupplier, toEmailStr, ccEmailStr, { reopenCase: payload.reopenCase });
+      cleanSupplier = summarizeBatchSuppliers(nextItemsArr, cleanSupplier);
+    } else {
+      // Single-item, unscoped, or single-supplier save
+      const hasMixedFollowUpSups = extractDistinctSuppliersFromItems(existingItemsArr).length > 1;
+      const allowCascadeFollowUpSup = Boolean(cleanSupplier) && (!hasMixedFollowUpSups || Boolean(payload.unifyMixedSuppliers));
+      if (existingItemsArr.length > 0) {
+        nextItemsArr = existingItemsArr.map((it, idx) => {
+          const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
+          if (!allowCascadeFollowUpSup && itemHasRealSup) return it;
+          const nextSup = cleanSupplier || it.supplier_name || 'Pending Assignment';
+          const iKey = String(it.id || it.item_id || `line_${idx + 1}`).trim();
+          nextItemEmails[iKey] = {
+            supplier_name: nextSup,
+            supplier_email_to: toEmailStr,
+            supplier_email_cc: ccEmailStr,
+            email_cleared: !toEmailStr
+          };
+          return {
+            ...it,
+            supplier_name: nextSup,
+            supplierName: nextSup,
+            supplier: nextSup,
+            supplier_email_to: toEmailStr,
+            supplier_email_cc: ccEmailStr,
+            email_cleared: !toEmailStr
+          };
+        });
+        if (hasMixedFollowUpSups && !payload.unifyMixedSuppliers) {
+          cleanSupplier = summarizeBatchSuppliers(nextItemsArr, cleanSupplier);
+        }
+      }
+      upsertSupMetaEntry(cleanSupplier || existing?.supplier_name, toEmailStr, ccEmailStr, { reopenCase: payload.reopenCase });
+    }
+
+    const isMixedResult = isMixedSuppliersSummary(cleanSupplier) || extractDistinctSuppliersFromItems(nextItemsArr).length > 1;
     const nextFollowUp = {
       ...prevFollowUp,
-      supplier_email_to: toEmailStr,
-      supplier_email_cc: ccEmailStr,
+      ...(!isMixedResult ? {
+        supplier_name: cleanSupplier || prevFollowUp.supplier_name || '',
+        supplier_email_to: toEmailStr,
+        supplier_email_cc: ccEmailStr,
+        ...(toEmailStr ? { supplier_email_cleared: false } : { supplier_email_cleared: true })
+      } : {
+        supplier_email_to: '',
+        supplier_email_cc: ''
+      }),
+      item_emails: nextItemEmails,
+      by_supplier: nextBySupplier,
       enabled: followUpEnabled,
       manually_disabled: !followUpEnabled,
       updated_at: nowIso
@@ -3512,16 +3674,22 @@ export const catalogService = {
       ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
       supplier_pickup: {
         ...prevPickup,
-        ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
-        supplier_email_to: toEmailStr,
-        supplier_email_cc: ccEmailStr
+        ...(!isMixedResult && cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+        ...(!isMixedResult ? {
+          supplier_email_to: toEmailStr,
+          supplier_email_cc: ccEmailStr
+        } : {})
       },
       follow_up: nextFollowUp
     };
 
     const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    const auditSummaryNote = hasExplicitBatchArray
+      ? `Updated ${payload.itemUpdates.length} batch item/supplier row(s) (${cleanSupplier}) | Auto Follow-Up: ${followUpEnabled ? 'ON (10-Day SLA)' : 'OFF'}`
+      : `Supplier: ${cleanSupplier || existing?.supplier_name || 'Pending'} | Email TO: ${toEmailStr || 'None (Internal Only)'} | Auto Follow-Up: ${followUpEnabled ? 'ON (10-Day SLA)' : 'OFF'}`;
     const updates = {
       ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+      ...(nextItemsArr.length > 0 ? { items: nextItemsArr } : {}),
       ai_document_metadata: updatedMeta,
       audit_trail: [
         ...existingAudit,
@@ -3530,29 +3698,10 @@ export const catalogService = {
           action: 'SUPPLIER_FOLLOWUP_CONFIG_UPDATED',
           stage: String(existing?.status || 'FOLLOW_UP').toUpperCase(),
           actor: payload.actorName || 'Admin',
-          note: `Supplier: ${cleanSupplier || existing?.supplier_name || 'Pending'} | Email TO: ${toEmailStr || 'None'} | Auto Follow-Up: ${followUpEnabled ? 'ON (10-Day SLA)' : 'OFF'}`
+          note: auditSummaryNote
         }
       ]
     };
-
-    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
-    const hasMixedFollowUpSups = extractDistinctSuppliersFromItems(existingItemsArr).length > 1;
-    const allowCascadeFollowUpSup = Boolean(cleanSupplier) && (!hasMixedFollowUpSups || Boolean(payload.unifyMixedSuppliers));
-
-    if (cleanSupplier && existingItemsArr.length > 0) {
-      updates.items = existingItemsArr.map((it) => {
-        const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
-        if (!allowCascadeFollowUpSup && itemHasRealSup) return it;
-        return {
-          ...it,
-          supplier_name: cleanSupplier,
-          supplier: cleanSupplier
-        };
-      });
-      if (hasMixedFollowUpSups && !payload.unifyMixedSuppliers) {
-        updates.supplier_name = summarizeBatchSuppliers(updates.items, cleanSupplier);
-      }
-    }
 
     let { data: savedRows, error: updateErr } = await supabase
       .from('rma_reports')
@@ -3568,7 +3717,7 @@ export const catalogService = {
       savedRows = retry.data;
     }
 
-    if (allowCascadeFollowUpSup && !isMixedSuppliersSummary(cleanSupplier)) {
+    if (!isMixedResult && cleanSupplier && !isMixedSuppliersSummary(cleanSupplier)) {
       try {
         await supabase.from('rma_reports').update({ supplier_name: cleanSupplier }).eq('parent_rma_id', resolvedId);
       } catch {}
@@ -3576,16 +3725,8 @@ export const catalogService = {
 
     const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
     try {
-      const supForDir = cleanSupplier || existing?.supplier_name;
-      if (supForDir && (toEmailStr || ccEmailStr)) {
-        supplierDirectoryService.upsertFromSubmission(
-          {
-            supplier_name: supForDir,
-            supplier_email_to: toEmailStr,
-            supplier_email_cc: ccEmailStr
-          },
-          { isTestMode: recordIsTest }
-        ).catch(() => {});
+      for (const pair of dirUpsertPairs) {
+        supplierDirectoryService.upsertFromSubmission(pair, { isTestMode: recordIsTest }).catch(() => {});
       }
     } catch {}
     this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });
@@ -3593,9 +3734,9 @@ export const catalogService = {
   },
 
   /**
-   * Explicitly close the 4-Step Follow-Up workflow (Picked Up / Handover Completed or Manual Case Close)
+   * Explicitly close the 4-Step Follow-Up workflow (supports per-supplier SLA close inside mixed batches or full case close)
    */
-  async closeFollowUpCase(report, { reason = 'Picked Up — Case Closed', markPickedUp = true, actorName = 'Admin' } = {}) {
+  async closeFollowUpCase(report, { reason = 'Picked Up — Case Closed', markPickedUp = true, actorName = 'Admin', targetSupplierKey = null } = {}) {
     const { existing, resolvedId, rmaNumber } = await this._resolveLatestRmaParentRow(report);
     const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
       ? { ...existing.ai_document_metadata }
@@ -3609,7 +3750,94 @@ export const catalogService = {
     const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
     const nowIso = new Date().toISOString();
 
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const distinctKeysInBatch = Array.from(new Set(
+      existingItemsArr.map((it) => normalizeSupplierGroupKey(it?.supplier_name || it?.supplierName || ''))
+    ));
+    const isScopedSupplierClose = Boolean(targetSupplierKey && distinctKeysInBatch.length > 1 && distinctKeysInBatch.includes(targetSupplierKey));
+
+    if (isScopedSupplierClose) {
+      const nextBySupplier = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object')
+        ? { ...prevFollowUp.by_supplier }
+        : {};
+      const matchedItems = existingItemsArr.filter((it) => normalizeSupplierGroupKey(it?.supplier_name || it?.supplierName || '') === targetSupplierKey);
+      const displaySup = matchedItems[0]?.supplier_name || targetSupplierKey;
+      nextBySupplier[targetSupplierKey] = {
+        ...(nextBySupplier[targetSupplierKey] || {}),
+        supplier_name: displaySup,
+        supplier_key: targetSupplierKey,
+        enabled: false,
+        ...(markPickedUp ? { picked_up_at: nowIso } : {}),
+        case_closed_at: nowIso,
+        case_status: markPickedUp ? 'picked_up_closed' : 'manual_closed',
+        close_reason: reason,
+        closed_by: actorName
+      };
+      const nextItems = existingItemsArr.map((it) => {
+        const k = normalizeSupplierGroupKey(it?.supplier_name || it?.supplierName || '');
+        if (k !== targetSupplierKey) return it;
+        return {
+          ...it,
+          ...(markPickedUp ? { picked_up_at: nowIso, status: 'picked_up' } : { case_closed_at: nowIso, status: 'resolved' })
+        };
+      });
+      const allSuppliersClosed = distinctKeysInBatch.every((k) => Boolean(nextBySupplier[k]?.case_closed_at || nextBySupplier[k]?.picked_up_at));
+      const updatedMeta = {
+        ...existingMeta,
+        ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
+        follow_up: {
+          ...prevFollowUp,
+          by_supplier: nextBySupplier,
+          ...(allSuppliersClosed ? {
+            enabled: false,
+            ...(markPickedUp ? { picked_up_at: nowIso } : {}),
+            case_closed_at: nowIso,
+            case_status: markPickedUp ? 'picked_up_closed' : 'manual_closed',
+            close_reason: reason,
+            closed_by: actorName
+          } : {})
+        }
+      };
+      const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+      const nextStatus = allSuppliersClosed
+        ? (markPickedUp && existing?.rma_type === 'supplier_outbound' ? 'picked_up' : 'resolved')
+        : existing?.status;
+      const updates = {
+        ...(allSuppliersClosed ? { status: nextStatus } : {}),
+        items: nextItems,
+        ai_document_metadata: updatedMeta,
+        audit_trail: [
+          ...existingAudit,
+          {
+            timestamp: nowIso,
+            action: 'FOLLOWUP_SUPPLIER_CLOSED',
+            stage: String(nextStatus || 'FOLLOW_UP').toUpperCase(),
+            actor: actorName,
+            note: `Closed SLA for supplier ${displaySup}: ${reason}`
+          }
+        ]
+      };
+      const { data: savedRows, error: updateErr } = await supabase.from('rma_reports').update(updates).eq('id', resolvedId).select();
+      if (updateErr) throw updateErr;
+      const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+      this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });
+      return savedRow || { ...existing, ...updates, id: resolvedId };
+    }
+
     const pickedUpTimestamp = markPickedUp ? (prevPickup.picked_up_at || prevFollowUp.picked_up_at || nowIso) : prevFollowUp.picked_up_at;
+    const nextBySupplierClosed = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object')
+      ? Object.fromEntries(
+          Object.entries(prevFollowUp.by_supplier).map(([k, v]) => [k, {
+            ...(v || {}),
+            enabled: false,
+            ...(pickedUpTimestamp ? { picked_up_at: pickedUpTimestamp } : {}),
+            case_closed_at: nowIso,
+            case_status: markPickedUp ? 'picked_up_closed' : 'manual_closed',
+            close_reason: reason,
+            closed_by: actorName
+          }])
+        )
+      : prevFollowUp.by_supplier;
     const updatedMeta = {
       ...existingMeta,
       ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
@@ -3621,6 +3849,7 @@ export const catalogService = {
       } : {}),
       follow_up: {
         ...prevFollowUp,
+        ...(nextBySupplierClosed ? { by_supplier: nextBySupplierClosed } : {}),
         enabled: false,
         ...(pickedUpTimestamp ? { picked_up_at: pickedUpTimestamp } : {}),
         case_closed_at: nowIso,

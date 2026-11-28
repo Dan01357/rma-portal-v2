@@ -1,4 +1,5 @@
 import { escapeXml, colToLetter, buildStoredZip } from './exportXlsx.js';
+import { createSupplierScopedReportView } from './followUpWorkflow.js';
 import {
   isTestRecord,
   formatDateYmd,
@@ -9,6 +10,7 @@ import {
   getReportManifestItems,
   sumManifestQuantity,
   summarizeBatchSuppliers,
+  extractDistinctSuppliersFromItems,
   isMixedSuppliersSummary,
   isRealSupplierName
 } from './rmaHelpers.js';
@@ -86,27 +88,59 @@ function buildMirrorStylesXml() {
  * Builds strict OOXML `.xlsx` bytes mirroring a New RMA Email Alert payload.
  * Preserves Field | Value mapping and optional MANIFEST LINE ITEMS table for 2-way reply ingestion.
  */
-export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = '', resolvedRecipients = null, allReports = [] } = {}) {
-  const rmaNumber = String(report.rma_number || report.rmaNumber || 'RMA-PENDING').trim();
-  const isTest = isTestRecord(report);
-  const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-    ? report.ai_document_metadata
+export function buildRmaAlertXlsxBytes(
+  report = {},
+  {
+    subject = '',
+    editUrl = '',
+    resolvedRecipients = null,
+    allReports = [],
+    supplierGroup = null,
+    forceManifestTable = false
+  } = {}
+) {
+  const activeReport = supplierGroup ? createSupplierScopedReportView(report, supplierGroup) : report;
+  const rmaNumber = String(activeReport.rma_number || activeReport.rmaNumber || 'RMA-PENDING').trim();
+  const isTest = isTestRecord(activeReport);
+  const meta = (activeReport.ai_document_metadata && typeof activeReport.ai_document_metadata === 'object')
+    ? activeReport.ai_document_metadata
     : {};
   const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
-  const items = getReportManifestItems(report, allReports);
+  const items = supplierGroup?.items?.length
+    ? supplierGroup.items
+    : getReportManifestItems(activeReport, allReports);
 
   const isMultiItemBatch = items.length > 1;
+  const distinctBatchSuppliers = extractDistinctSuppliersFromItems(items);
+  const hasMixedBatchSuppliers = !supplierGroup && distinctBatchSuppliers.length > 1;
+  const showManifestTable = Boolean(isMultiItemBatch || forceManifestTable || supplierGroup?.isBatchSlice);
   const effectiveQuantity = isMultiItemBatch
-    ? sumManifestQuantity(items, report.quantity ?? report.total_quantity ?? 1)
-    : (Number(report.quantity ?? report.total_quantity ?? 1) || 1);
-  const rawTopSupplier = String(report.supplier_name || report.supplierName || '').trim();
-  const effectiveTopSupplier = isMultiItemBatch
-    ? summarizeBatchSuppliers(items, isMixedSuppliersSummary(rawTopSupplier) ? '' : rawTopSupplier)
-    : rawTopSupplier;
+    ? sumManifestQuantity(items, activeReport.quantity ?? activeReport.total_quantity ?? 1)
+    : (Number(activeReport.quantity ?? activeReport.total_quantity ?? 1) || 1);
+  const rawTopSupplier = String(activeReport.supplier_name || activeReport.supplierName || '').trim();
+  const effectiveTopSupplier = supplierGroup
+    ? supplierGroup.supplierName
+    : (isMultiItemBatch
+        ? summarizeBatchSuppliers(items, isMixedSuppliersSummary(rawTopSupplier) ? '' : rawTopSupplier)
+        : rawTopSupplier);
 
-  const gpsAddress = getGpsAddressDisplay(report) || '';
-  const gpsMapUrl = getGpsMapUrl(report) || '';
-  const isSupplierStream = report.rma_type === 'supplier_outbound';
+  const topSupplierEmailTo = supplierGroup
+    ? (supplierGroup.supplierEmailTo || '')
+    : (hasMixedBatchSuppliers ? '' : String(followUpMeta.supplier_email_to || activeReport.supplier_email_to || '').trim());
+  const topSupplierEmailCc = supplierGroup
+    ? (supplierGroup.supplierEmailCc || '')
+    : (hasMixedBatchSuppliers ? '' : String(followUpMeta.supplier_email_cc || activeReport.supplier_email_cc || '').trim());
+
+  const effectiveUnitPrice = items.length === 1
+    ? Number(items[0]?.price ?? activeReport.price ?? 0)
+    : Number(activeReport.price || 0);
+  const effectivePriceVat = items.length === 1
+    ? Number(items[0]?.price_with_vat ?? items[0]?.priceWithVat ?? activeReport.price_with_vat ?? activeReport.priceWithVat ?? 0)
+    : Number(activeReport.price_with_vat || activeReport.priceWithVat || 0);
+
+  const gpsAddress = getGpsAddressDisplay(activeReport) || '';
+  const gpsMapUrl = getGpsMapUrl(activeReport) || '';
+  const isSupplierStream = activeReport.rma_type === 'supplier_outbound';
   const toSummary = Array.isArray(resolvedRecipients?.toList) ? resolvedRecipients.toList.join(', ') : '';
   const ccSummary = Array.isArray(resolvedRecipients?.ccList) ? resolvedRecipients.ccList.join(', ') : '';
 
@@ -114,37 +148,40 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     ['RMA Number', rmaNumber, 'Identifier — do not rename'],
     ['Test Mode', isTest ? 'YES (Sandbox)' : 'NO (Live)', 'Test vs Live isolation guard'],
     ['Logistics Stream', isSupplierStream ? 'supplier_outbound' : 'customer_inbound', 'customer_inbound or supplier_outbound'],
-    ...(isSupplierStream ? [] : [['Store / Branch', report.store_branch || '', 'Editable text']]),
-    ['Supplier / Vendor Name', effectiveTopSupplier, isMultiItemBatch ? 'Auto-summarized from item suppliers below' : 'Editable supplier / updates Supplier Directory'],
-    ['Supplier Email (To)', followUpMeta.supplier_email_to || '', 'Comma-separated emails for auto follow-ups'],
-    ['Supplier Email (CC)', followUpMeta.supplier_email_cc || '', 'Comma-separated CC emails'],
-    ['Barcode', report.barcode || '', 'Plain text barcode'],
-    ['Assigned SKU', report.code || report.sku || '', 'Editable SKU / Item Code'],
-    ['Product Description', report.name || report.productName || report.product_name || '', 'Editable product name'],
+    ...(isSupplierStream ? [] : [['Store / Branch', activeReport.store_branch || '', 'Editable text']]),
+    ['Supplier / Vendor Name', effectiveTopSupplier, isMultiItemBatch && !supplierGroup ? 'Auto-summarized from item suppliers below' : 'Editable supplier / updates Supplier Directory'],
+    ['Supplier Email (To)', topSupplierEmailTo, hasMixedBatchSuppliers ? 'Mixed-supplier batch — edit per row in MANIFEST LINE ITEMS below' : 'Comma-separated emails for auto follow-ups'],
+    ['Supplier Email (CC)', topSupplierEmailCc, hasMixedBatchSuppliers ? 'Mixed-supplier batch — edit per row in MANIFEST LINE ITEMS below' : 'Comma-separated CC emails'],
+    ['Barcode', activeReport.barcode || '', 'Plain text barcode'],
+    ['Assigned SKU', activeReport.code || activeReport.sku || '', 'Editable SKU / Item Code'],
+    ['Product Description', activeReport.name || activeReport.productName || activeReport.product_name || '', 'Editable product name'],
     ['Quantity', effectiveQuantity, isMultiItemBatch ? 'Auto-calculated sum of MANIFEST LINE ITEMS Qty on reply' : 'Numeric quantity', 'number'],
-    ['Packaging Unit', report.unit_name || report.unitName || 'pc', 'pc / pack / box / case'],
-    ['Unit Price (PHP)', Number(report.price || 0), 'Net unit price', 'currency'],
-    ['Price w/ VAT (PHP)', Number(report.price_with_vat || report.priceWithVat || 0), 'VAT-inclusive unit price', 'currency'],
-    ['Defect / Return Reason', report.reason || '', 'Editable defect reason'],
-    ['Explanation / Notes', report.explanation || report.notes || '', 'Editable detailed explanation / notes'],
-    ['Sales Invoice (SI) #', report.si_number || '', 'Editable SI number'],
-    ['Delivery Receipt (DR) #', report.dr_number || report.invoice_dr_number || '', 'Editable DR number'],
-    ['Purchase Order (PO) #', report.po_number || '', 'Editable PO number'],
-    ['Batch / Lot #', report.batch_lot_number || '', 'Editable batch / lot number'],
-    ['Expiry Date (YYYY-MM-DD)', formatDateYmd(report.expiry_date) || '', 'Format: YYYY-MM-DD'],
-    ['Warehouse Location', report.warehouse_location || '', 'Editable rack / bin location'],
-    ['Account Executive (AE)', report.ae_name || '', 'Optional AE Name'],
-    ['AE Email', report.ae_email || '', 'Optional AE Email'],
-    ['Reported By', report.reporter_name || report.reported_by || '', 'Reporter full name'],
-    ['Contact Number/Email', report.reporter_contact || '', 'Phone number or email'],
-    ['Submission Date (YYYY-MM-DD HH:mm)', formatDateTimeYmdHm(report.created_at || new Date()), 'Asia/Manila timestamp'],
-    ['GPS Location', gpsAddress || (report.gps_latitude && report.gps_longitude ? `${report.gps_latitude}, ${report.gps_longitude}` : 'No GPS'), 'Clear Street / Barangay / City / ZIP'],
+    ['Packaging Unit', activeReport.unit_name || activeReport.unitName || 'pc', 'pc / pack / box / case'],
+    ['Unit Price (PHP)', effectiveUnitPrice, 'Net unit price', 'currency'],
+    ['Price w/ VAT (PHP)', effectivePriceVat, 'VAT-inclusive unit price', 'currency'],
+    ['Defect / Return Reason', activeReport.reason || '', 'Editable defect reason'],
+    ['Explanation / Notes', activeReport.explanation || activeReport.notes || '', 'Editable detailed explanation / notes'],
+    ['Sales Invoice (SI) #', activeReport.si_number || '', 'Editable SI number'],
+    ['Delivery Receipt (DR) #', activeReport.dr_number || activeReport.invoice_dr_number || '', 'Editable DR number'],
+    ['Purchase Order (PO) #', activeReport.po_number || '', 'Editable PO number'],
+    ['Batch / Lot #', activeReport.batch_lot_number || '', 'Editable batch / lot number'],
+    ['Expiry Date (YYYY-MM-DD)', formatDateYmd(activeReport.expiry_date) || '', 'Format: YYYY-MM-DD'],
+    ['Warehouse Location', activeReport.warehouse_location || '', 'Editable rack / bin location'],
+    ['Account Executive (AE)', activeReport.ae_name || '', 'Optional AE Name'],
+    ['AE Email', activeReport.ae_email || '', 'Optional AE Email'],
+    ['Reported By', activeReport.reporter_name || activeReport.reported_by || '', 'Reporter full name'],
+    ['Contact Number/Email', activeReport.reporter_contact || '', 'Phone number or email'],
+    ['Submission Date (YYYY-MM-DD HH:mm)', formatDateTimeYmdHm(activeReport.created_at || new Date()), 'Asia/Manila timestamp'],
+    ['GPS Location', gpsAddress || (activeReport.gps_latitude && activeReport.gps_longitude ? `${activeReport.gps_latitude}, ${activeReport.gps_longitude}` : 'No GPS'), 'Clear Street / Barangay / City / ZIP'],
     ['GPS Maps Link', gpsMapUrl, 'Google Maps search URL'],
-    ['Google Drive Folder', report.google_drive_folder_url || '', 'Attached photos & paperwork folder'],
+    ['Google Drive Folder', activeReport.google_drive_folder_url || '', 'Attached photos & paperwork folder'],
     ['Email Subject', subject || `${isTest ? '[TEST] ' : ''}[RMA Alert] ${rmaNumber}`, 'Email alert mirror subject'],
     ['Alert Recipients (To)', toSummary, 'Authorized TO list'],
     ['Alert Recipients (CC)', ccSummary, 'Authorized CC list'],
-    ['Online RMA Editor Link', editUrl || '', 'Never-expiring To/CC portal edit link']
+    ['Online RMA Editor Link', editUrl || '', 'Never-expiring To/CC portal edit link'],
+    ...(supplierGroup?.isBatchSlice
+      ? [['Batch Supplier Scope', `${supplierGroup.supplierName} | Line Refs: ${supplierGroup.parentLineRefs.join(', ')}`, 'Do not edit — scopes reply updates strictly to these items']]
+      : [])
   ];
 
   const rowsXml = [];
@@ -176,12 +213,26 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     rIdx += 1;
   });
 
-  // Manifest table when multi-item batch return (2+ lines)
-  if (items.length > 1) {
+  // Manifest table when multi-item batch return (2+ lines) or scoped batch slice
+  if (showManifestTable) {
     rIdx += 1;
     rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, `MANIFEST LINE ITEMS (${items.length})`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}${makeCellXml(`D${rIdx}`, '', 1)}</row>`);
     rIdx += 1;
-    const mHeaders = ['Serial No.', 'Supplier Name', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
+    const mHeaders = [
+      'Serial No.',
+      'Supplier Name',
+      'Barcode',
+      'Assigned SKU',
+      'Product Description',
+      'Quantity',
+      'Packaging Unit',
+      'Expiry Date (YYYY-MM-DD)',
+      'Defect Reason',
+      'Explanation',
+      'Supplier Email (To)',
+      'Supplier Email (CC)',
+      'Parent Line Ref #'
+    ];
     rowsXml.push(
       `<row r="${rIdx}" ht="22" customHeight="1">` +
       mHeaders.map((h, i) => makeCellXml(`${colToLetter(i)}${rIdx}`, h, 3, 'text')).join('') +
@@ -189,11 +240,24 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     );
     rIdx += 1;
     items.forEach((it, idx) => {
-      const itemSup = isRealSupplierName(it.supplier_name)
-        ? String(it.supplier_name).trim()
-        : (isRealSupplierName(it.supplierName)
-            ? String(it.supplierName).trim()
-            : (!isMixedSuppliersSummary(report.supplier_name) ? String(report.supplier_name || '').trim() : ''));
+      const itemSup = isRealSupplierName(it._effectiveSupplierName)
+        ? String(it._effectiveSupplierName).trim()
+        : (isRealSupplierName(it.supplier_name)
+            ? String(it.supplier_name).trim()
+            : (isRealSupplierName(it.supplierName)
+                ? String(it.supplierName).trim()
+                : (!isMixedSuppliersSummary(activeReport.supplier_name) ? String(activeReport.supplier_name || '').trim() : '')));
+      const itemTo = String(
+        it.supplier_email_to ??
+        (supplierGroup && !supplierGroup.isUnassignedBucket ? supplierGroup.supplierEmailTo : '') ??
+        ''
+      ).trim();
+      const itemCc = String(
+        it.supplier_email_cc ??
+        (supplierGroup && !supplierGroup.isUnassignedBucket ? supplierGroup.supplierEmailCc : '') ??
+        ''
+      ).trim();
+      const parentLineRef = Number(it._parentLineRef || (idx + 1));
       const vals = [
         [idx + 1, 'number', 2],
         [itemSup, 'text', 5],
@@ -203,8 +267,11 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
         [Math.max(1, Number(it.quantity ?? it.qty) || 1), 'number', 5],
         [it.unit_name || it.unit || 'pc', 'text', 5],
         [formatDateYmd(it.expiry_date) || '', 'text', 5],
-        [it.reason || report.reason || '', 'text', 5],
-        [it.explanation || '', 'text', 5]
+        [it.reason || activeReport.reason || '', 'text', 5],
+        [it.explanation || '', 'text', 5],
+        [itemTo, 'text', 5],
+        [itemCc, 'text', 5],
+        [parentLineRef, 'number', 2]
       ];
       rowsXml.push(
         `<row r="${rIdx}" ht="20" customHeight="1">` +
@@ -215,9 +282,9 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     });
   }
 
-  const maxCols = items.length > 1 ? 10 : 4;
+  const maxCols = showManifestTable ? 13 : 4;
   const maxRow = rIdx - 1;
-  const colWidths = [11, 32, 46, 40, 36, 12, 16, 22, 24, 34].slice(0, maxCols);
+  const colWidths = [11, 32, 46, 40, 36, 12, 16, 22, 24, 34, 34, 30, 16].slice(0, maxCols);
   const colsXml = `<cols>${colWidths.map((w, idx) => `<col min="${idx + 1}" max="${idx + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
 
   const sheetXml = [
@@ -291,7 +358,7 @@ function uint8ToBase64(bytes) {
  * Generates an email-ready base64 `.xlsx` attachment object for `sendRMANotification`.
  */
 export function buildRmaAlertXlsxAttachment(report = {}, options = {}) {
-  const filename = buildRmaAlertFilename(options.subject || report.rma_number || 'RMA Alert');
+  const filename = options.filename || buildRmaAlertFilename(options.subject || report.rma_number || 'RMA Alert');
   const bytes = buildRmaAlertXlsxBytes(report, options);
   return {
     filename,

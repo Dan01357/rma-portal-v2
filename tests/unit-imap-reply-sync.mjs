@@ -581,5 +581,60 @@ test('reorder status is strictly independent from 4-Choice Outcome (never marks 
   assert.equal(resolveReorderStatus(defaultItem).label, 'Pending');
 });
 
+test('scoped per-supplier batch .xlsx preserves Col A..J + adds Col K..M (Supplier Email & Parent Line Ref #)', async () => {
+  const { groupReportItemsBySupplierForFollowUp, resolveReportPartyAndEmails } = await import('../src/utils/followUpWorkflow.js');
+  const mixedBatch = {
+    id: 990,
+    rma_number: 'RMA-TEST-2026-0990-SPLIT',
+    rma_type: 'supplier_outbound',
+    is_parent: true,
+    supplier_name: 'Multiple Suppliers (Acme Corp, Suysing)',
+    items: [
+      { id: 'line-a', name: 'Item One', barcode: '10001', code: 'SKU1', quantity: 2, unit_name: 'pc', price: 50, supplier_name: 'Acme Corp', supplier_email_to: 'acme@vendor.test.ph' },
+      { id: 'line-b', name: 'Item Two', barcode: '10002', code: 'SKU2', quantity: 3, unit_name: 'box', price: 99, supplier_name: 'Suysing', supplier_email_to: 'claims@suysing.test.ph' }
+    ],
+    ai_document_metadata: {
+      is_test: true,
+      follow_up: {
+        enabled: true,
+        supplier_email_to: ''
+      }
+    }
+  };
+
+  // Verify empty string in follow_up does not shadow pickup email
+  const fallbackCheck = resolveReportPartyAndEmails({
+    supplier_name: 'Acme Corp',
+    ai_document_metadata: {
+      follow_up: { supplier_email_to: '' },
+      supplier_pickup: { supplier_email_to: 'pickup-fallback@acme.test.ph' }
+    }
+  });
+  assert.equal(fallbackCheck.supplierEmailTo, 'pickup-fallback@acme.test.ph');
+
+  const groups = groupReportItemsBySupplierForFollowUp(mixedBatch, [], []);
+  assert.equal(groups.length, 2);
+  const suysingGroup = groups.find((g) => g.supplierName === 'Suysing');
+  assert.ok(suysingGroup);
+
+  const bytes = buildRmaAlertXlsxBytes(mixedBatch, {
+    subject: '[TEST] Scoped Follow-Up',
+    supplierGroup: suysingGroup,
+    forceManifestTable: true
+  });
+  const parsed = extractRmaUpdatesFromXlsxBuffer(Buffer.from(bytes), {
+    subjectHint: '[TEST] Scoped Follow-Up'
+  });
+
+  assert.equal(parsed.patch.supplier_name, 'Suysing');
+  assert.equal(parsed.patch.supplier_email_to, 'claims@suysing.test.ph');
+  assert.equal(parsed.batchScope?.lineRefs?.[0], 2);
+  assert.equal(parsed.manifestUpdates.length, 1);
+  assert.equal(parsed.manifestUpdates[0].parentLineRef, 2);
+  assert.equal(parsed.manifestUpdates[0].supplier_email_to, 'claims@suysing.test.ph');
+  assert.equal(parsed.manifestUpdates[0].quantity, 3);
+});
+
+
 
 

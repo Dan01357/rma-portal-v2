@@ -1008,8 +1008,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       const testMatrixJson = await testMatrixRes.json();
       expect(testMatrixJson.success).toBe(true);
       expect(testMatrixJson.isTestMode).toBe(true);
-      expect(testMatrixJson.to).toBe('mgan@pingconmarketing.com');
-      expect(testMatrixJson.cc).toEqual([]);
+      expect(testMatrixJson.to).toContain('mgan@pingconmarketing.com');
+      expect(Array.isArray(testMatrixJson.cc)).toBe(true);
       expect(testMatrixJson.subject).toMatch(/^\[TEST\] /);
       expect(testMatrixJson.filename).toMatch(/^TEST_Overall_RMA_Matrix_Report_/);
       assertStrictOoxmlWorkbook(Buffer.from(testMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });

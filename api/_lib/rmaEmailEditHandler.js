@@ -7,6 +7,7 @@ import {
   isRealSupplierName,
   extractDistinctSuppliersFromItems
 } from '../../src/utils/rmaHelpers.js';
+import { normalizeSupplierGroupKey } from '../../src/utils/followUpWorkflow.js';
 
 const INVITES_SETTINGS_KEY = 'customer_rma_invites_store';
 
@@ -419,6 +420,8 @@ export async function handleRmaEmailEdit(req, res) {
         supplier_name: resolvedItemSup,
         supplierName: resolvedItemSup,
         supplier: resolvedItemSup,
+        supplier_email_to: String(it.supplier_email_to ?? '').trim(),
+        supplier_email_cc: String(it.supplier_email_cc ?? '').trim(),
         quantity: Number.isFinite(qtyVal) && qtyVal >= 1 ? Math.round(qtyVal) : 1,
         unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
         price: Number.isFinite(netVal) && netVal >= 0 ? Number(netVal.toFixed(2)) : 0,
@@ -434,7 +437,7 @@ export async function handleRmaEmailEdit(req, res) {
     updates.total_quantity = totalBatchQty;
     updates.quantity = totalBatchQty;
     updates.supplier_name = summarizeBatchSuppliers(sanitizedItems, fallbackSingleSup);
-  } else if (Array.isArray(report.items) && report.items.length > 0 && (updates.supplier_name || updates.expiry_date !== undefined)) {
+  } else if (Array.isArray(report.items) && report.items.length > 0 && (updates.supplier_name || updates.expiry_date !== undefined || u.supplier_email_to !== undefined || u.supplier_email_cc !== undefined)) {
     const existingDistinctSups = extractDistinctSuppliersFromItems(report.items);
     const hasMixedSups = existingDistinctSups.length > 1;
     updates.items = report.items.map((it) => {
@@ -442,6 +445,8 @@ export async function handleRmaEmailEdit(req, res) {
       return {
         ...it,
         ...(shouldCascadeSup ? { supplier_name: updates.supplier_name, supplierName: updates.supplier_name, supplier: updates.supplier_name } : {}),
+        ...(u.supplier_email_to !== undefined && !hasMixedSups ? { supplier_email_to: String(u.supplier_email_to || '').trim() } : {}),
+        ...(u.supplier_email_cc !== undefined && !hasMixedSups ? { supplier_email_cc: String(u.supplier_email_cc || '').trim() } : {}),
         ...(updates.expiry_date !== undefined ? { expiry_date: updates.expiry_date } : {})
       };
     });
@@ -450,9 +455,38 @@ export async function handleRmaEmailEdit(req, res) {
   const prevMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
     ? report.ai_document_metadata
     : {};
+  const prevFollowUp = (prevMeta.follow_up && typeof prevMeta.follow_up === 'object') ? prevMeta.follow_up : {};
+  const nextItemEmails = (prevFollowUp.item_emails && typeof prevFollowUp.item_emails === 'object') ? { ...prevFollowUp.item_emails } : {};
+  const nextBySup = (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object') ? { ...prevFollowUp.by_supplier } : {};
+
+  if (Array.isArray(updates.items) && updates.items.length > 0) {
+    updates.items.forEach((it, idx) => {
+      const iKey = String(it.id || it.item_id || `line_${idx + 1}`).trim();
+      const sName = String(it.supplier_name || '').trim();
+      const sKey = normalizeSupplierGroupKey(sName);
+      const sTo = String(it.supplier_email_to || '').trim();
+      const sCc = String(it.supplier_email_cc || '').trim();
+      if (sTo || sCc) {
+        nextItemEmails[iKey] = { supplier_name: sName, supplier_email_to: sTo, supplier_email_cc: sCc };
+        if (sKey !== '__unassigned__') {
+          nextBySup[sKey] = { ...(nextBySup[sKey] || {}), supplier_name: sName, supplier_key: sKey, supplier_email_to: sTo, supplier_email_cc: sCc };
+        }
+      }
+    });
+  }
+  const singleSupTo = u.supplier_email_to !== undefined ? String(u.supplier_email_to || '').trim() : prevFollowUp.supplier_email_to;
+  const singleSupCc = u.supplier_email_cc !== undefined ? String(u.supplier_email_cc || '').trim() : prevFollowUp.supplier_email_cc;
+
   updates.ai_document_metadata = {
     ...prevMeta,
     ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
+    follow_up: {
+      ...prevFollowUp,
+      ...(u.supplier_email_to !== undefined ? { supplier_email_to: singleSupTo || '', supplier_email_cleared: !singleSupTo } : {}),
+      ...(u.supplier_email_cc !== undefined ? { supplier_email_cc: singleSupCc || '' } : {}),
+      item_emails: nextItemEmails,
+      by_supplier: nextBySup
+    },
     last_email_edit: {
       edited_by_email: userEmail,
       edited_at: nowIso,

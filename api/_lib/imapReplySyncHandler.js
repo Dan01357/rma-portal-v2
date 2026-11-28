@@ -16,6 +16,12 @@ import {
   parseSupplierDirectoryValue,
   isBlockedLiveDirectoryContact
 } from '../../src/utils/supplierDirectoryHelpers.js';
+import {
+  normalizeSupplierGroupKey,
+  buildSupplierDirectoryMap,
+  lookupSupplierDirectoryContact,
+  splitEmailStringOrList
+} from '../../src/utils/followUpWorkflow.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -257,8 +263,11 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
   if (manifestHeaderRowIdx >= 0 && manifestHeaderRowIdx < rows.length) {
     const headerRow = Array.from(rows[manifestHeaderRowIdx] || [], (h) => String(h ?? '').trim().toLowerCase());
     const colMap = {
-      line: headerRow.findIndex((h) => h && (h.includes('serial') || h.includes('line') || h === 'sn')),
-      supplier_name: headerRow.findIndex((h) => h.includes('supplier') || h.includes('vendor')),
+      line: headerRow.findIndex((h) => h && (h.includes('serial') || h === 'sn' || /^line\s*(?:#|no)?$/i.test(h))),
+      parent_line_ref: headerRow.findIndex((h) => h.includes('parent line') || h.includes('line ref')),
+      supplier_name: headerRow.findIndex((h) => (h.includes('supplier') || h.includes('vendor')) && !h.includes('email')),
+      supplier_email_to: headerRow.findIndex((h) => (h.includes('supplier') || h.includes('vendor')) && h.includes('email') && h.includes('to')),
+      supplier_email_cc: headerRow.findIndex((h) => (h.includes('supplier') || h.includes('vendor')) && h.includes('email') && h.includes('cc')),
       barcode: headerRow.findIndex((h) => h.includes('barcode')),
       code: headerRow.findIndex((h) => h.includes('sku') || h.includes('item code')),
       name: headerRow.findIndex((h) => h.includes('description') || h.includes('product')),
@@ -275,6 +284,8 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
       if (!row.some((c) => String(c ?? '').trim())) continue;
       const rawSerial = colMap.line >= 0 ? parseInt(row[colMap.line], 10) : NaN;
       const serialNo = Number.isFinite(rawSerial) && rawSerial > 0 ? rawSerial : (manifestUpdates.length + 1);
+      const rawParentRef = colMap.parent_line_ref >= 0 ? parseInt(row[colMap.parent_line_ref], 10) : NaN;
+      const parentLineRef = Number.isFinite(rawParentRef) && rawParentRef > 0 ? rawParentRef : null;
       const rawPrice = colMap.price >= 0 && String(row[colMap.price] ?? '').trim() !== ''
         ? Number(String(row[colMap.price]).replace(/[,\s]/g, ''))
         : undefined;
@@ -283,8 +294,11 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
         : undefined;
       manifestUpdates.push({
         serialNo,
-        lineIndex: serialNo - 1,
+        lineIndex: (parentLineRef || serialNo) - 1,
+        parentLineRef,
         supplier_name: colMap.supplier_name >= 0 ? String(row[colMap.supplier_name] ?? '').trim() : '',
+        supplier_email_to: colMap.supplier_email_to >= 0 ? String(row[colMap.supplier_email_to] ?? '').trim() : undefined,
+        supplier_email_cc: colMap.supplier_email_cc >= 0 ? String(row[colMap.supplier_email_cc] ?? '').trim() : undefined,
         barcode: colMap.barcode >= 0 ? String(row[colMap.barcode] ?? '').trim() : '',
         code: colMap.code >= 0 ? String(row[colMap.code] ?? '').trim() : '',
         name: colMap.name >= 0 ? String(row[colMap.name] ?? '').trim() : '',
@@ -354,13 +368,29 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
     ae_email: getField('AE Email')
   };
 
+  const batchScopeRaw = String(getField('Batch Supplier Scope') || '').trim();
+  let batchScope = null;
+  if (batchScopeRaw) {
+    const [supPart, refsPart] = batchScopeRaw.split('|').map((s) => s.trim());
+    const refsMatch = (refsPart || batchScopeRaw).match(/line\s*refs?\s*:\s*([0-9,\s]+)/i);
+    const lineRefs = refsMatch
+      ? refsMatch[1].split(',').map((n) => parseInt(n.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+    batchScope = {
+      raw: batchScopeRaw,
+      supplierName: supPart || '',
+      lineRefs
+    };
+  }
+
   return {
     isRmaWorksheet,
     rmaNumber,
     isTestHint,
     fieldMap,
     patch,
-    manifestUpdates
+    manifestUpdates,
+    batchScope
   };
 }
 
@@ -489,6 +519,39 @@ export function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet,
   if (reportIsTest && testEmailsSet?.has(clean)) return true;
   if (report?.ae_email && cleanEmailAddr(report.ae_email) === clean) return true;
   if (report?.reporter_contact && cleanEmailAddr(report.reporter_contact) === clean) return true;
+
+  const assignedSupplierEmails = new Set();
+  const collectEmails = (raw) => {
+    splitEmailStringOrList(raw).forEach((e) => assignedSupplierEmails.add(e));
+  };
+  const fu = report?.ai_document_metadata?.follow_up;
+  const pickup = report?.ai_document_metadata?.supplier_pickup;
+  collectEmails(report?.supplier_email_to);
+  collectEmails(report?.supplier_email_cc);
+  collectEmails(fu?.supplier_email_to);
+  collectEmails(fu?.supplier_email_cc);
+  collectEmails(pickup?.supplier_email_to);
+  collectEmails(pickup?.supplier_email_cc);
+  if (fu?.by_supplier && typeof fu.by_supplier === 'object') {
+    Object.values(fu.by_supplier).forEach((entry) => {
+      collectEmails(entry?.supplier_email_to);
+      collectEmails(entry?.supplier_email_cc);
+    });
+  }
+  if (fu?.item_emails && typeof fu.item_emails === 'object') {
+    Object.values(fu.item_emails).forEach((entry) => {
+      collectEmails(entry?.supplier_email_to);
+      collectEmails(entry?.supplier_email_cc);
+    });
+  }
+  if (Array.isArray(report?.items)) {
+    report.items.forEach((it) => {
+      collectEmails(it?.supplier_email_to);
+      collectEmails(it?.supplier_email_cc);
+    });
+  }
+  if (assignedSupplierEmails.has(clean)) return true;
+
   const domain = clean.split('@')[1] || '';
   return ['pingconmarketing.com', 'a2z2go.net', 'keysysincorporated.com'].includes(domain);
 }
@@ -614,6 +677,36 @@ export async function applyRmaXlsxUpdates({
     supabase.from('rma_items').select('*').eq('rma_report_id', existing.id)
   ]);
 
+  const activeDirKey = getSupplierDirectorySettingsKey(existingIsTest);
+  const activeDirRow = (settingsRows || []).find((s) => s.key === activeDirKey);
+  const activeDirMap = buildSupplierDirectoryMap(activeDirRow?.value);
+
+  const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
+    ? existing.items
+    : (Array.isArray(childReportRows) && childReportRows.length > 0
+        ? childReportRows
+        : (Array.isArray(rmaItemRows) && rmaItemRows.length > 0 ? rmaItemRows : []));
+
+  const scopeLineRefs = Array.isArray(parsed.batchScope?.lineRefs) ? parsed.batchScope.lineRefs : [];
+  const hasExplicitScope = Boolean(
+    scopeLineRefs.length > 0 ||
+    parsed.manifestUpdates.some((m) => Number.isFinite(m.parentLineRef) && m.parentLineRef > 0)
+  );
+  const scopedIndicesSet = (() => {
+    if (baseItemsList.length <= 1) return null;
+    if (scopeLineRefs.length > 0) {
+      return new Set(scopeLineRefs.map((n) => n - 1).filter((idx) => idx >= 0 && idx < baseItemsList.length));
+    }
+    const explicitRefs = parsed.manifestUpdates
+      .map((m) => m.parentLineRef)
+      .filter((n) => Number.isFinite(n) && n > 0 && n <= baseItemsList.length);
+    if (explicitRefs.length > 0 && explicitRefs.length < baseItemsList.length) {
+      return new Set(explicitRefs.map((n) => n - 1));
+    }
+    return null;
+  })();
+  const isScopedMultiItemReply = Boolean(scopedIndicesSet && scopedIndicesSet.size > 0 && baseItemsList.length > 1);
+
   const patch = parsed.patch || {};
   const updates = {};
   const changedFields = [];
@@ -631,12 +724,15 @@ export async function applyRmaXlsxUpdates({
   if (existing.rma_type !== 'supplier_outbound') {
     compareAssignStr('store_branch', patch.store_branch);
   }
-  compareAssignStr('supplier_name', patch.supplier_name);
-  compareAssignStr('code', patch.code);
-  compareAssignStr('name', patch.name);
-  compareAssignStr('unit_name', patch.unit_name);
-  compareAssignStr('reason', patch.reason);
-  compareAssignStr('explanation', patch.explanation);
+  if (!isScopedMultiItemReply) {
+    compareAssignStr('supplier_name', patch.supplier_name);
+    compareAssignStr('code', patch.code);
+    compareAssignStr('name', patch.name);
+    compareAssignStr('unit_name', patch.unit_name);
+    compareAssignStr('reason', patch.reason);
+    compareAssignStr('explanation', patch.explanation);
+    compareAssignStr('expiry_date', patch.expiry_date);
+  }
   compareAssignStr('si_number', patch.si_number);
   compareAssignStr('dr_number', patch.dr_number);
   compareAssignStr('po_number', patch.po_number);
@@ -652,11 +748,13 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  if (patch.expiry_date !== undefined && String(patch.expiry_date).trim()) {
+  if (!isScopedMultiItemReply && patch.expiry_date !== undefined && String(patch.expiry_date).trim()) {
     const ymd = normalizeYmdInput(patch.expiry_date);
     if (ymd && ymd !== String(existing.expiry_date || '').slice(0, 10)) {
       updates.expiry_date = ymd;
-      changedFields.push('expiry_date');
+      if (!changedFields.includes('expiry_date')) changedFields.push('expiry_date');
+    } else {
+      delete updates.expiry_date;
     }
   }
 
@@ -668,35 +766,124 @@ export async function applyRmaXlsxUpdates({
       changedFields.push(col);
     }
   };
-  assignNum('quantity', patch.quantity);
-  assignNum('price', patch.price);
-  assignNum('price_with_vat', patch.price_with_vat);
+  if (!isScopedMultiItemReply) {
+    assignNum('quantity', patch.quantity);
+    assignNum('price', patch.price);
+    assignNum('price_with_vat', patch.price_with_vat);
+  }
+
+  const resolveEmailsWithDirAutoFill = ({ nextSup, prevSup, incomingTo, incomingCc, prevTo, prevCc }) => {
+    const cleanNextTo = incomingTo !== undefined ? String(incomingTo).trim() : '';
+    const cleanNextCc = incomingCc !== undefined ? String(incomingCc).trim() : '';
+    const cleanPrevTo = String(prevTo || '').trim();
+    const cleanPrevCc = String(prevCc || '').trim();
+    const supChanged = Boolean(
+      isRealSupplierName(nextSup) &&
+      normalizeSupplierGroupKey(nextSup) !== normalizeSupplierGroupKey(prevSup)
+    );
+    const toExplicitlyEdited = incomingTo !== undefined && cleanNextTo !== cleanPrevTo;
+    const ccExplicitlyEdited = incomingCc !== undefined && cleanNextCc !== cleanPrevCc;
+
+    if (toExplicitlyEdited || ccExplicitlyEdited) {
+      return {
+        emailTo: toExplicitlyEdited ? cleanNextTo : cleanPrevTo,
+        emailCc: ccExplicitlyEdited ? cleanNextCc : cleanPrevCc,
+        explicitClear: toExplicitlyEdited && !cleanNextTo
+      };
+    }
+
+    if (supChanged) {
+      const dirMatch = lookupSupplierDirectoryContact(activeDirMap, nextSup);
+      if (dirMatch) {
+        return {
+          emailTo: dirMatch.emailToList.join(', '),
+          emailCc: dirMatch.emailCcList.join(', '),
+          explicitClear: false
+        };
+      }
+      return { emailTo: '', emailCc: '', explicitClear: true };
+    }
+
+    if (!cleanPrevTo && isRealSupplierName(nextSup)) {
+      const dirMatch = lookupSupplierDirectoryContact(activeDirMap, nextSup);
+      if (dirMatch) {
+        return {
+          emailTo: dirMatch.emailToList.join(', '),
+          emailCc: cleanPrevCc || dirMatch.emailCcList.join(', '),
+          explicitClear: false
+        };
+      }
+    }
+
+    return { emailTo: cleanPrevTo, emailCc: cleanPrevCc, explicitClear: false };
+  };
 
   const prevMeta = (existing.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
     ? existing.ai_document_metadata
     : {};
   const prevFollowUp = (prevMeta.follow_up && typeof prevMeta.follow_up === 'object') ? prevMeta.follow_up : {};
-  const nextFollowUp = { ...prevFollowUp };
+  const prevPickup = (prevMeta.supplier_pickup && typeof prevMeta.supplier_pickup === 'object') ? prevMeta.supplier_pickup : {};
+  const nextFollowUp = {
+    ...prevFollowUp,
+    item_emails: (prevFollowUp.item_emails && typeof prevFollowUp.item_emails === 'object') ? { ...prevFollowUp.item_emails } : {},
+    by_supplier: (prevFollowUp.by_supplier && typeof prevFollowUp.by_supplier === 'object') ? { ...prevFollowUp.by_supplier } : {}
+  };
+  let nextPickup = prevMeta.supplier_pickup ? { ...prevPickup } : null;
   let metaChanged = false;
 
-  if (patch.supplier_email_to !== undefined && String(patch.supplier_email_to).trim() !== String(prevFollowUp.supplier_email_to || '').trim()) {
-    if (String(patch.supplier_email_to).trim()) {
-      nextFollowUp.supplier_email_to = String(patch.supplier_email_to).trim();
-      changedFields.push('supplier_email_to');
+  if (!isScopedMultiItemReply) {
+    const prevTopSup = String(existing.supplier_name || '').trim();
+    const nextTopSup = String(updates.supplier_name || prevTopSup).trim();
+    const prevTopTo = String(prevFollowUp.supplier_email_to || prevPickup.supplier_email_to || '').trim();
+    const prevTopCc = String(prevFollowUp.supplier_email_cc || prevPickup.supplier_email_cc || '').trim();
+    const resolvedTopEmails = resolveEmailsWithDirAutoFill({
+      nextSup: nextTopSup,
+      prevSup: prevTopSup,
+      incomingTo: patch.supplier_email_to,
+      incomingCc: patch.supplier_email_cc,
+      prevTo: prevTopTo,
+      prevCc: prevTopCc
+    });
+
+    if (resolvedTopEmails.emailTo !== prevTopTo || resolvedTopEmails.explicitClear) {
+      if (resolvedTopEmails.emailTo || (patch.supplier_email_to !== undefined && prevTopTo) || resolvedTopEmails.explicitClear) {
+        nextFollowUp.supplier_email_to = resolvedTopEmails.emailTo;
+        if (resolvedTopEmails.explicitClear && !resolvedTopEmails.emailTo) {
+          nextFollowUp.supplier_email_cleared = true;
+        } else {
+          delete nextFollowUp.supplier_email_cleared;
+        }
+        if (nextPickup) nextPickup.supplier_email_to = resolvedTopEmails.emailTo;
+        if (!changedFields.includes('supplier_email_to')) changedFields.push('supplier_email_to');
+        metaChanged = true;
+      }
+    }
+    if (resolvedTopEmails.emailCc !== prevTopCc) {
+      nextFollowUp.supplier_email_cc = resolvedTopEmails.emailCc;
+      if (nextPickup) nextPickup.supplier_email_cc = resolvedTopEmails.emailCc;
+      if (!changedFields.includes('supplier_email_cc')) changedFields.push('supplier_email_cc');
       metaChanged = true;
     }
-  }
-  if (patch.supplier_email_cc !== undefined && String(patch.supplier_email_cc).trim() !== String(prevFollowUp.supplier_email_cc || '').trim()) {
-    if (String(patch.supplier_email_cc).trim()) {
-      nextFollowUp.supplier_email_cc = String(patch.supplier_email_cc).trim();
-      changedFields.push('supplier_email_cc');
-      metaChanged = true;
+    if (nextTopSup && isRealSupplierName(nextTopSup)) {
+      nextFollowUp.supplier_name = nextTopSup;
+      const supKey = normalizeSupplierGroupKey(nextTopSup);
+      if (supKey !== '__unassigned__' && (resolvedTopEmails.emailTo || resolvedTopEmails.emailCc || nextFollowUp.by_supplier[supKey])) {
+        nextFollowUp.by_supplier[supKey] = {
+          ...(nextFollowUp.by_supplier[supKey] || {}),
+          supplier_name: nextTopSup,
+          supplier_email_to: nextFollowUp.supplier_email_to ?? prevTopTo,
+          supplier_email_cc: nextFollowUp.supplier_email_cc ?? prevTopCc,
+          ...(resolvedTopEmails.explicitClear && !nextFollowUp.supplier_email_to ? { email_cleared: true } : { email_cleared: false })
+        };
+        metaChanged = true;
+      }
     }
   }
+
   if (
     prevFollowUp.manually_disabled !== true &&
     nextFollowUp.enabled !== true &&
-    (nextFollowUp.supplier_email_to || patch.supplier_name || parsed.manifestUpdates.some((m) => m.supplier_name))
+    (nextFollowUp.supplier_email_to || patch.supplier_name || parsed.manifestUpdates.some((m) => m.supplier_name || m.supplier_email_to))
   ) {
     nextFollowUp.enabled = true;
     if (!nextFollowUp.started_at) {
@@ -705,27 +892,57 @@ export async function applyRmaXlsxUpdates({
     metaChanged = true;
   }
 
-  // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
-  const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
-    ? existing.items
-    : (Array.isArray(childReportRows) && childReportRows.length > 0
-        ? childReportRows
-        : (Array.isArray(rmaItemRows) && rmaItemRows.length > 0 ? rmaItemRows : []));
+  // Apply per-item Manifest Line Item edits independently (never touching sibling supplier rows outside scoped subset)
   const editedManifestEntries = [];
 
-  if (parsed.manifestUpdates.length > 0 && baseItemsList.length > 0) {
+  const synthesizedManifestUpdates = (() => {
+    const list = [...parsed.manifestUpdates];
+    // Handle a scoped single-supplier batch .xlsx where edits were made only in Column C Field|Value without adding manifest row changes
+    if (isScopedMultiItemReply && list.length === 0) {
+      for (const idx of scopedIndicesSet) {
+        list.push({
+          serialNo: idx + 1,
+          lineIndex: idx,
+          parentLineRef: idx + 1,
+          supplier_name: patch.supplier_name || '',
+          supplier_email_to: patch.supplier_email_to,
+          supplier_email_cc: patch.supplier_email_cc,
+          barcode: baseItemsList[idx]?.barcode || '',
+          code: scopedIndicesSet.size === 1 ? (patch.code || '') : '',
+          name: scopedIndicesSet.size === 1 ? (patch.name || '') : '',
+          quantity: scopedIndicesSet.size === 1 && patch.quantity !== undefined ? Number(String(patch.quantity).replace(/[,\s]/g, '')) : undefined,
+          unit_name: scopedIndicesSet.size === 1 ? (patch.unit_name || '') : '',
+          price: scopedIndicesSet.size === 1 && patch.price !== undefined ? Number(String(patch.price).replace(/[,\s]/g, '')) : undefined,
+          expiry_date: scopedIndicesSet.size === 1 ? normalizeYmdInput(patch.expiry_date) : null,
+          reason: scopedIndicesSet.size === 1 ? (patch.reason || '') : '',
+          explanation: scopedIndicesSet.size === 1 ? (patch.explanation || '') : ''
+        });
+      }
+    }
+    return list;
+  })();
+
+  if (synthesizedManifestUpdates.length > 0 && baseItemsList.length > 0) {
     const nextItems = baseItemsList.map((it) => ({ ...it }));
     const usedIndices = new Set();
+    const isAllowedIndex = (idx) => !scopedIndicesSet || scopedIndicesSet.has(idx);
 
-    for (const m of parsed.manifestUpdates) {
+    for (const m of synthesizedManifestUpdates) {
       let matchIdx = -1;
       const mBarcode = normMatchKey(m.barcode);
       const mSku = normMatchKey(m.code);
 
-      if (mBarcode) {
+      if (Number.isFinite(m.parentLineRef) && m.parentLineRef >= 1) {
+        const refIdx = m.parentLineRef - 1;
+        if (refIdx >= 0 && refIdx < nextItems.length && !usedIndices.has(refIdx) && isAllowedIndex(refIdx)) {
+          matchIdx = refIdx;
+        }
+      }
+
+      if (matchIdx === -1 && mBarcode) {
         const barcodeMatches = [];
         nextItems.forEach((it, idx) => {
-          if (!usedIndices.has(idx) && normMatchKey(it.barcode) === mBarcode) barcodeMatches.push(idx);
+          if (!usedIndices.has(idx) && isAllowedIndex(idx) && normMatchKey(it.barcode) === mBarcode) barcodeMatches.push(idx);
         });
         if (barcodeMatches.length === 1) {
           matchIdx = barcodeMatches[0];
@@ -737,7 +954,7 @@ export async function applyRmaXlsxUpdates({
       if (matchIdx === -1 && mSku) {
         const skuMatches = [];
         nextItems.forEach((it, idx) => {
-          if (!usedIndices.has(idx) && normMatchKey(it.code || it.sku) === mSku) skuMatches.push(idx);
+          if (!usedIndices.has(idx) && isAllowedIndex(idx) && normMatchKey(it.code || it.sku) === mSku) skuMatches.push(idx);
         });
         if (skuMatches.length === 1) {
           matchIdx = skuMatches[0];
@@ -746,7 +963,15 @@ export async function applyRmaXlsxUpdates({
         }
       }
 
-      if (matchIdx === -1 && Number.isFinite(m.lineIndex) && m.lineIndex >= 0 && m.lineIndex < nextItems.length && !usedIndices.has(m.lineIndex)) {
+      if (
+        matchIdx === -1 &&
+        !hasExplicitScope &&
+        !isScopedMultiItemReply &&
+        Number.isFinite(m.lineIndex) &&
+        m.lineIndex >= 0 &&
+        m.lineIndex < nextItems.length &&
+        !usedIndices.has(m.lineIndex)
+      ) {
         matchIdx = m.lineIndex;
       }
 
@@ -754,12 +979,63 @@ export async function applyRmaXlsxUpdates({
       usedIndices.add(matchIdx);
 
       const origItem = nextItems[matchIdx];
+      const itemKey = String(origItem.id || origItem.item_id || `line_${matchIdx + 1}`).trim();
+      const prevItemSup = String(origItem.supplier_name || origItem.supplierName || '').trim();
+      const topScopedSup = isScopedMultiItemReply && patch.supplier_name && String(patch.supplier_name).trim() !== String(parsed.batchScope?.supplierName || '').trim()
+        ? String(patch.supplier_name).trim()
+        : '';
+      const incomingSup = m.supplier_name || topScopedSup;
+      const nextItemSup = incomingSup || prevItemSup;
+
       const itemPatch = {};
-      if (m.supplier_name && m.supplier_name !== String(origItem.supplier_name || origItem.supplierName || '').trim()) {
-        itemPatch.supplier_name = m.supplier_name;
-        itemPatch.supplierName = m.supplier_name;
-        itemPatch.supplier = m.supplier_name;
+      if (incomingSup && incomingSup !== prevItemSup) {
+        itemPatch.supplier_name = incomingSup;
+        itemPatch.supplierName = incomingSup;
+        itemPatch.supplier = incomingSup;
       }
+
+      const prevItemTo = String(
+        origItem.supplier_email_to ??
+        prevFollowUp.item_emails?.[itemKey]?.supplier_email_to ??
+        prevFollowUp.by_supplier?.[normalizeSupplierGroupKey(prevItemSup)]?.supplier_email_to ??
+        ''
+      ).trim();
+      const prevItemCc = String(
+        origItem.supplier_email_cc ??
+        prevFollowUp.item_emails?.[itemKey]?.supplier_email_cc ??
+        prevFollowUp.by_supplier?.[normalizeSupplierGroupKey(prevItemSup)]?.supplier_email_cc ??
+        ''
+      ).trim();
+      const incomingItemTo = m.supplier_email_to !== undefined
+        ? m.supplier_email_to
+        : (isScopedMultiItemReply ? patch.supplier_email_to : undefined);
+      const incomingItemCc = m.supplier_email_cc !== undefined
+        ? m.supplier_email_cc
+        : (isScopedMultiItemReply ? patch.supplier_email_cc : undefined);
+
+      const resolvedItemEmails = resolveEmailsWithDirAutoFill({
+        nextSup: nextItemSup,
+        prevSup: prevItemSup,
+        incomingTo: incomingItemTo,
+        incomingCc: incomingItemCc,
+        prevTo: prevItemTo,
+        prevCc: prevItemCc
+      });
+
+      if (resolvedItemEmails.emailTo !== prevItemTo || resolvedItemEmails.explicitClear) {
+        if (resolvedItemEmails.emailTo || resolvedItemEmails.explicitClear || incomingItemTo !== undefined) {
+          itemPatch.supplier_email_to = resolvedItemEmails.emailTo;
+          if (resolvedItemEmails.explicitClear && !resolvedItemEmails.emailTo) {
+            itemPatch.email_cleared = true;
+          } else {
+            itemPatch.email_cleared = false;
+          }
+        }
+      }
+      if (resolvedItemEmails.emailCc !== prevItemCc || incomingItemCc !== undefined) {
+        itemPatch.supplier_email_cc = resolvedItemEmails.emailCc;
+      }
+
       if (m.code && m.code !== String(origItem.code || origItem.sku || '').trim()) {
         itemPatch.code = m.code;
         itemPatch.sku = m.code;
@@ -791,9 +1067,31 @@ export async function applyRmaXlsxUpdates({
       if (Object.keys(itemPatch).length > 0) {
         const updatedItem = { ...origItem, ...itemPatch };
         nextItems[matchIdx] = updatedItem;
+
+        const finalSupName = String(updatedItem.supplier_name || '').trim();
+        const finalSupKey = normalizeSupplierGroupKey(finalSupName);
+        if (itemPatch.supplier_email_to !== undefined || itemPatch.supplier_email_cc !== undefined || itemPatch.supplier_name) {
+          nextFollowUp.item_emails[itemKey] = {
+            supplier_name: finalSupName,
+            supplier_email_to: updatedItem.supplier_email_to || '',
+            supplier_email_cc: updatedItem.supplier_email_cc || '',
+            email_cleared: Boolean(updatedItem.email_cleared && !updatedItem.supplier_email_to)
+          };
+          if (finalSupKey !== '__unassigned__') {
+            nextFollowUp.by_supplier[finalSupKey] = {
+              ...(nextFollowUp.by_supplier[finalSupKey] || {}),
+              supplier_name: finalSupName,
+              supplier_email_to: updatedItem.supplier_email_to || nextFollowUp.by_supplier[finalSupKey]?.supplier_email_to || '',
+              supplier_email_cc: updatedItem.supplier_email_cc || nextFollowUp.by_supplier[finalSupKey]?.supplier_email_cc || '',
+              email_cleared: Boolean(updatedItem.email_cleared && !updatedItem.supplier_email_to)
+            };
+          }
+          metaChanged = true;
+        }
+
         editedManifestEntries.push({
           idx: matchIdx,
-          serialNo: m.serialNo || matchIdx + 1,
+          serialNo: m.parentLineRef || m.serialNo || matchIdx + 1,
           origItem,
           updatedItem,
           itemPatch
@@ -824,6 +1122,8 @@ export async function applyRmaXlsxUpdates({
       }
       editedManifestEntries.forEach((e) => {
         if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
+        if (e.itemPatch.supplier_email_to !== undefined) changedFields.push(`item_${e.serialNo}_supplier_email_to`);
+        if (e.itemPatch.supplier_email_cc !== undefined) changedFields.push(`item_${e.serialNo}_supplier_email_cc`);
         if (e.itemPatch.quantity !== undefined) changedFields.push(`item_${e.serialNo}_quantity`);
         if (e.itemPatch.code) changedFields.push(`item_${e.serialNo}_code`);
         if (e.itemPatch.name) changedFields.push(`item_${e.serialNo}_name`);
@@ -831,7 +1131,7 @@ export async function applyRmaXlsxUpdates({
         if (e.itemPatch.expiry_date) changedFields.push(`item_${e.serialNo}_expiry_date`);
       });
     }
-  } else if (Array.isArray(existing.items) && existing.items.length === 1) {
+  } else if (Array.isArray(existing.items) && existing.items.length === 1 && !isScopedMultiItemReply) {
     // Keep single-item JSONB mirror consistent when top-level Field|Value rows were edited
     const origSingle = existing.items[0] || {};
     const singleItemPatch = {};
@@ -839,6 +1139,13 @@ export async function applyRmaXlsxUpdates({
       singleItemPatch.supplier_name = updates.supplier_name;
       singleItemPatch.supplierName = updates.supplier_name;
       singleItemPatch.supplier = updates.supplier_name;
+    }
+    if (nextFollowUp.supplier_email_to !== undefined && String(nextFollowUp.supplier_email_to) !== String(origSingle.supplier_email_to ?? '')) {
+      singleItemPatch.supplier_email_to = nextFollowUp.supplier_email_to;
+      singleItemPatch.email_cleared = Boolean(nextFollowUp.supplier_email_cleared && !nextFollowUp.supplier_email_to);
+    }
+    if (nextFollowUp.supplier_email_cc !== undefined && String(nextFollowUp.supplier_email_cc) !== String(origSingle.supplier_email_cc ?? '')) {
+      singleItemPatch.supplier_email_cc = nextFollowUp.supplier_email_cc;
     }
     if (updates.code) {
       singleItemPatch.code = updates.code;
@@ -880,6 +1187,7 @@ export async function applyRmaXlsxUpdates({
     updates.ai_document_metadata = {
       ...prevMeta,
       ...(existingIsTest ? { is_test: true, test_mode: true } : {}),
+      ...(nextPickup ? { supplier_pickup: nextPickup } : {}),
       follow_up: nextFollowUp
     };
   }
@@ -973,13 +1281,28 @@ export async function applyRmaXlsxUpdates({
         if (itemPatch.expiry_date) childUpdate.expiry_date = itemPatch.expiry_date;
         if (itemPatch.reason) childUpdate.reason = itemPatch.reason;
         if (itemPatch.explanation) childUpdate.explanation = itemPatch.explanation;
-        if (existingIsTest) {
+        if (itemPatch.supplier_email_to !== undefined) childUpdate.supplier_email_to = itemPatch.supplier_email_to;
+        if (itemPatch.supplier_email_cc !== undefined) childUpdate.supplier_email_cc = itemPatch.supplier_email_cc;
+        if (existingIsTest || itemPatch.supplier_email_to !== undefined || itemPatch.supplier_email_cc !== undefined) {
           const prevChildMeta = (matchedChild.ai_document_metadata && typeof matchedChild.ai_document_metadata === 'object')
             ? matchedChild.ai_document_metadata
             : {};
-          childUpdate.ai_document_metadata = { ...prevChildMeta, is_test: true, test_mode: true };
-          const cNotes = String(matchedChild.notes || '').trim();
-          if (!cNotes.includes('[TEST_MODE]')) childUpdate.notes = cNotes ? `[TEST_MODE] ${cNotes}` : '[TEST_MODE]';
+          const prevChildFu = (prevChildMeta.follow_up && typeof prevChildMeta.follow_up === 'object') ? prevChildMeta.follow_up : {};
+          childUpdate.ai_document_metadata = {
+            ...prevChildMeta,
+            ...(existingIsTest ? { is_test: true, test_mode: true } : {}),
+            ...((itemPatch.supplier_email_to !== undefined || itemPatch.supplier_email_cc !== undefined) ? {
+              follow_up: {
+                ...prevChildFu,
+                ...(itemPatch.supplier_email_to !== undefined ? { supplier_email_to: itemPatch.supplier_email_to } : {}),
+                ...(itemPatch.supplier_email_cc !== undefined ? { supplier_email_cc: itemPatch.supplier_email_cc } : {})
+              }
+            } : {})
+          };
+          if (existingIsTest) {
+            const cNotes = String(matchedChild.notes || '').trim();
+            if (!cNotes.includes('[TEST_MODE]')) childUpdate.notes = cNotes ? `[TEST_MODE] ${cNotes}` : '[TEST_MODE]';
+          }
         }
         await safeUpdateTableRow('rma_reports', matchedChild.id, childUpdate).catch(() => {});
       }
@@ -1014,32 +1337,54 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  // Upsert Supplier Directory entry if supplier email(s) updated (strictly isolated Live vs Test + Live placeholder guard)
-  const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
-  const effectiveSupTo = nextFollowUp.supplier_email_to || '';
-  const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
-  if (
-    effectiveSupplier &&
-    !isMixedSuppliersSummary(effectiveSupplier) &&
-    isRealSupplierName(effectiveSupplier) &&
-    (effectiveSupTo || effectiveSupCc) &&
-    (existingIsTest || !isBlockedLiveDirectoryContact(effectiveSupplier, effectiveSupTo, effectiveSupCc))
-  ) {
+  // Upsert Supplier Directory entries for all updated supplier/email pairs (including mixed-supplier batch lines, isolated Live vs Test)
+  const dirUpsertCandidates = [];
+  if (editedManifestEntries.length > 0) {
+    editedManifestEntries.forEach(({ updatedItem }) => {
+      const sName = String(updatedItem?.supplier_name || '').trim();
+      const sTo = String(updatedItem?.supplier_email_to || '').trim();
+      const sCc = String(updatedItem?.supplier_email_cc || '').trim();
+      if (isRealSupplierName(sName) && (sTo || sCc)) {
+        dirUpsertCandidates.push({ supplier_name: sName, email_to: sTo, email_cc: sCc });
+      }
+    });
+  } else {
+    const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
+    const effectiveSupTo = nextFollowUp.supplier_email_to || '';
+    const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
+    if (isRealSupplierName(effectiveSupplier) && !isMixedSuppliersSummary(effectiveSupplier) && (effectiveSupTo || effectiveSupCc)) {
+      dirUpsertCandidates.push({ supplier_name: effectiveSupplier, email_to: effectiveSupTo, email_cc: effectiveSupCc });
+    }
+  }
+
+  const validDirUpserts = [];
+  const seenDirKeys = new Set();
+  for (const cand of dirUpsertCandidates) {
+    const lower = cand.supplier_name.toLowerCase();
+    if (seenDirKeys.has(lower)) continue;
+    if (!existingIsTest && isBlockedLiveDirectoryContact(cand.supplier_name, cand.email_to, cand.email_cc)) continue;
+    seenDirKeys.add(lower);
+    validDirUpserts.push(cand);
+  }
+
+  if (validDirUpserts.length > 0) {
     try {
       const dirKey = getSupplierDirectorySettingsKey(existingIsTest);
       const dirRow = (settingsRows || []).find((s) => s.key === dirKey);
       let dirList = parseSupplierDirectoryValue(dirRow?.value);
-      const lower = effectiveSupplier.toLowerCase();
-      const idx = dirList.findIndex((e) => String(e?.supplier_name || '').trim().toLowerCase() === lower);
-      const nextEntry = {
-        supplier_name: effectiveSupplier,
-        email_to: effectiveSupTo,
-        email_cc: effectiveSupCc,
-        updated_at: nowIso,
-        updated_by: actorLabel
-      };
-      if (idx >= 0) dirList[idx] = { ...dirList[idx], ...nextEntry };
-      else dirList.push(nextEntry);
+      validDirUpserts.forEach((cand) => {
+        const lower = cand.supplier_name.toLowerCase();
+        const idx = dirList.findIndex((e) => String(e?.supplier_name || '').trim().toLowerCase() === lower);
+        const nextEntry = {
+          supplier_name: cand.supplier_name,
+          email_to: cand.email_to,
+          email_cc: cand.email_cc,
+          updated_at: nowIso,
+          updated_by: actorLabel
+        };
+        if (idx >= 0) dirList[idx] = { ...dirList[idx], ...nextEntry };
+        else dirList.push(nextEntry);
+      });
       await supabase.from('rma_settings').upsert({ key: dirKey, value: dirList, updated_at: nowIso }, { onConflict: 'key' });
     } catch {}
   }

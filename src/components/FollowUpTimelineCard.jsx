@@ -1,14 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { Calendar, CheckCircle2, Clock, AlertTriangle, RotateCcw, ChevronDown, ChevronUp, Zap } from 'lucide-react';
-import { computeFourStepWorkflow, formatDurationCompact } from '../utils/followUpWorkflow';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Calendar, CheckCircle2, Clock, AlertTriangle, RotateCcw, ChevronDown, ChevronUp, Zap, Mail } from 'lucide-react';
+import {
+  computeFourStepWorkflow,
+  groupReportItemsBySupplierForFollowUp,
+  formatDurationCompact
+} from '../utils/followUpWorkflow';
 import { notificationService, SETTINGS_SYNC_EVENT } from '../services/notificationService';
+import { supplierDirectoryService } from '../services/supplierDirectoryService';
 import { isTestRecord } from '../utils/rmaHelpers';
 
 /**
  * Reusable Full 4-Step + 10-Calendar-Day (Day 0..Day 10) Timeline Card.
- * Displays Step 1 Report Date, Step 2 Waiting For Pickup (compact summary above the fold with collapsible Day 0..10 log),
- * Step 3 Driver Picked Up Date, and Step 4 Case Close.
- * For Test Mode Sandbox RMAs with accelerated testStepIntervalSeconds > 0, renders live countdowns.
+ * Automatically surfaces per-supplier SLA tabs when a batch RMA has multiple suppliers,
+ * keeping each supplier's recipients, countdown, and timeline isolated.
  */
 export default function FollowUpTimelineCard({
   report,
@@ -19,11 +23,16 @@ export default function FollowUpTimelineCard({
   compact = false,
   defaultExpanded = false,
   onResetTimeline = null,
-  isResettingTimeline = false
+  isResettingTimeline = false,
+  directory = null,
+  allReports = [],
+  focusedSupplierKey = null
 }) {
   const [isDaysExpanded, setIsDaysExpanded] = useState(Boolean(defaultExpanded));
   const [cfg, setCfg] = useState(() => notificationService.getDailyFollowUpConfig());
   const [nowTick, setNowTick] = useState(() => new Date());
+  const [dirEntries, setDirEntries] = useState(() => (Array.isArray(directory) ? directory : []));
+  const [activeSupplierTab, setActiveSupplierTab] = useState(focusedSupplierKey || null);
 
   useEffect(() => {
     const sync = () => setCfg(notificationService.getDailyFollowUpConfig());
@@ -34,6 +43,26 @@ export default function FollowUpTimelineCard({
       window.removeEventListener('storage', sync);
     };
   }, []);
+
+  useEffect(() => {
+    if (Array.isArray(directory)) {
+      setDirEntries(directory);
+      return;
+    }
+    if (!report) return;
+    let mounted = true;
+    const modeIsTest = Boolean(isTestRecord(report));
+    supplierDirectoryService.loadDirectory({ isTestMode: modeIsTest }).then((list) => {
+      if (mounted && Array.isArray(list)) setDirEntries(list);
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [directory, report?.id, report?.rma_number]);
+
+  useEffect(() => {
+    if (focusedSupplierKey) setActiveSupplierTab(focusedSupplierKey);
+  }, [focusedSupplierKey]);
 
   const resolvedStepSec = testStepIntervalSeconds !== undefined
     ? Number(testStepIntervalSeconds || 0)
@@ -47,8 +76,28 @@ export default function FollowUpTimelineCard({
     return () => clearInterval(id);
   }, [isAcceleratedPreview]);
 
-  const wf = workflow || (report
+  const supplierGroups = useMemo(() => {
+    if (!report || workflow) return [];
+    return groupReportItemsBySupplierForFollowUp(report, allReports, catalogProducts, {
+      directory: dirEntries,
+      customerFollowUpDefaultEnabled: resolvedCustomerDefault,
+      testStepIntervalSeconds: resolvedStepSec,
+      now: isAcceleratedPreview ? nowTick : undefined
+    });
+  }, [report, workflow, allReports, catalogProducts, dirEntries, resolvedCustomerDefault, resolvedStepSec, isAcceleratedPreview, nowTick]);
+
+  const activeGroup = useMemo(() => {
+    if (supplierGroups.length <= 1) return supplierGroups[0] || null;
+    if (activeSupplierTab) {
+      const hit = supplierGroups.find((g) => g.supplierKey === activeSupplierTab);
+      if (hit) return hit;
+    }
+    return supplierGroups[0] || null;
+  }, [supplierGroups, activeSupplierTab]);
+
+  const wf = workflow || activeGroup?.workflow || (report
     ? computeFourStepWorkflow(report, catalogProducts, {
+        directory: dirEntries,
         customerFollowUpDefaultEnabled: resolvedCustomerDefault,
         testStepIntervalSeconds: resolvedStepSec,
         now: isAcceleratedPreview ? nowTick : undefined
@@ -58,6 +107,8 @@ export default function FollowUpTimelineCard({
   if (!wf) return null;
 
   const days = Array.isArray(wf.timelineDays) ? wf.timelineDays : [];
+  const activeEmails = activeGroup ? activeGroup.toEmails : wf.party.toEmails;
+  const isInternalPending = !activeEmails || activeEmails.length === 0;
 
   const getBadgeClasses = (state) => {
     switch (state) {
@@ -115,6 +166,53 @@ export default function FollowUpTimelineCard({
             {wf.step4.done ? wf.step4.dateDisplay : `Step ${wf.activeStepNumber} of 4 • ${wf.step2.text}`}
           </span>
         </div>
+      </div>
+
+      {/* Multi-Supplier Split Follow-Up Tabs (shown whenever a batch has multiple supplier lanes) */}
+      {supplierGroups.length > 1 && (
+        <div className="p-2 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+          <div className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+            Per-Supplier Split Follow-Up Lanes ({supplierGroups.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {supplierGroups.map((g) => {
+              const isSelected = activeGroup?.supplierKey === g.supplierKey;
+              return (
+                <button
+                  key={g.supplierKey}
+                  type="button"
+                  onClick={() => setActiveSupplierTab(g.supplierKey)}
+                  className={`px-2.5 py-1 rounded-lg border text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                      : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <span>{g.supplierName}</span>
+                  <span className="font-mono text-[9.5px] opacity-85">
+                    ({g.items.length}) • {g.workflow.isClosed ? 'Closed' : `Day ${g.workflow.calendarDay}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Active Follow-Up Email Routing Indicator */}
+      <div className={`px-2.5 py-1.5 rounded-xl border text-[10.5px] font-semibold flex flex-wrap items-center justify-between gap-2 ${
+        isInternalPending
+          ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-200'
+          : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+      }`}>
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <Mail className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+          <span className="break-words">
+            {isInternalPending
+              ? `Routing (${activeGroup?.supplierName || wf.party.supplierName}): Internal Employees Only (Supplier Email Pending)`
+              : `Follow-Up TO (${activeGroup?.supplierName || wf.party.supplierName}): ${activeEmails.join(', ')} (+ Internal CCs)`}
+          </span>
+        </span>
       </div>
 
       {/* Live Accelerated Test Countdown Strip (only when Test Speed active & ticket open) */}

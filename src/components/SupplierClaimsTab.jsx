@@ -30,8 +30,12 @@ import ImageLightboxModal from './ImageLightboxModal';
 import SupplierFollowUpModal from './SupplierFollowUpModal';
 import SupplierDirectoryModal from './SupplierDirectoryModal';
 import { supplierClaimService } from '../services/supplierClaimService';
+import { supplierDirectoryService } from '../services/supplierDirectoryService';
 import {
   getCleanHumanWorkflowStatus,
+  groupReportItemsBySupplierForFollowUp,
+  normalizeSupplierGroupKey,
+  resolveReportPartyAndEmails,
   isPlaceholderSupplier
 } from '../utils/followUpWorkflow';
 import { 
@@ -58,6 +62,7 @@ import {
   getGpsAddressDisplay,
   getGpsMapUrl,
   summarizeBatchSuppliers,
+  extractDistinctSuppliersFromItems,
   isRealSupplierName,
   isMixedSuppliersSummary,
   resolveReorderStatus
@@ -101,16 +106,25 @@ export default function SupplierClaimsTab({
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
   const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+  const [activeDirectory, setActiveDirectory] = useState(() => supplierDirectoryService.getCachedDirectory({ isTestMode }));
 
   useEffect(() => {
     const syncCfg = () => setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+    const syncDir = () => {
+      supplierDirectoryService.loadDirectory({ isTestMode }).then((list) => {
+        if (Array.isArray(list)) setActiveDirectory(list);
+      }).catch(() => {});
+    };
+    syncDir();
     window.addEventListener(SETTINGS_SYNC_EVENT, syncCfg);
     window.addEventListener('storage', syncCfg);
+    window.addEventListener('rma-data-changed', syncDir);
     return () => {
       window.removeEventListener(SETTINGS_SYNC_EVENT, syncCfg);
       window.removeEventListener('storage', syncCfg);
+      window.removeEventListener('rma-data-changed', syncDir);
     };
-  }, []);
+  }, [isTestMode]);
 
   const handleMarkReordered = async (report, nextStatus = 'reordered') => {
     if (!report || updatingQueueId) return;
@@ -141,15 +155,19 @@ export default function SupplierClaimsTab({
     const rowKey = report.id || report.rma_number;
     setUpdatingQueueId(rowKey);
     setFollowUpBanner(null);
+    const scopedSupKey = report?.is_unpacked_manifest_item
+      ? normalizeSupplierGroupKey(report?.supplier_name)
+      : null;
     try {
       await catalogService.closeFollowUpCase(report, {
         markPickedUp: true,
         reason: 'Picked Up — Case Closed',
-        actorName: currentUser?.name || currentUser?.email || 'Admin'
+        actorName: currentUser?.name || currentUser?.email || 'Admin',
+        ...(scopedSupKey && scopedSupKey !== '__unassigned__' ? { targetSupplierKey: scopedSupKey } : {})
       });
       setFollowUpBanner({
         type: 'success',
-        text: `${report.rma_number} marked Picked Up — Case Closed (countdown stopped).`
+        text: `${report.rma_number}${report?.is_unpacked_manifest_item && report?.supplier_name ? ` (${report.supplier_name})` : ''} marked Picked Up — Case Closed.`
       });
       if (onRefresh) onRefresh();
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-closed', rmaNumber: report.rma_number } }));
@@ -392,6 +410,25 @@ export default function SupplierClaimsTab({
             ? child.photos
             : (Array.isArray(r.photos) ? r.photos : []);
 
+          const childItemKey = String(child.id || child.item_id || `line_${cIdx + 1}`).trim();
+          const parentMetaFu = r.ai_document_metadata?.follow_up || {};
+          const itemOv = parentMetaFu.item_emails?.[childItemKey] || parentMetaFu.item_emails?.[`line_${cIdx + 1}`] || {};
+          const childSupKey = normalizeSupplierGroupKey(resolvedChildSupplier);
+          const bySupOv = childSupKey !== '__unassigned__' ? (parentMetaFu.by_supplier?.[childSupKey] || {}) : {};
+          const isSingleBatchSup = extractDistinctSuppliersFromItems(manifestChildren).length <= 1;
+          const childEmailTo = String(
+            child.supplier_email_to ||
+            itemOv.supplier_email_to ||
+            bySupOv.supplier_email_to ||
+            (isSingleBatchSup ? (parentMetaFu.supplier_email_to || r.ai_document_metadata?.supplier_pickup?.supplier_email_to || '') : '')
+          ).trim();
+          const childEmailCc = String(
+            child.supplier_email_cc ||
+            itemOv.supplier_email_cc ||
+            bySupOv.supplier_email_cc ||
+            (isSingleBatchSup ? (parentMetaFu.supplier_email_cc || r.ai_document_metadata?.supplier_pickup?.supplier_email_cc || '') : '')
+          ).trim();
+
           rawItems.push({
             ...r,
             ...child,
@@ -399,6 +436,8 @@ export default function SupplierClaimsTab({
             parent_rma_id: r.id,
             is_parent: false,
             is_unpacked_manifest_item: true,
+            _itemKey: childItemKey,
+            _parentLineRef: cIdx + 1,
             manifest_line_index: cIdx,
             manifest_total_lines: manifestChildren.length,
             manifest_items: manifestChildren,
@@ -415,6 +454,8 @@ export default function SupplierClaimsTab({
             price: childPrice,
             price_with_vat: childPrice,
             supplier_name: resolvedChildSupplier,
+            supplier_email_to: childEmailTo,
+            supplier_email_cc: childEmailCc,
             warehouse_location: child.warehouse_location || r.warehouse_location || 'DOCK',
             disposition: child.disposition || r.disposition || 'Pending',
             reason: child.reason || r.reason || 'Damaged',
@@ -1225,12 +1266,29 @@ export default function SupplierClaimsTab({
                   const existingClaim = getClaimForReport(r);
                   const outcome = formatFourChoiceOutcome(r);
                   const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList, {
+                    directory: activeDirectory,
+                    itemKey: r._itemKey,
+                    parentLineRef: r._parentLineRef,
+                    supplierName: r.is_unpacked_manifest_item ? res.supplier : undefined,
                     customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
                     testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
                   });
                   const wf = statusInfo.workflow;
                   const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
+                  const manifestGroups = isManifest
+                    ? groupReportItemsBySupplierForFollowUp(r, reportsList, savedProductsList, {
+                        directory: activeDirectory,
+                        customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+                        testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
+                      })
+                    : [];
+                  const rowParty = resolveReportPartyAndEmails(r, savedProductsList, {
+                    directory: activeDirectory,
+                    itemKey: r._itemKey,
+                    parentLineRef: r._parentLineRef,
+                    supplierName: res.supplier
+                  });
                   const manifestKey = r.id || r.rma_number;
                   const isManifestExpanded = expandedManifestIds.has(manifestKey);
 
@@ -1424,31 +1482,57 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Vendor / Supplier & Warehouse Bin */}
-                        <td className="py-2 px-1 max-w-[112px]" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <span className={`font-bold truncate max-w-[106px] ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`} title={res.supplier}>
-                              {res.supplier}
-                            </span>
-                            {(isPlaceholderSupplier(res.supplier) || wf.party.toEmails.length === 0) ? (
+                        <td className="py-2 px-1.5 min-w-[180px] max-w-[235px]" onClick={(e) => e.stopPropagation()}>
+                          {isManifest && manifestGroups.length > 1 ? (
+                            <div className="space-y-1">
+                              <div className="flex flex-col gap-0.5">
+                                {manifestGroups.slice(0, 3).map((g) => (
+                                  <div key={g.supplierKey} className="text-[10px] leading-tight flex items-center gap-1 flex-wrap">
+                                    <span className="font-bold text-slate-800 dark:text-slate-200">{g.supplierName}:</span>
+                                    <span className={`font-mono ${g.internalOnly ? 'text-sky-700 dark:text-sky-300' : 'text-indigo-700 dark:text-indigo-300'}`}>
+                                      {g.internalOnly ? 'Internal Only' : g.toEmails[0]}
+                                    </span>
+                                  </div>
+                                ))}
+                                {manifestGroups.length > 3 && (
+                                  <span className="text-[9px] text-slate-500">+{manifestGroups.length - 3} more supplier(s)</span>
+                                )}
+                              </div>
                               <button
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
-                                className="px-1.5 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9px] font-black cursor-pointer text-left leading-tight"
-                                title="Set Supplier Name and Follow-Up Emails (TO/CC)"
+                                className="px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 text-[9.5px] font-black cursor-pointer whitespace-nowrap"
+                                title="Configure Per-Supplier Emails & Split Follow-Ups"
                               >
-                                + Set Supplier &amp; Email
+                                📧 Batch Suppliers ({manifestGroups.length})
                               </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setFollowUpModalReport(r)}
-                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-mono cursor-pointer truncate max-w-[106px]"
-                                title={`Edit Supplier Email (${wf.party.toEmails[0]})`}
-                              >
-                                📧 {wf.party.toEmails[0]}
-                              </button>
-                            )}
-                          </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className={`font-bold break-words ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`} title={res.supplier}>
+                                {res.supplier}
+                              </span>
+                              {(isPlaceholderSupplier(res.supplier) || rowParty.toEmails.length === 0) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setFollowUpModalReport(r)}
+                                  className="px-1.5 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9px] font-black cursor-pointer text-left leading-tight whitespace-nowrap"
+                                  title="Set Supplier Name and Follow-Up Emails (TO/CC)"
+                                >
+                                  + Set Supplier &amp; Email
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setFollowUpModalReport(r)}
+                                  className="px-1.5 py-0.5 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9.5px] font-mono cursor-pointer break-words max-w-full text-left"
+                                  title={`Edit Supplier Email (${rowParty.toEmails[0]})`}
+                                >
+                                  📧 {rowParty.toEmails[0]}
+                                </button>
+                              )}
+                            </div>
+                          )}
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate" title={normalizeWarehouseLocation(r.warehouse_location, r)}>
                             <span className="text-slate-600 dark:text-slate-300 font-semibold">{normalizeWarehouseLocation(r.warehouse_location, r)}</span>
                             {r.batch_lot_number && (
@@ -1956,12 +2040,29 @@ export default function SupplierClaimsTab({
               const existingClaim = getClaimForReport(r);
               const outcome = formatFourChoiceOutcome(r);
               const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList, {
+                directory: activeDirectory,
+                itemKey: r._itemKey,
+                parentLineRef: r._parentLineRef,
+                supplierName: r.is_unpacked_manifest_item ? res.supplier : undefined,
                 customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
                 testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
               });
               const wf = statusInfo.workflow;
               const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
               const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
+              const mobManifestGroups = isManifest
+                ? groupReportItemsBySupplierForFollowUp(r, reportsList, savedProductsList, {
+                    directory: activeDirectory,
+                    customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled,
+                    testStepIntervalSeconds: isTestMode ? followUpConfig.testStepIntervalSeconds : 0
+                  })
+                : [];
+              const mobRowParty = resolveReportPartyAndEmails(r, savedProductsList, {
+                directory: activeDirectory,
+                itemKey: r._itemKey,
+                parentLineRef: r._parentLineRef,
+                supplierName: res.supplier
+              });
               const manifestKey = r.id || r.rma_number;
               const isManifestExpanded = expandedManifestIds.has(manifestKey);
               const reorderInfo = resolveReorderStatus(r);
@@ -2051,10 +2152,40 @@ export default function SupplierClaimsTab({
                         <span className={`font-bold ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
                           {res.supplier}
                         </span>
+                        {!isManifest && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFollowUpModalReport(r);
+                            }}
+                            className={`px-1.5 py-0.5 rounded-md font-mono text-[9.5px] border ${
+                              mobRowParty.toEmails.length > 0
+                                ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
+                                : 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-sans font-bold'
+                            }`}
+                          >
+                            {mobRowParty.toEmails.length > 0 ? `📧 ${mobRowParty.toEmails[0]}` : '+ Set Supplier & Email'}
+                          </button>
+                        )}
                         <span className="text-slate-400 font-mono">
                           SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600'}>{res.code || 'Unassigned'}</strong>
                         </span>
                       </div>
+                      {isManifest && mobManifestGroups.length > 1 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                          {mobManifestGroups.map((g) => (
+                            <button
+                              key={g.supplierKey}
+                              type="button"
+                              onClick={() => setFollowUpModalReport(r)}
+                              className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[9.5px] font-bold text-slate-700 dark:text-slate-200"
+                            >
+                              {g.supplierName}: {g.internalOnly ? 'Internal Only' : g.toEmails[0]}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div className="text-[10px] text-slate-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
                         <span>{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
                         <span>{normalizeWarehouseLocation(r.warehouse_location, r)}</span>
@@ -2271,10 +2402,14 @@ export default function SupplierClaimsTab({
         isOpen={Boolean(followUpModalReport)}
         onClose={() => setFollowUpModalReport(null)}
         report={followUpModalReport}
+        allReports={reportsList}
         catalogProducts={savedProductsList}
         isTestMode={isTestMode}
         currentUser={currentUser}
         onUpdated={() => {
+          supplierDirectoryService.loadDirectory({ isTestMode }).then((list) => {
+            if (Array.isArray(list)) setActiveDirectory(list);
+          }).catch(() => {});
           if (onRefresh) onRefresh();
           window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-updated' } }));
         }}
@@ -2283,7 +2418,12 @@ export default function SupplierClaimsTab({
       {/* Persistent Supplier Emails Directory Modal */}
       <SupplierDirectoryModal
         isOpen={isDirectoryOpen}
-        onClose={() => setIsDirectoryOpen(false)}
+        onClose={() => {
+          setIsDirectoryOpen(false);
+          supplierDirectoryService.loadDirectory({ isTestMode }).then((list) => {
+            if (Array.isArray(list)) setActiveDirectory(list);
+          }).catch(() => {});
+        }}
         isTestMode={isTestMode}
       />
 

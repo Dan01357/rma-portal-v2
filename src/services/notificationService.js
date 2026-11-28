@@ -37,8 +37,17 @@ import {
   normalizePhotoUrlArray,
   getGpsAddressDisplay,
   getGpsMapUrl,
-  isRealSupplierName
+  isRealSupplierName,
+  isMixedSuppliersSummary,
+  getReportManifestItems,
+  extractDistinctSuppliersFromItems
 } from '../utils/rmaHelpers';
+import {
+  SUPPLIER_DIRECTORY_STORAGE_KEY,
+  TEST_SUPPLIER_DIRECTORY_STORAGE_KEY,
+  parseSupplierDirectoryValue,
+  normalizeSupplierDirectoryKey
+} from '../utils/supplierDirectoryHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
 import { buildRmaAlertXlsxAttachment } from '../utils/rmaAlertXlsx';
 
@@ -1647,6 +1656,10 @@ export const notificationService = {
                 </div>`}
                 ${eventType === 'scrapped' ? `
                 <div class="row">
+                  <div class="col-label">Distribution Scope:</div>
+                  <div class="col-val" style="color: #9f1239; font-weight: 800;">Strictly Internal Employees Only (Never Sent to External Suppliers)</div>
+                </div>
+                <div class="row">
                   <div class="col-label">Re-Order Requested?:</div>
                   <div class="col-val">${needsReorderFlag ? 'YES — Purchase Re-Order Requested' : 'NO — Scrap Write-Off Only'}</div>
                 </div>` : ''}
@@ -1775,7 +1788,7 @@ export const notificationService = {
           </div>
 
           <div class="footer">
-            Automated RMA Lifecycle Notification — Pingcon Marketing Corp. RMA Portal<br/>
+            Automated RMA Lifecycle Notification — Pingcon Marketing Corp. RMA Portal${eventType === 'scrapped' ? ' • Internal Employees Only (Never Dispatched to Suppliers)' : ''}<br/>
             Sender: ${escapeEmailHtml(config.senderEmail)} • Event Time (YYYY-MM-DD HH:mm): ${escapeEmailHtml(eventTimeStr)}
           </div>
         </div>
@@ -1826,36 +1839,103 @@ export const notificationService = {
       const effectiveActor = String(actorName || pickup.processed_by || meta.simple_rtv_updated_by || '').trim();
       const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
 
-      const isPickupEvent = isDebitClaimEvent || eventType === 'pickup_replacement';
+      const isScrapEvent = eventType === 'scrapped' || profileKey === 'rma_scrapped';
+      const isPickupEvent = !isScrapEvent && (isDebitClaimEvent || eventType === 'pickup_replacement');
       const supplierToList = isPickupEvent ? splitEmailList(pickup.supplier_email_to) : [];
       const supplierCcList = isPickupEvent ? splitEmailList(pickup.supplier_email_cc) : [];
 
-      const baseToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
+      const blockedSupplierEmails = new Set();
+      if (isScrapEvent) {
+        const collectSupEmail = (raw) => splitEmailList(raw).forEach((e) => blockedSupplierEmails.add(e));
+        const supNamesOnReport = new Set();
+        effectiveReports.forEach((rep) => {
+          collectSupEmail(rep?.supplier_email_to);
+          collectSupEmail(rep?.supplier_email_cc);
+          const repMeta = rep?.ai_document_metadata || {};
+          collectSupEmail(repMeta?.supplier_pickup?.supplier_email_to);
+          collectSupEmail(repMeta?.supplier_pickup?.supplier_email_cc);
+          collectSupEmail(repMeta?.follow_up?.supplier_email_to);
+          collectSupEmail(repMeta?.follow_up?.supplier_email_cc);
+          if (repMeta?.follow_up?.by_supplier && typeof repMeta.follow_up.by_supplier === 'object') {
+            Object.values(repMeta.follow_up.by_supplier).forEach((ent) => {
+              collectSupEmail(ent?.supplier_email_to);
+              collectSupEmail(ent?.supplier_email_cc);
+              if (ent?.supplier_name && isRealSupplierName(ent.supplier_name)) supNamesOnReport.add(ent.supplier_name);
+            });
+          }
+          if (repMeta?.follow_up?.item_emails && typeof repMeta.follow_up.item_emails === 'object') {
+            Object.values(repMeta.follow_up.item_emails).forEach((ent) => {
+              collectSupEmail(ent?.supplier_email_to);
+              collectSupEmail(ent?.supplier_email_cc);
+            });
+          }
+          const lines = getReportManifestItems(rep, allReports);
+          lines.forEach((it) => {
+            collectSupEmail(it?.supplier_email_to);
+            collectSupEmail(it?.supplier_email_cc);
+            if (it?.supplier_name && isRealSupplierName(it.supplier_name)) supNamesOnReport.add(it.supplier_name);
+          });
+          extractDistinctSuppliersFromItems(lines).forEach((s) => supNamesOnReport.add(s));
+          if (rep?.supplier_name && !isMixedSuppliersSummary(rep.supplier_name) && isRealSupplierName(rep.supplier_name)) {
+            supNamesOnReport.add(String(rep.supplier_name).trim());
+          }
+        });
+        if (typeof window !== 'undefined') {
+          [false, true].forEach((modeFlag) => {
+            try {
+              const rawDir = localStorage.getItem(modeFlag ? TEST_SUPPLIER_DIRECTORY_STORAGE_KEY : SUPPLIER_DIRECTORY_STORAGE_KEY);
+              const entries = parseSupplierDirectoryValue(rawDir);
+              entries.forEach((ent) => {
+                const k = normalizeSupplierDirectoryKey(ent?.supplier_name || ent?.supplierName);
+                const matchesNamed = Array.from(supNamesOnReport).some((s) => normalizeSupplierDirectoryKey(s) === k);
+                if (matchesNamed || !modeFlag) {
+                  collectSupEmail(ent?.email_to);
+                  collectSupEmail(ent?.email_cc);
+                }
+              });
+            } catch {}
+          });
+        }
+      }
+
+      const rawBaseToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
         ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
         : config.toList;
-      const baseCcList = customRecipients && Array.isArray(customRecipients.ccList)
+      const rawBaseCcList = customRecipients && Array.isArray(customRecipients.ccList)
         ? splitEmailList(customRecipients.ccList)
         : config.baseCcList;
+
+      const baseToList = isScrapEvent
+        ? rawBaseToList.filter((e) => !blockedSupplierEmails.has(e) || (testActive && e === sandboxEmail))
+        : rawBaseToList;
+      const baseCcList = isScrapEvent
+        ? rawBaseCcList.filter((e) => !blockedSupplierEmails.has(e))
+        : rawBaseCcList;
 
       const mergedTo = Array.from(new Set([
         ...baseToList,
         ...supplierToList
       ]));
-      const toList = mergedTo.length > 0
-        ? mergedTo
-        : (testActive ? [sandboxEmail] : [...DEFAULT_RECIPIENTS.toList]);
+      const fallbackInternalTo = testActive
+        ? [sandboxEmail]
+        : (config.toList.filter((e) => !isScrapEvent || !blockedSupplierEmails.has(e)).length > 0
+            ? config.toList.filter((e) => !isScrapEvent || !blockedSupplierEmails.has(e))
+            : [...DEFAULT_RECIPIENTS.toList]);
+      const toList = mergedTo.length > 0 ? mergedTo : fallbackInternalTo;
       const toEmail = toList.join(', ') || config.toEmail;
 
       const toSet = new Set(toList);
       const ccSet = new Set([
         ...baseCcList,
         ...supplierCcList
-      ].filter((e) => !toSet.has(e)));
+      ].filter((e) => !toSet.has(e) && (!isScrapEvent || !blockedSupplierEmails.has(e))));
       if (!testActive) {
         effectiveReports.forEach((r) => {
           if (r?.ae_email && String(r.ae_email).includes('@')) {
             const cleanAe = String(r.ae_email).trim().toLowerCase();
-            if (!toSet.has(cleanAe)) ccSet.add(cleanAe);
+            if (!toSet.has(cleanAe) && (!isScrapEvent || !blockedSupplierEmails.has(cleanAe))) {
+              ccSet.add(cleanAe);
+            }
           }
         });
       }
@@ -2038,6 +2118,9 @@ export const notificationService = {
           } : {}),
           emailType: profileKey,
           sandboxEmail,
+          ...(isScrapEvent && blockedSupplierEmails.size > 0
+            ? { excludedSupplierEmails: Array.from(blockedSupplierEmails) }
+            : {}),
           attachments,
           text: plainTextLines.join('\n')
         })

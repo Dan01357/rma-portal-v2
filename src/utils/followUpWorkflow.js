@@ -14,6 +14,10 @@ import {
   getRealPhotos,
   hasAssignedSku,
   isTestRecord,
+  isMixedSuppliersSummary,
+  isRealSupplierName,
+  sumManifestQuantity,
+  getReportManifestItems,
   formatPeso
 } from './rmaHelpers.js';
 
@@ -211,7 +215,83 @@ function escapeHtml(val) {
     .replace(/"/g, '&quot;');
 }
 
-export function resolveReportPartyAndEmails(report, catalogProducts = []) {
+export function normalizeSupplierGroupKey(val) {
+  const s = String(val || '').trim();
+  if (!s || isPlaceholderSupplier(s) || isMixedSuppliersSummary(s)) {
+    return '__unassigned__';
+  }
+  const slug = s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug || '__unassigned__';
+}
+
+function normalizeDirectoryLookupName(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function buildSupplierDirectoryMap(rawDirectory) {
+  if (rawDirectory instanceof Map) return rawDirectory;
+  const map = new Map();
+  let list = [];
+  if (Array.isArray(rawDirectory)) {
+    list = rawDirectory;
+  } else if (typeof rawDirectory === 'string' && rawDirectory.trim()) {
+    try {
+      const parsed = JSON.parse(rawDirectory);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+  } else if (rawDirectory && typeof rawDirectory === 'object' && Array.isArray(rawDirectory.suppliers)) {
+    list = rawDirectory.suppliers;
+  }
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const key = normalizeDirectoryLookupName(entry.supplier_name || entry.name);
+    if (!key) continue;
+    const to = splitEmailStringOrList(entry.email_to ?? entry.emailTo ?? entry.email);
+    const cc = splitEmailStringOrList(entry.email_cc ?? entry.emailCc).filter((e) => !to.includes(e));
+    if (to.length > 0 || cc.length > 0) {
+      map.set(key, {
+        supplierName: String(entry.supplier_name || entry.name || '').trim(),
+        emailToList: to,
+        emailCcList: cc
+      });
+    }
+  }
+  return map;
+}
+
+export function lookupSupplierDirectoryContact(directory, supplierName) {
+  if (!supplierName || isPlaceholderSupplier(supplierName) || isMixedSuppliersSummary(supplierName)) {
+    return null;
+  }
+  const map = buildSupplierDirectoryMap(directory);
+  return map.get(normalizeDirectoryLookupName(supplierName)) || null;
+}
+
+function firstNonEmptyEmailString(candidates = []) {
+  for (const raw of candidates) {
+    const clean = String(raw ?? '').trim();
+    if (clean) return clean;
+  }
+  return '';
+}
+
+function areAllGroupItemsLocallyClosed(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return false;
+  return items.every((it) => {
+    const st = String(it?.status || '').toLowerCase().trim();
+    const res = String(it?.workflow_resolution || it?.ai_document_metadata?.workflow_resolution || '').toLowerCase().trim();
+    return Boolean(
+      it?.picked_up_at ||
+      it?.case_closed_at ||
+      ['picked_up', 'picked_up_by_supplier', 'buffer_replacement_dispatched', 'buffer_dispatched', 'restocked', 'scrapped', 'disposed', 'rejected', 'resolved', 'closed'].includes(st) ||
+      ['restocked', 'scrapped_no_reorder'].includes(res)
+    );
+  });
+}
+
+export function resolveReportPartyAndEmails(report, catalogProducts = [], options = {}) {
   const meta = (report?.ai_document_metadata && typeof report.ai_document_metadata === 'object')
     ? report.ai_document_metadata
     : {};
@@ -227,31 +307,86 @@ export function resolveReportPartyAndEmails(report, catalogProducts = []) {
     ? catalogProducts.find((p) => p?.barcode && String(p.barcode).trim() === bc)
     : null;
 
+  const explicitSupplier = options.supplierName;
+  const rawParentSup = String(report?.supplier_name || report?.supplierName || '').trim();
   const supplierCandidate = [
+    explicitSupplier,
+    report?._effectiveSupplierName,
     pickup.supplier_name,
-    report?.supplier_name,
-    report?.supplierName,
+    isMixedSuppliersSummary(rawParentSup) ? '' : rawParentSup,
     report?.supplier,
     matchedCatalog?.supplier_name,
     matchedCatalog?.supplierName
-  ].find((cand) => !isPlaceholderSupplier(cand));
+  ].find((cand) => !isPlaceholderSupplier(cand) && !isMixedSuppliersSummary(cand));
 
   const supplierName = supplierCandidate ? String(supplierCandidate).trim() : '';
   const hasValidSupplier = Boolean(supplierName);
+  const supplierKey = normalizeSupplierGroupKey(supplierName);
 
-  const isSupplierStream = report?.rma_type === 'supplier_outbound';
   const customerBranch = !isPlaceholderSupplier(pickup.customer_name)
     ? String(pickup.customer_name).trim()
     : (!isPlaceholderSupplier(report?.store_branch) ? String(report.store_branch).trim() : '');
 
-  const supplierEmailTo = String(followUp.supplier_email_to ?? pickup.supplier_email_to ?? '').trim();
-  const supplierEmailCc = String(followUp.supplier_email_cc ?? pickup.supplier_email_cc ?? '').trim();
+  const bySupplierMap = (followUp.by_supplier && typeof followUp.by_supplier === 'object') ? followUp.by_supplier : {};
+  const scopedBySup = supplierKey !== '__unassigned__' ? (bySupplierMap[supplierKey] || null) : null;
+
+  const itemEmailsMap = (followUp.item_emails && typeof followUp.item_emails === 'object') ? followUp.item_emails : {};
+  const itemKeyCandidate = String(options.itemKey || report?._itemKey || report?.id || report?.item_id || '').trim();
+  const lineRefCandidate = options.parentLineRef || report?._parentLineRef;
+  const itemEmailEntry =
+    (itemKeyCandidate && itemEmailsMap[itemKeyCandidate]) ||
+    (lineRefCandidate && (itemEmailsMap[`line_${lineRefCandidate}`] || itemEmailsMap[String(lineRefCandidate)])) ||
+    null;
+
+  const isExplicitlyCleared = Boolean(
+    options.emailCleared ||
+    report?.email_cleared ||
+    itemEmailEntry?.email_cleared ||
+    scopedBySup?.email_cleared ||
+    (followUp.supplier_email_cleared && (!hasValidSupplier || normalizeSupplierGroupKey(followUp.supplier_name) === supplierKey))
+  );
+
+  const hasDistinctMultiSuppliersInMap = Object.keys(bySupplierMap).filter((k) => k && k !== '__unassigned__').length > 1;
+  const parentSupKey = normalizeSupplierGroupKey(followUp.supplier_name || (!isMixedSuppliersSummary(rawParentSup) ? rawParentSup : ''));
+  const canInheritParentFollowUp =
+    !isMixedSuppliersSummary(rawParentSup) &&
+    !hasDistinctMultiSuppliersInMap &&
+    (supplierKey === '__unassigned__' || parentSupKey === '__unassigned__' || parentSupKey === supplierKey);
+
+  const dirContact = options.directory
+    ? lookupSupplierDirectoryContact(options.directory, supplierName)
+    : null;
+
+  const supplierEmailTo = isExplicitlyCleared && !options.supplierEmailTo && !report?.supplier_email_to && !scopedBySup?.supplier_email_to
+    ? ''
+    : firstNonEmptyEmailString([
+        options.supplierEmailTo,
+        report?.supplier_email_to,
+        itemEmailEntry?.supplier_email_to,
+        scopedBySup?.supplier_email_to,
+        canInheritParentFollowUp ? followUp.supplier_email_to : '',
+        canInheritParentFollowUp ? pickup.supplier_email_to : '',
+        dirContact ? dirContact.emailToList.join(', ') : ''
+      ]);
+
+  const supplierEmailCc = isExplicitlyCleared && !options.supplierEmailCc && !report?.supplier_email_cc && !scopedBySup?.supplier_email_cc
+    ? ''
+    : firstNonEmptyEmailString([
+        options.supplierEmailCc,
+        report?.supplier_email_cc,
+        itemEmailEntry?.supplier_email_cc,
+        scopedBySup?.supplier_email_cc,
+        canInheritParentFollowUp ? followUp.supplier_email_cc : '',
+        canInheritParentFollowUp ? pickup.supplier_email_cc : '',
+        dirContact ? dirContact.emailCcList.join(', ') : ''
+      ]);
 
   const toEmails = splitEmailStringOrList(supplierEmailTo);
   const ccEmails = splitEmailStringOrList(supplierEmailCc).filter((e) => !toEmails.includes(e));
 
   return {
     supplierName: supplierName || 'Pending Assignment',
+    supplierKey,
     hasValidSupplier,
     customerBranch: customerBranch || 'Wholesale Customer',
     supplierEmailTo,
@@ -265,6 +400,336 @@ export function resolveReportPartyAndEmails(report, catalogProducts = []) {
   };
 }
 
+function buildScopedReportFromGroup(report, group) {
+  if (!report || !group) return report;
+  const baseMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+    ? report.ai_document_metadata
+    : {};
+  const baseFollowUp = (baseMeta.follow_up && typeof baseMeta.follow_up === 'object')
+    ? baseMeta.follow_up
+    : {};
+  const bySupMap = (baseFollowUp.by_supplier && typeof baseFollowUp.by_supplier === 'object')
+    ? baseFollowUp.by_supplier
+    : {};
+  const hasAnyBySupplierEntries = Object.keys(bySupMap).length > 0;
+  const supEntry = (group.supplierFollowUpMeta && typeof group.supplierFollowUpMeta === 'object')
+    ? group.supplierFollowUpMeta
+    : (bySupMap[group.supplierKey] || null);
+
+  // If other suppliers already started per-supplier tracking in `by_supplier`, a newly added supplier must NOT
+  // inherit a sibling supplier's sent dates, sim step markers, pickup timestamps, or closure flags.
+  const scopedFollowUp = supEntry
+    ? {
+        ...baseFollowUp,
+        ...supEntry,
+        supplier_name: group.supplierName,
+        supplier_email_to: group.supplierEmailTo,
+        supplier_email_cc: group.supplierEmailCc
+      }
+    : hasAnyBySupplierEntries
+      ? {
+          enabled: baseFollowUp.enabled,
+          manually_disabled: baseFollowUp.manually_disabled,
+          started_at: baseFollowUp.started_at,
+          supplier_name: group.supplierName,
+          supplier_email_to: group.supplierEmailTo,
+          supplier_email_cc: group.supplierEmailCc
+        }
+      : {
+          ...baseFollowUp,
+          supplier_name: group.supplierName,
+          supplier_email_to: group.supplierEmailTo,
+          supplier_email_cc: group.supplierEmailCc
+        };
+
+  const singleItem = group.items.length === 1 ? group.items[0] : null;
+  const itemLevelPhotos = group.items.flatMap((it) => (Array.isArray(it?.photos) ? it.photos : [])).filter(Boolean);
+  const scopedPhotos = itemLevelPhotos.length > 0
+    ? itemLevelPhotos
+    : (Array.isArray(report.photos) ? report.photos : []);
+
+  const scopedTotalQty = sumManifestQuantity(group.items, 1);
+
+  return {
+    ...report,
+    is_parent: group.items.length > 1,
+    items: group.items,
+    supplier_name: group.supplierName,
+    supplier_email_to: group.supplierEmailTo,
+    supplier_email_cc: group.supplierEmailCc,
+    quantity: scopedTotalQty,
+    total_quantity: scopedTotalQty,
+    total_items: group.items.length,
+    barcode: singleItem ? (singleItem.barcode ?? report.barcode) : '',
+    code: singleItem ? (singleItem.code ?? singleItem.sku ?? '') : '',
+    sku: singleItem ? (singleItem.sku ?? singleItem.code ?? '') : '',
+    name: singleItem ? (singleItem.name || singleItem.productName || singleItem.product_name || report.name) : `Batch Return Manifest (${group.items.length} Items — ${group.supplierName})`,
+    unit_name: singleItem ? (singleItem.unit_name || singleItem.unit || report.unit_name || 'pc') : 'pc',
+    price: singleItem ? Number(singleItem.price ?? 0) : 0,
+    price_with_vat: singleItem ? Number(singleItem.price_with_vat ?? singleItem.priceWithVat ?? 0) : 0,
+    expiry_date: singleItem ? (singleItem.expiry_date || report.expiry_date || '') : '',
+    reason: singleItem ? (singleItem.reason || report.reason || '') : (group.items.map((it) => it?.reason).find(Boolean) || report.reason || ''),
+    explanation: singleItem ? (singleItem.explanation || report.explanation || '') : '',
+    photos: scopedPhotos,
+    _scopedSupplierGroup: group,
+    ai_document_metadata: {
+      ...baseMeta,
+      follow_up: scopedFollowUp
+    }
+  };
+}
+
+export function createSupplierScopedReportView(report, group) {
+  return buildScopedReportFromGroup(report, group);
+}
+
+/**
+ * Groups an RMA report's manifest items by normalized supplier for split follow-up emails & scoped `.xlsx` generation.
+ * Never leaks Supplier A items/emails to Supplier B; keeps unassigned items in a single internal-only bucket.
+ */
+export function groupReportItemsBySupplierForFollowUp(report, allReports = [], catalogProducts = [], options = {}) {
+  if (!report) return [];
+  const dirMap = buildSupplierDirectoryMap(options.directory);
+  const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+    ? report.ai_document_metadata
+    : {};
+  const followUp = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
+  const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object') ? meta.supplier_pickup : {};
+  const itemEmailsMap = (followUp.item_emails && typeof followUp.item_emails === 'object') ? followUp.item_emails : {};
+  const bySupMap = (followUp.by_supplier && typeof followUp.by_supplier === 'object') ? followUp.by_supplier : {};
+
+  const rawManifest = getReportManifestItems(report, allReports);
+  const isBatchParent =
+    rawManifest.length > 1 ||
+    Boolean(report.is_parent) ||
+    String(report.name || '').toLowerCase().startsWith('batch return manifest');
+  const rawItems = rawManifest.length > 0 ? rawManifest : [report];
+
+  const rawParentSup = String(report.supplier_name || report.supplierName || '').trim();
+  const parentSupFallback = (!isMixedSuppliersSummary(rawParentSup) && isRealSupplierName(rawParentSup))
+    ? rawParentSup
+    : '';
+
+  const enrichedItems = rawItems.map((it, idx) => {
+    const parentLineRef = Number(it?._parentLineRef || (idx + 1));
+    const itemKey = String(it?._itemKey || it?.id || it?.item_id || `line_${parentLineRef}`).trim();
+    const bc = String(it?.barcode || (!isBatchParent ? report.barcode : '') || '').trim();
+    const matchedCat = (Array.isArray(catalogProducts) && bc)
+      ? catalogProducts.find((p) => p?.barcode && String(p.barcode).trim() === bc)
+      : null;
+
+    const itemSupCand = [
+      it?.supplier_name,
+      it?.supplierName,
+      it?.supplier,
+      !isBatchParent ? pickup.supplier_name : '',
+      !isBatchParent ? parentSupFallback : '',
+      it?.supplier_name === undefined && !isMixedSuppliersSummary(rawParentSup) ? parentSupFallback : '',
+      matchedCat?.supplier_name,
+      matchedCat?.supplierName
+    ].find((cand) => isRealSupplierName(cand));
+
+    const effectiveSupplierName = itemSupCand ? String(itemSupCand).trim() : 'Pending Assignment';
+    const supplierKey = normalizeSupplierGroupKey(effectiveSupplierName);
+    const hasValidSupplier = supplierKey !== '__unassigned__';
+
+    return {
+      item: {
+        ...it,
+        _parentLineRef: parentLineRef,
+        _itemKey: itemKey,
+        _effectiveSupplierName: effectiveSupplierName
+      },
+      parentLineRef,
+      itemKey,
+      supplierKey,
+      effectiveSupplierName,
+      hasValidSupplier
+    };
+  });
+
+  const distinctRealSupplierKeys = new Set(
+    enrichedItems.filter((x) => x.supplierKey !== '__unassigned__').map((x) => x.supplierKey)
+  );
+  const followUpSupKey = normalizeSupplierGroupKey(followUp.supplier_name || parentSupFallback);
+  const singleSupplierMatchesFollowUp =
+    !isBatchParent ||
+    (distinctRealSupplierKeys.size <= 1 && (followUpSupKey === '__unassigned__' || distinctRealSupplierKeys.has(followUpSupKey)));
+
+  const bucketOrder = [];
+  const buckets = new Map();
+
+  for (const entry of enrichedItems) {
+    const { item, parentLineRef, itemKey, supplierKey, effectiveSupplierName, hasValidSupplier } = entry;
+    if (!buckets.has(supplierKey)) {
+      buckets.set(supplierKey, {
+        supplierKey,
+        supplierName: effectiveSupplierName,
+        hasValidSupplier,
+        isUnassignedBucket: supplierKey === '__unassigned__',
+        isBatchSlice: isBatchParent,
+        parentLineRefs: [],
+        itemKeys: [],
+        items: [],
+        toEmailSet: new Set(),
+        ccEmailSet: new Set(),
+        explicitClear: false
+      });
+      bucketOrder.push(supplierKey);
+    }
+
+    const bucket = buckets.get(supplierKey);
+    bucket.parentLineRefs.push(parentLineRef);
+    bucket.itemKeys.push(itemKey);
+
+    const itemEmailMeta =
+      itemEmailsMap[itemKey] ||
+      itemEmailsMap[`line_${parentLineRef}`] ||
+      itemEmailsMap[String(parentLineRef)] ||
+      null;
+    const bySupEntry = supplierKey !== '__unassigned__' ? (bySupMap[supplierKey] || null) : null;
+    const dirContact = hasValidSupplier ? lookupSupplierDirectoryContact(dirMap, effectiveSupplierName) : null;
+
+    const itemCleared = Boolean(
+      item.email_cleared ||
+      itemEmailMeta?.email_cleared ||
+      bySupEntry?.email_cleared ||
+      (singleSupplierMatchesFollowUp && followUp.supplier_email_cleared)
+    );
+
+    const canInheritParentScalar =
+      singleSupplierMatchesFollowUp &&
+      (!hasValidSupplier || followUpSupKey === '__unassigned__' || followUpSupKey === supplierKey);
+
+    const itemFollowUp = (item.ai_document_metadata?.follow_up && typeof item.ai_document_metadata.follow_up === 'object')
+      ? item.ai_document_metadata.follow_up
+      : {};
+
+    const resolvedItemToRaw = itemCleared && !item.supplier_email_to && !itemEmailMeta?.supplier_email_to && !bySupEntry?.supplier_email_to
+      ? ''
+      : firstNonEmptyEmailString([
+          item.supplier_email_to,
+          itemFollowUp.supplier_email_to,
+          itemEmailMeta?.supplier_email_to,
+          bySupEntry?.supplier_email_to,
+          canInheritParentScalar ? followUp.supplier_email_to : '',
+          canInheritParentScalar ? pickup.supplier_email_to : '',
+          dirContact ? dirContact.emailToList.join(', ') : ''
+        ]);
+
+    const resolvedItemCcRaw = itemCleared && !item.supplier_email_cc && !itemEmailMeta?.supplier_email_cc && !bySupEntry?.supplier_email_cc
+      ? ''
+      : firstNonEmptyEmailString([
+          item.supplier_email_cc,
+          itemFollowUp.supplier_email_cc,
+          itemEmailMeta?.supplier_email_cc,
+          bySupEntry?.supplier_email_cc,
+          canInheritParentScalar ? followUp.supplier_email_cc : '',
+          canInheritParentScalar ? pickup.supplier_email_cc : '',
+          dirContact ? dirContact.emailCcList.join(', ') : ''
+        ]);
+
+    const itemToList = splitEmailStringOrList(resolvedItemToRaw);
+    const itemCcList = splitEmailStringOrList(resolvedItemCcRaw).filter((e) => !itemToList.includes(e));
+
+    itemToList.forEach((e) => bucket.toEmailSet.add(e));
+    itemCcList.forEach((e) => bucket.ccEmailSet.add(e));
+    if (itemCleared) bucket.explicitClear = true;
+
+    bucket.items.push({
+      ...item,
+      supplier_name: hasValidSupplier ? effectiveSupplierName : (item.supplier_name || 'Pending Assignment'),
+      supplier_email_to: itemToList.join(', '),
+      supplier_email_cc: itemCcList.join(', ')
+    });
+  }
+
+  const rawStatusLower = String(report?.status || '').toLowerCase();
+  const isClosedParentStatus = [
+    'picked_up',
+    'picked_up_by_supplier',
+    'buffer_replacement_dispatched',
+    'buffer_dispatched',
+    'restocked',
+    'scrapped',
+    'disposed',
+    'rejected',
+    'resolved',
+    'closed'
+  ].includes(rawStatusLower);
+  const parentIsExplicitlyOpen =
+    !isClosedParentStatus &&
+    !followUp.case_closed_at &&
+    !followUp.picked_up_at &&
+    !followUp.auto_disposed_at &&
+    !pickup.picked_up_at;
+
+  return bucketOrder.map((key) => {
+    const b = buckets.get(key);
+    const toEmails = Array.from(b.toEmailSet);
+    const ccEmails = Array.from(b.ccEmailSet).filter((e) => !toEmails.includes(e));
+    const rawSupMeta = (b.supplierKey !== '__unassigned__' ? bySupMap[b.supplierKey] : bySupMap.__unassigned__) || null;
+    // In a single-supplier RMA (non-mixed), parent follow_up state is authoritative when explicitly reopened/reset.
+    let supplierFollowUpMeta = rawSupMeta;
+    if (bucketOrder.length === 1 && parentIsExplicitlyOpen && rawSupMeta && typeof rawSupMeta === 'object') {
+      const sanitizedMeta = { ...rawSupMeta };
+      delete sanitizedMeta.enabled;
+      delete sanitizedMeta.manually_disabled;
+      delete sanitizedMeta.picked_up_at;
+      delete sanitizedMeta.case_closed_at;
+      delete sanitizedMeta.case_status;
+      delete sanitizedMeta.auto_disposed_at;
+      delete sanitizedMeta.close_reason;
+      delete sanitizedMeta.closed_by;
+      supplierFollowUpMeta = sanitizedMeta;
+    }
+
+    const groupObj = {
+      supplierKey: b.supplierKey,
+      supplierName: b.supplierName,
+      hasValidSupplier: b.hasValidSupplier,
+      isUnassignedBucket: b.isUnassignedBucket,
+      isBatchSlice: b.isBatchSlice,
+      parentLineRefs: b.parentLineRefs,
+      itemKeys: b.itemKeys,
+      items: b.items,
+      totalQuantity: sumManifestQuantity(b.items, 1),
+      toEmails,
+      ccEmails,
+      supplierEmailTo: toEmails.join(', '),
+      supplierEmailCc: ccEmails.join(', '),
+      internalOnly: toEmails.length === 0,
+      supplierFollowUpMeta
+    };
+
+    const scopedReport = buildScopedReportFromGroup(report, groupObj);
+    const groupWorkflow = computeFourStepWorkflow(scopedReport, catalogProducts, {
+      ...options,
+      directory: dirMap,
+      supplierName: groupObj.supplierName,
+      supplierEmailTo: groupObj.supplierEmailTo,
+      supplierEmailCc: groupObj.supplierEmailCc,
+      emailCleared: b.explicitClear
+    });
+
+    if (areAllGroupItemsLocallyClosed(groupObj.items) && !groupWorkflow.isClosed) {
+      groupWorkflow.isClosed = true;
+      groupWorkflow.isCountdownActive = false;
+      groupWorkflow.step4 = {
+        ...groupWorkflow.step4,
+        done: true,
+        reason: 'Items Resolved',
+        dateDisplay: groupWorkflow.step4.dateDisplay === 'Open' ? 'Case Closed' : groupWorkflow.step4.dateDisplay
+      };
+    }
+
+    return {
+      ...groupObj,
+      workflow: groupWorkflow
+    };
+  });
+}
+
 /**
  * Computes the complete 4-Step Workflow & 10-Calendar-Day SLA state for an RMA report.
  */
@@ -272,7 +737,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   const nowDate = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const stream = report?.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
   const isSupplierStream = stream === 'supplier_outbound';
-  const party = resolveReportPartyAndEmails(report, catalogProducts);
+  const party = resolveReportPartyAndEmails(report, catalogProducts, options);
   const { meta, pickupMeta, followUpMeta } = party;
 
   const statusLower = String(report?.status || '').toLowerCase().trim();
@@ -757,15 +1222,17 @@ export function getCleanHumanWorkflowStatus(report, catalogProducts = [], option
   };
 }
 
-export function buildFollowUpEmailSubject({ report, supplierName, calendarDay, isTestMode = false, now = new Date() }) {
+export function buildFollowUpEmailSubject({ report, supplierName, calendarDay, isTestMode = false, internalOnly = false, now = new Date() }) {
   const rmaNumber = report?.rma_number || report?.rmaNumber || 'RMA-PENDING';
   const monthDayYr = formatMonthDayYear(now);
   const clampedDay = Math.max(0, Math.min(FOLLOW_UP_MAX_DAYS, Number(calendarDay || 0)));
   const isSupplier = report?.rma_type === 'supplier_outbound';
   const partyLabel = supplierName || 'Pending Assignment';
-  const base = isSupplier
-    ? `[Follow-Up | ${monthDayYr} — Day ${clampedDay} of ${FOLLOW_UP_MAX_DAYS}] ${rmaNumber}: Waiting for Supplier Pickup (${partyLabel})`
-    : `[Follow-Up | ${monthDayYr} — Day ${clampedDay} of ${FOLLOW_UP_MAX_DAYS}] ${rmaNumber}: Waiting for Customer Handover (${partyLabel})`;
+  const actionPhrase = isSupplier ? 'Waiting for Supplier Pickup' : 'Waiting for Customer Handover';
+  const internalSuffix = internalOnly
+    ? (isSupplier ? ' [Internal Reminder — Supplier Email Pending]' : ' [Internal Reminder — Email Pending]')
+    : '';
+  const base = `[Follow-Up | ${monthDayYr} — Day ${clampedDay} of ${FOLLOW_UP_MAX_DAYS}] ${rmaNumber}: ${actionPhrase} (${partyLabel})${internalSuffix}`;
   return formatTestEmailSubject(base, isTestMode);
 }
 
@@ -907,25 +1374,44 @@ export function buildFollowUpEmailContent({
   allReports = [],
   catalogProducts = [],
   workflow = null,
+  supplierGroup = null,
+  actualRecipients = null,
+  internalOnly = null,
+  attachFilename = '',
   isTestMode = false,
   sandboxEmail = DEFAULT_SANDBOX_EMAIL,
   now = new Date()
 }) {
-  const wf = workflow || computeFourStepWorkflow(report, catalogProducts, { now });
+  const scopedReport = supplierGroup ? buildScopedReportFromGroup(report, supplierGroup) : report;
+  const wf = workflow || supplierGroup?.workflow || computeFourStepWorkflow(scopedReport, catalogProducts, { now });
   const rmaNumber = report?.rma_number || report?.rmaNumber || 'RMA-PENDING';
-  const partyName = wf.isSupplierStream ? wf.party.supplierName : (wf.party.supplierName !== 'Pending Assignment' ? wf.party.supplierName : wf.party.customerBranch);
+  const partyName = supplierGroup
+    ? supplierGroup.supplierName
+    : (wf.isSupplierStream ? wf.party.supplierName : (wf.party.supplierName !== 'Pending Assignment' ? wf.party.supplierName : wf.party.customerBranch));
+  const isInternalReminder = internalOnly !== null
+    ? Boolean(internalOnly)
+    : Boolean(supplierGroup ? supplierGroup.internalOnly : (wf.party.toEmails.length === 0));
+
   const subject = buildFollowUpEmailSubject({
-    report,
+    report: scopedReport,
     supplierName: partyName,
     calendarDay: wf.calendarDay,
     isTestMode,
+    internalOnly: isInternalReminder,
     now
   });
 
-  const { rows, photos, tableHtml, photosHtml } = renderItemsAndPhotosHtml(report, allReports, catalogProducts);
+  const { rows, photos, tableHtml, photosHtml } = renderItemsAndPhotosHtml(scopedReport, allReports, catalogProducts);
   const warningText = wf.isSupplierStream
     ? 'Waiting for supplier to pick up bad order for only 10 calendar days. After 10 calendar days, items will be automatically disposed of / scrapped due to health and sanitation risks.'
     : 'Waiting for pickup / handover completion within 10 calendar days. After 10 calendar days, held items may be automatically closed / disposed of due to health and sanitation risks.';
+
+  const routedToList = Array.isArray(actualRecipients?.toList) && actualRecipients.toList.length > 0
+    ? actualRecipients.toList
+    : [normalizeSandboxEmail(sandboxEmail)];
+  const routedCcList = Array.isArray(actualRecipients?.ccList) ? actualRecipients.ccList : [];
+  const savedSupplierTo = supplierGroup ? supplierGroup.toEmails : wf.party.toEmails;
+  const savedSupplierCc = supplierGroup ? supplierGroup.ccEmails : wf.party.ccEmails;
 
   const daysRemaining = Math.max(0, FOLLOW_UP_MAX_DAYS - wf.calendarDay);
   const html = `
@@ -936,7 +1422,7 @@ export function buildFollowUpEmailContent({
       <div style="max-width: 660px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden;">
         <div style="background: #92400e; padding: 22px 26px; color: #ffffff;">
           <div style="display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: rgba(255,255,255,0.2); margin-bottom: 8px;">
-            ${isTestMode ? `[TEST] DAY ${wf.calendarDay} OF 10 FOLLOW-UP` : `DAY ${wf.calendarDay} OF 10 PICKUP FOLLOW-UP`}
+            ${isTestMode ? `[TEST] DAY ${wf.calendarDay} OF 10 FOLLOW-UP` : `DAY ${wf.calendarDay} OF 10 PICKUP FOLLOW-UP`}${isInternalReminder ? ' • INTERNAL ONLY (SUPPLIER EMAIL PENDING)' : ''}
           </div>
           <h1 style="margin: 0; font-size: 19px; font-weight: 800;">${isTestMode ? '[TEST] ' : ''}Bad Order Pickup Follow-Up: ${escapeHtml(rmaNumber)}</h1>
           <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
@@ -945,8 +1431,20 @@ export function buildFollowUpEmailContent({
         </div>
         <div style="padding: 24px;">
           ${isTestMode ? `
-          <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700;">
-            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
+          <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700; line-height: 1.5;">
+            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Live vendor directory bypassed.<br/>
+            Routed TO: <span style="font-family: monospace;">${escapeHtml(routedToList.join(', '))}</span>${routedCcList.length > 0 ? ` • CC: <span style="font-family: monospace;">${escapeHtml(routedCcList.join(', '))}</span>` : ''}<br/>
+            ${savedSupplierTo.length > 0 ? `Saved Test Supplier Email(s): <span style="font-family: monospace;">${escapeHtml(savedSupplierTo.join(', '))}</span>${savedSupplierCc.length > 0 ? ` (CC: ${escapeHtml(savedSupplierCc.join(', '))})` : ''}` : `Supplier Email: Pending Assignment (Internal/Sandbox Recipients Only)`}
+          </div>` : ''}
+
+          ${isInternalReminder ? `
+          <div style="background: #eff6ff; border: 1px solid #93c5fd; color: #1e3a8a; padding: 12px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; line-height: 1.5;">
+            <strong>📋 Internal Action Needed — Supplier Email Pending:</strong> No external supplier email is assigned to <strong>${escapeHtml(partyName)}</strong> yet, so this reminder was sent strictly to your internal team. Save a Supplier Email in the Portal or reply with the attached <code>.xlsx</code> worksheet to automatically include the supplier on upcoming follow-ups.
+          </div>` : ''}
+
+          ${attachFilename ? `
+          <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700;">
+            📎 Attached 2-Way Reply Worksheet (.xlsx): <span style="font-family: monospace;">${escapeHtml(attachFilename)}</span> (Scoped strictly to <strong>${escapeHtml(partyName)}</strong> — edit values inline and reply to update automatically)
           </div>` : ''}
 
           <div style="background: #fff1f2; border: 2px solid #fda4af; color: #881337; padding: 14px 16px; border-radius: 12px; margin-bottom: 18px; font-size: 13px; line-height: 1.5;">
@@ -957,7 +1455,7 @@ export function buildFollowUpEmailContent({
           <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: #475569; margin-bottom: 4px;">4-Step Workflow &amp; Dates (${escapeHtml(rmaNumber)})</div>
           ${renderWorkflowStepsHtml(wf)}
 
-          <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: #475569; margin: 18px 0 4px;">Item Details</div>
+          <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: #475569; margin: 18px 0 4px;">Item Details (${rows.length})</div>
           ${tableHtml}
           ${photosHtml}
         </div>
@@ -979,7 +1477,9 @@ export function buildFollowUpEmailContent({
 
   const text = [
     subject,
-    `${wf.isSupplierStream ? 'Supplier' : 'Party'}: ${partyName}`,
+    `${wf.isSupplierStream ? 'Supplier' : 'Party'}: ${partyName}${isInternalReminder ? ' [Internal Reminder — Supplier Email Pending]' : ''}`,
+    ...(isTestMode ? [`TEST MODE — Routed TO: ${routedToList.join(', ')}${routedCcList.length > 0 ? ` | CC: ${routedCcList.join(', ')}` : ''}`] : []),
+    ...(attachFilename ? [`Attached .xlsx Worksheet: ${attachFilename}`] : []),
     warningText,
     `Step 1 (Report Date): ${wf.step1.dateDisplay} | Step 2: ${wf.step2.text} | Step 3 (Driver Picked Up): ${wf.step3.dateDisplay} | Step 4 (Case Close): ${wf.step4.dateDisplay}`,
     ...timelineText,
@@ -995,6 +1495,7 @@ export function buildAutoDisposedEmailContent({
   allReports = [],
   catalogProducts = [],
   workflow = null,
+  actualRecipients = null,
   isTestMode = false,
   sandboxEmail = DEFAULT_SANDBOX_EMAIL,
   now = new Date()
@@ -1003,11 +1504,17 @@ export function buildAutoDisposedEmailContent({
   const rmaNumber = report?.rma_number || report?.rmaNumber || 'RMA-PENDING';
   const partyName = wf.isSupplierStream ? wf.party.supplierName : (wf.party.supplierName !== 'Pending Assignment' ? wf.party.supplierName : wf.party.customerBranch);
   const rawSub = wf.isSupplierStream
-    ? `[Auto-Disposed >10 Days] ${rmaNumber}: Unclaimed Supplier Bad Order Disposed (${partyName})`
-    : `[Auto-Closed >10 Days] ${rmaNumber}: 10-Day Handover Window Elapsed (${partyName})`;
+    ? `[Auto-Disposed >10 Days] ${rmaNumber}: Unclaimed Supplier Bad Order Disposed (${partyName}) — Internal Only`
+    : `[Auto-Closed >10 Days] ${rmaNumber}: 10-Day Handover Window Elapsed (${partyName}) — Internal Only`;
   const subject = formatTestEmailSubject(rawSub, isTestMode);
 
   const { rows, photos, tableHtml, photosHtml } = renderItemsAndPhotosHtml(report, allReports, catalogProducts);
+  const routedToStr = Array.isArray(actualRecipients?.toList) && actualRecipients.toList.length > 0
+    ? actualRecipients.toList.join(', ')
+    : normalizeSandboxEmail(sandboxEmail);
+  const routedCcStr = Array.isArray(actualRecipients?.ccList) && actualRecipients.ccList.length > 0
+    ? actualRecipients.ccList.join(', ')
+    : '';
 
   const html = `
     <!DOCTYPE html>
@@ -1017,7 +1524,7 @@ export function buildAutoDisposedEmailContent({
       <div style="max-width: 660px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden;">
         <div style="background: #9f1239; padding: 22px 26px; color: #ffffff;">
           <div style="display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: rgba(255,255,255,0.2); margin-bottom: 8px;">
-            ${isTestMode ? '[TEST] 10-DAY SLA AUTO-DISPOSED' : '10-DAY SLA AUTO-DISPOSED & CLOSED'}
+            ${isTestMode ? '[TEST] 10-DAY SLA AUTO-DISPOSED • INTERNAL ONLY' : '10-DAY SLA AUTO-DISPOSED & CLOSED • INTERNAL ONLY'}
           </div>
           <h1 style="margin: 0; font-size: 19px; font-weight: 800;">${isTestMode ? '[TEST] ' : ''}RMA Auto-Disposed After 10 Calendar Days: ${escapeHtml(rmaNumber)}</h1>
           <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
@@ -1027,11 +1534,11 @@ export function buildAutoDisposedEmailContent({
         <div style="padding: 24px;">
           ${isTestMode ? `
           <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px; font-weight: 700;">
-            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Delivered safely to ${escapeHtml(normalizeSandboxEmail(sandboxEmail))} only.
+            🧪 TEST MODE ACTIVE${wf.isAcceleratedTestSla ? ` (Accelerated SLA: 1 Simulated Day = ${escapeHtml(formatDurationCompact(wf.testStepIntervalSeconds))})` : ''} — Routed strictly to Test internal recipients: <span style="font-family: monospace;">${escapeHtml(routedToStr)}</span>${routedCcStr ? ` (CC: ${escapeHtml(routedCcStr)})` : ''}.
           </div>` : ''}
 
           <div style="background: #fff1f2; border: 1px solid #fecdd3; color: #881337; padding: 14px 16px; border-radius: 12px; margin-bottom: 18px; font-size: 13px;">
-            The 10-calendar-day pickup window (${wf.step1.dateYmd} to ${wf.step4.dateYmd || getManilaDateYmd(now)}) expired with no pickup recorded. This item has been automatically marked <strong>Scrapped / Disposed</strong> (<strong>Disposal / Scrap Area</strong>) due to health and sanitation risks, and the case is now closed.
+            <strong>Internal Employees Only (Never Sent to External Suppliers):</strong> The 10-calendar-day pickup window (${wf.step1.dateYmd} to ${wf.step4.dateYmd || getManilaDateYmd(now)}) expired with no pickup recorded. This item has been automatically marked <strong>Scrapped / Disposed</strong> (<strong>Disposal / Scrap Area</strong>) due to health and sanitation risks, and the case is now closed.
           </div>
 
           <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: #475569; margin-bottom: 4px;">4-Step Workflow &amp; Closure Audit</div>
@@ -1042,7 +1549,7 @@ export function buildAutoDisposedEmailContent({
           ${photosHtml}
         </div>
         <div style="background: #f1f5f9; padding: 14px 24px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0;">
-          Pingcon Marketing Operations • Dispatched to Configured New RMA Alert Recipients + Customer AE
+          Pingcon Marketing Operations • Strictly Internal Employee Notice (Never Sent to Suppliers)
         </div>
       </div>
     </body>
@@ -1051,6 +1558,7 @@ export function buildAutoDisposedEmailContent({
 
   const text = [
     subject,
+    'INTERNAL OPERATIONS NOTICE — Employees Only (Never Sent to External Suppliers)',
     `Party: ${partyName}`,
     `10-calendar-day pickup window expired on ${getManilaDateYmd(now)} (Asia/Manila). Item automatically disposed / case closed.`,
     `Step 1 Report: ${wf.step1.dateYmd} | Step 2: Expired (Day ${wf.calendarDay}) | Step 3: ${wf.step3.dateDisplay} | Step 4: ${wf.step4.dateDisplay} (${wf.step4.reason})`,

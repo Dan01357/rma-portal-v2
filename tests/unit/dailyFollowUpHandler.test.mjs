@@ -530,3 +530,294 @@ test('handleDailyFollowUp Live Mode uses Live supplier_directory_store (never Te
   assert.equal(db.reportRows[0].ai_document_metadata.follow_up.sent_count, 1);
 });
 
+test('Point 2 & 3 (Test & Live): explicit saved supplier email routes with internal new_rma+supplier_followup; missing supplier email continues internally', async () => {
+  const sentEmails = [];
+  const now = new Date('2026-11-28T05:30:00.000Z');
+  const db = createSupabaseStub({
+    settings: [
+      {
+        key: 'daily_followup_config',
+        value: {
+          autoEnabled: true,
+          autoSendTimePht: '13:00',
+          customerFollowUpDefaultEnabled: true,
+          testStepIntervalSeconds: 60,
+          testAutoCronEnabled: false
+        }
+      },
+      { key: 'test_sandbox_email', value: 'sandbox@pingcon.ph' },
+      {
+        key: 'test_supplier_directory_store',
+        value: [{ supplier_name: 'Acme Corp', email_to: 'acme@vendor-a.ph' }]
+      },
+      {
+        key: 'test_email_recipients_by_type',
+        value: {
+          new_rma: { toList: ['qa-internal@pingcon.ph'], ccList: ['qa-cc@pingcon.ph'] },
+          supplier_followup: { toList: [], ccList: ['qa-followup-cc@pingcon.ph'] }
+        }
+      },
+      {
+        key: 'email_recipients_by_type',
+        value: {
+          new_rma: { toList: ['ops-internal@pingcon.ph'], ccList: ['finance@pingcon.ph'] },
+          supplier_followup: { toList: [], ccList: ['claims-desk@pingcon.ph'] }
+        }
+      }
+    ],
+    reports: [
+      {
+        id: 901,
+        rma_number: 'RMA-TEST-2026-0901-PT2',
+        rma_type: 'supplier_outbound',
+        status: 'pending',
+        supplier_name: 'Edited Test Vendor',
+        created_at: '2026-11-28T05:29:00.000Z',
+        notes: '[TEST_MODE]',
+        ai_document_metadata: {
+          is_test: true,
+          test_mode: true,
+          follow_up: {
+            enabled: true,
+            started_at: '2026-11-28T05:29:00.000Z',
+            supplier_email_to: 'day7-edited@qa-vendor.test.ph',
+            supplier_email_cc: 'day7-cc@qa-vendor.test.ph'
+          }
+        },
+        audit_trail: []
+      },
+      {
+        id: 902,
+        rma_number: 'RMA-2026-0902-PT3',
+        rma_type: 'supplier_outbound',
+        status: 'pending',
+        supplier_name: 'Pending Assignment',
+        created_at: '2026-11-27T05:00:00.000Z',
+        ai_document_metadata: {
+          follow_up: {
+            enabled: true,
+            started_at: '2026-11-27T05:00:00.000Z',
+            supplier_email_to: ''
+          }
+        },
+        audit_trail: []
+      }
+    ]
+  });
+
+  const resTest = createMockRes();
+  await handleDailyFollowUp(
+    { method: 'POST', query: {}, body: {} },
+    resTest,
+    { action: 'daily-followup', isTestMode: true, dryRun: false, rmaNumber: 'RMA-TEST-2026-0901-PT2' },
+    {
+      supabaseClient: db,
+      authorizeCronOrAdmin: async () => ({ authorized: true, callerType: 'admin', actor: 'QA' }),
+      createSmtpTransport: () => ({
+        configured: true,
+        smtpUser: 'mailer@pingconmarketing.com',
+        transporter: {
+          async sendMail(mail) {
+            sentEmails.push({ lane: 'test', ...mail });
+            return { messageId: 'm1' };
+          }
+        }
+      }),
+      now
+    }
+  );
+  assert.equal(resTest.statusCode, 200);
+  const testMail = sentEmails.find((m) => m.lane === 'test');
+  assert.ok(testMail);
+  assert.equal(testMail.to, 'day7-edited@qa-vendor.test.ph');
+  assert.match(testMail.cc, /qa-internal@pingcon\.ph/);
+  assert.match(testMail.cc, /qa-followup-cc@pingcon\.ph/);
+  assert.equal(Array.isArray(testMail.attachments) && testMail.attachments.length === 1, true);
+  assert.match(testMail.attachments[0].filename, /\.xlsx$/);
+
+  const resLive = createMockRes();
+  await handleDailyFollowUp(
+    { method: 'POST', query: {}, body: {} },
+    resLive,
+    { action: 'daily-followup', isTestMode: false, dryRun: false, rmaNumber: 'RMA-2026-0902-PT3' },
+    {
+      supabaseClient: db,
+      authorizeCronOrAdmin: async () => ({ authorized: true, callerType: 'admin', actor: 'Ops' }),
+      createSmtpTransport: () => ({
+        configured: true,
+        smtpUser: 'mailer@pingconmarketing.com',
+        transporter: {
+          async sendMail(mail) {
+            sentEmails.push({ lane: 'live', ...mail });
+            return { messageId: 'm2' };
+          }
+        }
+      }),
+      now
+    }
+  );
+  assert.equal(resLive.statusCode, 200);
+  assert.equal(resLive.body.summary.skippedCount, 0);
+  const liveMail = sentEmails.find((m) => m.lane === 'live');
+  assert.ok(liveMail);
+  assert.equal(liveMail.to, 'ops-internal@pingcon.ph');
+  assert.match(liveMail.cc, /claims-desk@pingcon\.ph/);
+  assert.match(liveMail.subject, /Internal Reminder/i);
+});
+
+test('Point 4 & 5: mixed-supplier batch splits per supplier with isolated .xlsx workbooks, and auto-dispose strips all supplier emails', async () => {
+  const { extractRmaUpdatesFromXlsxBuffer } = await import('../../api/_lib/imapReplySyncHandler.js');
+  const sentEmails = [];
+  const now = new Date('2026-11-28T05:30:00.000Z');
+  const db = createSupabaseStub({
+    settings: [
+      {
+        key: 'daily_followup_config',
+        value: {
+          autoEnabled: true,
+          autoSendTimePht: '13:00',
+          customerFollowUpDefaultEnabled: true,
+          testStepIntervalSeconds: 60,
+          testAutoCronEnabled: false
+        }
+      },
+      { key: 'test_sandbox_email', value: 'sandbox@pingcon.ph' },
+      {
+        key: 'test_supplier_directory_store',
+        value: [{ supplier_name: 'Acme Corp', email_to: 'acme@vendor-a.ph' }]
+      },
+      {
+        key: 'test_email_recipients_by_type',
+        value: {
+          new_rma: { toList: ['qa-internal@pingcon.ph'], ccList: ['qa-cc@pingcon.ph'] },
+          rma_scrapped: { toList: ['scrap-boss@pingcon.ph', 'leaked-suysing@suysing.ph'], ccList: ['acme@vendor-a.ph'] },
+          supplier_followup: { toList: [], ccList: ['qa-fu@pingcon.ph'] }
+        }
+      }
+    ],
+    reports: [
+      {
+        id: 950,
+        rma_number: 'RMA-TEST-2026-0950-MIX',
+        rma_type: 'supplier_outbound',
+        is_parent: true,
+        status: 'pending',
+        supplier_name: 'Multiple Suppliers (Acme Corp, Suysing)',
+        created_at: '2026-11-28T05:29:00.000Z',
+        notes: '[TEST_MODE]',
+        items: [
+          { id: 'it-1', name: 'Acme Cracker', barcode: '111', code: 'SKU-A1', quantity: 2, unit_name: 'box', price: 111.11, supplier_name: 'Acme Corp', supplier_email_to: 'acme@vendor-a.ph' },
+          { id: 'it-2', name: 'Suysing Oil', barcode: '222', code: 'SKU-S1', quantity: 5, unit_name: 'btl', price: 222.22, supplier_name: 'Suysing', supplier_email_to: 'leaked-suysing@suysing.ph' },
+          { id: 'it-3', name: 'Acme Juice', barcode: '333', code: 'SKU-A2', quantity: 4, unit_name: 'cs', price: 333.33, supplier_name: 'Acme Corp', supplier_email_to: 'acme@vendor-a.ph' },
+          { id: 'it-4', name: 'Unassigned Snack', barcode: '444', code: 'SKU-U1', quantity: 1, unit_name: 'pc', price: 44.44, supplier_name: 'Pending Assignment', supplier_email_to: '' }
+        ],
+        ai_document_metadata: {
+          is_test: true,
+          test_mode: true,
+          follow_up: { enabled: true, started_at: '2026-11-28T05:29:00.000Z' }
+        },
+        audit_trail: []
+      },
+      {
+        id: 951,
+        rma_number: 'RMA-TEST-2026-0951-EXP',
+        rma_type: 'supplier_outbound',
+        status: 'pending',
+        supplier_name: 'Suysing',
+        ae_email: 'leaked-suysing@suysing.ph',
+        created_at: '2026-11-28T05:00:00.000Z',
+        notes: '[TEST_MODE]',
+        ai_document_metadata: {
+          is_test: true,
+          test_mode: true,
+          follow_up: {
+            enabled: true,
+            started_at: '2026-11-28T05:00:00.000Z',
+            supplier_email_to: 'leaked-suysing@suysing.ph'
+          }
+        },
+        audit_trail: []
+      }
+    ]
+  });
+
+  const resMix = createMockRes();
+  await handleDailyFollowUp(
+    { method: 'POST', query: {}, body: {} },
+    resMix,
+    { action: 'daily-followup', isTestMode: true, dryRun: false, rmaNumber: 'RMA-TEST-2026-0950-MIX' },
+    {
+      supabaseClient: db,
+      authorizeCronOrAdmin: async () => ({ authorized: true, callerType: 'admin', actor: 'QA' }),
+      createSmtpTransport: () => ({
+        configured: true,
+        smtpUser: 'mailer@pingconmarketing.com',
+        transporter: {
+          async sendMail(mail) {
+            sentEmails.push(mail);
+            return { messageId: `mix-${sentEmails.length}` };
+          }
+        }
+      }),
+      now
+    }
+  );
+  assert.equal(resMix.statusCode, 200);
+  assert.equal(sentEmails.length, 3);
+
+  const acmeMail = sentEmails.find((m) => m.to === 'acme@vendor-a.ph');
+  const suysingMail = sentEmails.find((m) => m.to === 'leaked-suysing@suysing.ph');
+  const pendingMail = sentEmails.find((m) => m.to === 'qa-internal@pingcon.ph');
+  assert.ok(acmeMail);
+  assert.ok(suysingMail);
+  assert.ok(pendingMail);
+
+  assert.match(acmeMail.html, /Acme Cracker/);
+  assert.match(acmeMail.html, /Acme Juice/);
+  assert.doesNotMatch(acmeMail.html, /Suysing Oil/);
+  assert.doesNotMatch(acmeMail.html, /Unassigned Snack/);
+  assert.match(suysingMail.html, /Suysing Oil/);
+  assert.doesNotMatch(suysingMail.html, /Acme Cracker/);
+  assert.doesNotMatch(suysingMail.html, /111\.11/);
+
+  const parsedSuysingXlsx = extractRmaUpdatesFromXlsxBuffer(suysingMail.attachments[0].content, { subjectHint: suysingMail.subject });
+  assert.equal(parsedSuysingXlsx.patch.supplier_name, 'Suysing');
+  assert.equal(parsedSuysingXlsx.patch.supplier_email_to, 'leaked-suysing@suysing.ph');
+  assert.equal(parsedSuysingXlsx.manifestUpdates.length, 1);
+  assert.equal(parsedSuysingXlsx.manifestUpdates[0].parentLineRef, 2);
+  assert.equal(parsedSuysingXlsx.manifestUpdates[0].name, 'Suysing Oil');
+
+  const parsedPendingXlsx = extractRmaUpdatesFromXlsxBuffer(pendingMail.attachments[0].content, { subjectHint: pendingMail.subject });
+  assert.equal(parsedPendingXlsx.manifestUpdates.length, 1);
+  assert.equal(parsedPendingXlsx.manifestUpdates[0].parentLineRef, 4);
+
+  // Auto-dispose on expired Test RMA must strip external supplier emails even if present in rma_scrapped/ae_email
+  const disposeSent = [];
+  const resDisp = createMockRes();
+  await handleDailyFollowUp(
+    { method: 'POST', query: {}, body: {} },
+    resDisp,
+    { action: 'daily-followup', isTestMode: true, dryRun: false, rmaNumber: 'RMA-TEST-2026-0951-EXP' },
+    {
+      supabaseClient: db,
+      authorizeCronOrAdmin: async () => ({ authorized: true, callerType: 'admin', actor: 'QA' }),
+      createSmtpTransport: () => ({
+        configured: true,
+        smtpUser: 'mailer@pingconmarketing.com',
+        transporter: {
+          async sendMail(mail) {
+            disposeSent.push(mail);
+            return { messageId: 'disp-1' };
+          }
+        }
+      }),
+      now
+    }
+  );
+  assert.equal(resDisp.statusCode, 200);
+  assert.equal(disposeSent.length, 1);
+  assert.equal(disposeSent[0].to, 'scrap-boss@pingcon.ph');
+  assert.doesNotMatch(disposeSent[0].to, /leaked-suysing|acme@/);
+  assert.doesNotMatch(disposeSent[0].cc || '', /leaked-suysing|acme@/);
+});
+
