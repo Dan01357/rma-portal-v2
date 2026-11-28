@@ -167,10 +167,27 @@ export default function TestModeSandboxTab({
           onRefresh?.();
         }
       } else {
+        const errList = Array.isArray(res?.errors) ? res.errors : [];
+        const firstErrObj = errList[0] || null;
+        const firstErrMsg = firstErrObj
+          ? `${firstErrObj?.rmaNumber ? `${firstErrObj.rmaNumber}: ` : ''}${firstErrObj?.message || 'Failed'}`
+          : '';
+        const sent = Number(res?.summary?.followUpsSent || 0);
+        const disposed = Number(res?.summary?.autoDisposed || 0);
+        const partialPrefix = (sent > 0 || disposed > 0)
+          ? `${sent} follow-up(s) sent, ${disposed} auto-disposed, ${errList.length || 1} error(s) — `
+          : '';
+        const detail = res?.error || firstErrMsg || 'Failed running Test SLA tick.';
+        const extraSuffix = errList.length > 1 && !String(detail).includes('more error')
+          ? ` (+${errList.length - 1} more)`
+          : '';
         setTickFeedback({
           type: 'error',
-          text: res?.error || 'Failed running Test SLA tick.'
+          text: `${partialPrefix}${detail}${extraSuffix}`
         });
+        if (sent > 0 || disposed > 0) {
+          onRefresh?.();
+        }
       }
     } catch (err) {
       setTickFeedback({ type: 'error', text: err?.message || 'Error triggering Test SLA tick.' });

@@ -63,41 +63,59 @@ function buildDirectoryLookupMap(rawDir) {
   return map;
 }
 
-async function safeUpdateRmaReport(reportId, updates) {
-  let { data, error } = await supabase
-    .from('rma_reports')
-    .update(updates)
-    .eq('id', reportId)
-    .select();
+export async function safeUpdateRmaReport(reportId, updates, db = supabase) {
+  const currentUpdates = { ...updates };
+  const maxAttempts = Object.keys(currentUpdates).length + 3;
 
-  if (error) {
-    const fallback = { ...updates };
-    if (String(error.message || '').includes('rma_reports_status_check') && fallback.status) {
-      fallback.status = 'under_inspection';
-    }
-    const retry = await supabase
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { data, error } = await db
       .from('rma_reports')
-      .update(fallback)
+      .update(currentUpdates)
       .eq('id', reportId)
       .select();
-    if (retry.error) throw retry.error;
-    data = retry.data;
+
+    if (!error) {
+      return Array.isArray(data) && data.length > 0 ? data[0] : null;
+    }
+
+    const msg = String(error.message || '');
+    const colMatch = msg.match(/Could not find the '([^']+)' column/i)
+      || msg.match(/column (?:rma_reports\.)?([a-zA-Z0-9_]+) does not exist/i);
+
+    let modified = false;
+    if (colMatch && colMatch[1] && Object.prototype.hasOwnProperty.call(currentUpdates, colMatch[1])) {
+      delete currentUpdates[colMatch[1]];
+      modified = true;
+    }
+    if (msg.includes('rma_reports_status_check') && currentUpdates.status && currentUpdates.status !== 'under_inspection') {
+      currentUpdates.status = 'under_inspection';
+      modified = true;
+    }
+
+    if (!modified) {
+      throw error;
+    }
   }
 
-  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+  return null;
 }
 
 /**
  * Handles automated & manual 10-Calendar-Day Pickup Follow-Up emails and Auto-Dispose (>10 days).
  * Invoked via /api/send-email?action=daily-followup to stay within Vercel's 12-function cap.
  */
-export async function handleDailyFollowUp(req, res, preParsedBody = null) {
+export async function handleDailyFollowUp(req, res, preParsedBody = null, deps = {}) {
+  const db = deps.supabaseClient || supabase;
+  const authorize = deps.authorizeCronOrAdmin || authorizeCronOrAdmin;
+  const createSmtp = deps.createSmtpTransport || createSmtpTransport;
+  const syncReplies = deps.syncEmailRepliesInternal || syncEmailRepliesInternal;
+
   if (!['GET', 'POST'].includes(req.method)) {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const auth = await authorizeCronOrAdmin(req);
+  const auth = await authorize(req);
   if (!auth.authorized) {
     return res.status(auth.status).json({
       error: auth.error,
@@ -146,7 +164,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     req.query?.respectSchedule === '1'
   );
 
-  const nowDate = new Date();
+  const nowDate = deps.now instanceof Date ? deps.now : new Date();
   const nowIso = nowDate.toISOString();
   const todayManila = getManilaDateYmd(nowDate);
   const currentHhmm = getManilaTimeHhmm(nowDate);
@@ -154,7 +172,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   // 1. Load configuration from rma_settings
   const settingsMap = new Map();
   try {
-    const { data: settingsRows } = await supabase
+    const { data: settingsRows } = await db
       .from('rma_settings')
       .select('key, value')
       .in('key', [
@@ -199,7 +217,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   let replySyncSummary = null;
   if (alsoSyncReplies && !dryRun) {
     try {
-      replySyncSummary = await syncEmailRepliesInternal({
+      replySyncSummary = await syncReplies({
         triggerSource: auth.callerType === 'cron' ? 'cron_followup_sweep' : 'admin_followup',
         caller: auth.actor
       });
@@ -290,21 +308,22 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
   // 3. Prepare SMTP transport if sending real emails
   let transporter = null;
-  const gmailUser = String(process.env.GMAIL_USER || '').trim();
-  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').trim();
+  let smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
   if (!dryRun) {
-    if (!gmailUser || !gmailPass) {
+    const smtp = createSmtp() || {};
+    if (!smtp.configured || !smtp.transporter) {
       return res.status(500).json({
         error: 'SMTP_NOT_CONFIGURED',
         message: 'Server email credentials (GMAIL_USER / GMAIL_APP_PASSWORD) are missing.'
       });
     }
-    transporter = createSmtpTransport();
+    transporter = smtp.transporter;
+    smtpUser = smtp.smtpUser || smtpUser;
   }
 
   // 4. Fetch reports (targeted single-RMA lookup when rmaNumber is specified) + catalog products
   const buildReportsQuery = () => {
-    const q = supabase.from('rma_reports').select('*');
+    const q = db.from('rma_reports').select('*');
     if (targetRmaNumber) {
       return q.ilike('rma_number', targetRmaNumber);
     }
@@ -313,7 +332,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
   const [reportsRes, productsRes] = await Promise.all([
     buildReportsQuery(),
-    supabase
+    db
       .from('products')
       .select('*')
   ]);
@@ -329,7 +348,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   if (targetRmaNumber && allRows.length > 0) {
     const parentIds = allRows.map((r) => r.id).filter(Boolean);
     if (parentIds.length > 0) {
-      const { data: childRows } = await supabase
+      const { data: childRows } = await db
         .from('rma_reports')
         .select('*')
         .in('parent_rma_id', parentIds);
@@ -452,12 +471,11 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
               disposition: '5- Scrap / Dispose',
               warehouse_location: 'Disposal / Scrap Area',
               ai_document_metadata: nextMeta,
-              updated_at: nowIso,
               audit_trail: nextAudit
-            });
+            }, db);
 
             try {
-              await supabase
+              await db
                 .from('rma_reports')
                 .update({
                   status: 'resolved',
@@ -469,7 +487,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
             if (finalTo.length > 0 && transporter) {
               await transporter.sendMail({
-                from: `Pingcon Marketing RMA <${gmailUser}>`,
+                from: `Pingcon Marketing RMA <${smtpUser}>`,
                 to: finalTo.join(', '),
                 ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
                 subject: emailPayload.subject,
@@ -602,7 +620,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         if (!dryRun) {
           if (transporter && finalTo.length > 0) {
             await transporter.sendMail({
-              from: `Pingcon Marketing RMA <${gmailUser}>`,
+              from: `Pingcon Marketing RMA <${smtpUser}>`,
               to: finalTo.join(', '),
               ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
               subject: emailPayload.subject,
@@ -659,9 +677,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
           await safeUpdateRmaReport(report.id, {
             ai_document_metadata: nextMeta,
-            updated_at: nowIso,
             audit_trail: nextAudit
-          });
+          }, db);
         }
 
         followUpsSent.push({
@@ -693,6 +710,9 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
   return res.status(200).json({
     success: errors.length === 0,
+    ...(errors.length > 0 ? {
+      error: `${errors[0]?.rmaNumber ? `${errors[0].rmaNumber}: ` : ''}${errors[0]?.message || 'Failed processing follow-up tick.'}${errors.length > 1 ? ` (+${errors.length - 1} more error(s))` : ''}`
+    } : {}),
     dryRun,
     skipped: false,
     ...(liveSkipReason ? { liveSkipped: true, liveSkipReason } : {}),
