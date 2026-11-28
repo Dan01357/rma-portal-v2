@@ -340,7 +340,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
       await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
       await page.locator('input[type="date"]').first().fill('2027-08-20');
-      const explainBox = page.locator('input[placeholder*="explanation" i], textarea[placeholder*="explanation" i]').first();
+      const explainBox = page.locator('input[placeholder*="defect notes" i], input[placeholder*="explanation" i], textarea[placeholder*="explanation" i]').first();
       await expect(explainBox).toBeVisible();
       await explainBox.fill('Crushed cap and leaking bottle [REORDER: NO]');
       await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
@@ -408,7 +408,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
 
       const completeDriverPickup = async (optionRegex, { exerciseMultiPhoto = false, processorName = 'Playwright Manual Processor' } = {}) => {
         await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-        await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Suy Sing Commercial Corp');
+        await page.locator('input[placeholder*="Customer / Branch" i], input[placeholder*="Customer / Store Branch Name" i]').fill('PW Test Branch Customer');
         await page.getByRole('button', { name: optionRegex }).click();
         await page
           .getByRole('button', {
@@ -417,8 +417,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           .click();
         await expect(page.getByText(/Driver Pickup Verification \(\d+\/5(?: Optional)? Slots\)/i)).toBeVisible();
 
-        await page.locator('input[placeholder*="branch.manager@customer.com" i]').fill('vendor-claims@example.com');
-        await page.locator('input[placeholder*="accounting@customer.com" i]').fill('vendor-cc@example.com');
+        await page.locator('input[placeholder*="branch.manager@customer.com" i]').fill('pw-customer-branch@pingcon-test.local');
+        await page.locator('input[placeholder*="accounting@customer.com" i]').fill('pw-customer-cc@pingcon-test.local');
 
         if (exerciseMultiPhoto) {
           const chooseFilesInputs = page.locator('input[type="file"][accept="image/*"][multiple]');
@@ -521,8 +521,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       });
       expect(debitMail.isTestMode).toBe(true);
       expect(debitMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Debit Claim\]/);
-      expect(debitMail.to).toContain('vendor-claims@example.com');
-      expect(debitMail.cc).toContain('vendor-cc@example.com');
+      expect(debitMail.to).toContain('pw-customer-branch@pingcon-test.local');
+      expect(debitMail.cc).toContain('pw-customer-cc@pingcon-test.local');
       expect(debitMail.html).toContain('Driver Pickup Verification Photos (5/5 categories');
       expect(debitMail.html).toContain('7 photos');
       expect(debitMail.html).toContain('PhilSys National ID (PhilID / ePhilID)');
@@ -548,8 +548,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       });
       expect(replaceMail.isTestMode).toBe(true);
       expect(replaceMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Replacement\]/);
-      expect(replaceMail.to).toContain('vendor-claims@example.com');
-      expect(replaceMail.cc).toContain('vendor-cc@example.com');
+      expect(replaceMail.to).toContain('pw-customer-branch@pingcon-test.local');
+      expect(replaceMail.cc).toContain('pw-customer-cc@pingcon-test.local');
       expect(replaceMail.html).toContain('Store / Branch:');
       expect(replaceMail.html).toContain('Warehouse Location:');
       expect(replaceMail.html).toContain('Driver Pickup Verification Photos (5/5 categories');
@@ -773,7 +773,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
                   barcode: VERIFIED_BARCODE,
                   code: 'SS1319P',
                   name: 'Test Item For Email Edit',
-                  supplier_name: 'Suy Sing Commercial Corp',
+                  supplier_name: 'PW Test Supplier Corp',
                   quantity: 2,
                   unit_name: 'pc',
                   price: 100,
@@ -1218,18 +1218,18 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       await expect(followUpRow).toBeVisible({ timeout: 25_000 });
 
       await followUpRow.getByRole('button', { name: /\+ Set Supplier & Email/i }).click();
-      await page.locator('#followup-modal-supplier-input').fill('Playwright FollowUp Supplier');
-      await page.locator('input[aria-label="Supplier Primary Email(s) (TO)"]').fill('vendor-fu@pingcon-test.local');
-      await page.locator('input[aria-label="Supplier CC Email(s) (Optional)"]').fill('cc-fu@pingcon-test.local');
+      await page.locator('#followup-modal-supplier-input').fill('PW Test FollowUp Supplier');
+      await page.locator('input[aria-label="Supplier Primary Email(s) (TO)"]').fill('pw-vendor-fu@pingcon-test.local');
+      await page.locator('input[aria-label="Supplier CC Email(s) (Optional)"]').fill('pw-cc-fu@pingcon-test.local');
       const autoSlaToggle = page.locator('input[aria-label="Auto Daily Follow-Up (10-Day SLA)"]');
       if (!(await autoSlaToggle.isChecked())) {
         await autoSlaToggle.check();
       }
       await page.getByRole('button', { name: /Save Supplier & Email/i }).click();
-      await expect(page.getByText(/Saved supplier "Playwright FollowUp Supplier"/i)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/Saved supplier "PW Test FollowUp Supplier"/i)).toBeVisible({ timeout: 15_000 });
       await page.locator('button[aria-label="Close supplier follow-up modal"]').click();
       await expect(page.locator('#followup-modal-supplier-input')).toBeHidden({ timeout: 15_000 });
-      await expect(followUpRow.getByText('Playwright FollowUp Supplier')).toBeVisible({ timeout: 15_000 });
+      await expect(followUpRow.getByText('PW Test FollowUp Supplier')).toBeVisible({ timeout: 15_000 });
 
       // Assert manual Send Follow-Up button is removed; exercise real automated ?action=daily-followup dryRun endpoint via Playwright request
       await expect(followUpRow.getByRole('button', { name: /Send Follow-Up/i })).toHaveCount(0);
@@ -1368,7 +1368,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           rma_number: followUpRma,
           barcode: VERIFIED_BARCODE,
           name: 'Playwright 2-Way XLSX Mirror Test Item',
-          supplier_name: 'Suy Sing Commercial Corp',
+          supplier_name: 'PW Test FollowUp Supplier',
           si_number: 'SI-2026-REPLY-99',
           dr_number: 'DR-2026-REPLY-88',
           warehouse_location: 'Good Stock Area',
@@ -1376,7 +1376,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
           ai_document_metadata: {
             is_test: true,
             test_mode: true,
-            follow_up: { supplier_email_to: 'reply-claims@suysing-test.local' }
+            follow_up: { supplier_email_to: 'pw-reply-claims@pingcon-test.local' }
           }
         },
         { subject: `[TEST] [RMA Alert] ${followUpRma}` }
@@ -1419,7 +1419,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
     } finally {
       await cleanupTestRecords(page, {
         rmaNumbers: seededTestRmas,
-        claimNumbers: [createdClaimNum]
+        claimNumbers: [createdClaimNum],
+        supplierNames: ['PW Test FollowUp Supplier', 'PW Test Branch Customer', 'PW Test Supplier Corp']
       });
       guard.detach();
     }

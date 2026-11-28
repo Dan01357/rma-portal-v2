@@ -11,6 +11,8 @@ export const PNG_BUFFER = Buffer.from(
 // Known catalog barcode verified in Supabase `products`
 export const VERIFIED_BARCODE = '4805358373037';
 export const VERIFIED_SKU = 'SS1319P';
+export const PW_TEST_SUPPLIER = 'PW Test Supplier Corp';
+export const PW_TEST_SUPPLIER_ALT = 'PW Test Supplier B';
 
 export function readSupabasePublicEnv() {
   let supaUrl = process.env.VITE_SUPABASE_URL || '';
@@ -478,21 +480,40 @@ export async function seedTestModeRma(
 }
 
 /**
- * Deletes synthetic RMAs, associated Credit Memos, Supplier Claims, and Consolidated CM entries from Supabase.
+ * Deletes synthetic RMAs, associated rma_items, Credit Memos, Supplier Claims,
+ * Playwright products/invites, and Playwright Supplier Directory / Test recipient entries from Supabase.
  */
 export async function cleanupTestRecords(
   page,
-  { rmaNumbers = [], claimNumbers = [], creditMemoNumbers = [] } = {}
+  {
+    rmaNumbers = [],
+    claimNumbers = [],
+    creditMemoNumbers = [],
+    supplierNames = [],
+    productBarcodes = [],
+    resetTestRecipients = false
+  } = {}
 ) {
   const rmas = (rmaNumbers || []).filter(Boolean);
   const claims = (claimNumbers || []).filter(Boolean);
   const cms = (creditMemoNumbers || []).filter(Boolean);
-  if (rmas.length === 0 && claims.length === 0 && cms.length === 0) return;
+  const suppliers = (supplierNames || []).filter(Boolean);
+  const barcodes = (productBarcodes || []).filter(Boolean);
+  if (
+    rmas.length === 0 &&
+    claims.length === 0 &&
+    cms.length === 0 &&
+    suppliers.length === 0 &&
+    barcodes.length === 0 &&
+    !resetTestRecipients
+  ) {
+    return;
+  }
 
   const { supaUrl, anonKey } = readSupabasePublicEnv();
   await page
     .evaluate(
-      async ({ targetRmas, targetClaims, targetCms, url, key }) => {
+      async ({ targetRmas, targetClaims, targetCms, targetSuppliers, targetBarcodes, shouldResetTestRecs, url, key }) => {
         try {
           const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
           const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
@@ -512,13 +533,29 @@ export async function cleanupTestRecords(
 
           for (const rmaNum of targetRmas) {
             await fetch(
+              `${url}/rest/v1/rma_items?rma_number=eq.${encodeURIComponent(rmaNum)}`,
+              { method: 'DELETE', headers }
+            ).catch(() => {});
+            await fetch(
               `${url}/rest/v1/credit_memos?rma_number=eq.${encodeURIComponent(rmaNum)}`,
+              { method: 'DELETE', headers }
+            );
+            // Delete child rows before parent row to satisfy parent_rma_id FK
+            await fetch(
+              `${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(rmaNum)}&parent_rma_id=not.is.null`,
               { method: 'DELETE', headers }
             );
             await fetch(
               `${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(rmaNum)}`,
               { method: 'DELETE', headers }
             );
+          }
+
+          for (const bc of targetBarcodes) {
+            await fetch(
+              `${url}/rest/v1/products?barcode=eq.${encodeURIComponent(bc)}`,
+              { method: 'DELETE', headers }
+            ).catch(() => {});
           }
 
           for (const claimNum of targetClaims) {
@@ -591,6 +628,78 @@ export async function cleanupTestRecords(
             }
           }
 
+          // Prune Playwright / synthetic entries from BOTH supplier_directory_store and test_supplier_directory_store
+          const targetSupplierKeys = new Set(
+            targetSuppliers.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)
+          );
+          const rePwSup = /^(pw\s+test\b|playwright\b|reset preservation supplier$|supplier\s+[ab]$|other guard vendor$)/i;
+          const rePwEmail = /@example\.(com|org|net)|@[a-z0-9.-]+\.local\b|@testgmail\.com|^(pw-test-|pw-invite-|pw-ed\d+-)/i;
+          for (const dirKey of ['test_supplier_directory_store', 'supplier_directory_store']) {
+            const dRes = await fetch(`${url}/rest/v1/rma_settings?key=eq.${dirKey}&select=value`, { headers });
+            if (!dRes.ok) continue;
+            const dJson = await dRes.json();
+            const rawVal = dJson?.[0]?.value;
+            const list = Array.isArray(rawVal)
+              ? rawVal
+              : (typeof rawVal === 'string' ? (() => { try { const p = JSON.parse(rawVal); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+            const cleanedDir = list.filter((entry) => {
+              const nm = String(entry?.supplier_name || entry?.supplierName || '').trim();
+              const lower = nm.toLowerCase();
+              const emStr = `${entry?.email_to || ''} ${entry?.email_cc || ''}`;
+              if (targetSupplierKeys.has(lower)) return false;
+              if (rePwSup.test(nm) || rePwEmail.test(emStr)) return false;
+              return true;
+            });
+            if (cleanedDir.length !== list.length || typeof rawVal === 'string') {
+              await fetch(`${url}/rest/v1/rma_settings?key=eq.${dirKey}`, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify({ value: cleanedDir })
+              });
+            }
+          }
+
+          // Scrub pw-test-* emails from test_email_recipients_by_type when requested
+          if (shouldResetTestRecs) {
+            const recRes = await fetch(
+              `${url}/rest/v1/rma_settings?key=eq.test_email_recipients_by_type&select=value`,
+              { headers }
+            );
+            if (recRes.ok) {
+              const recJson = await recRes.json();
+              const val = recJson?.[0]?.value;
+              if (val && typeof val === 'object') {
+                const nextVal = JSON.parse(JSON.stringify(val));
+                let changed = false;
+                for (const prof of Object.values(nextVal)) {
+                  if (!prof || typeof prof !== 'object') continue;
+                  if (Array.isArray(prof.toList)) {
+                    const filteredTo = prof.toList.filter((e) => !/^pw-test-/i.test(String(e || '').trim()));
+                    if (filteredTo.length !== prof.toList.length) {
+                      prof.toList = filteredTo;
+                      prof.toEmail = filteredTo.join(', ');
+                      changed = true;
+                    }
+                  }
+                  if (Array.isArray(prof.ccList)) {
+                    const filteredCc = prof.ccList.filter((e) => !/^pw-test-/i.test(String(e || '').trim()));
+                    if (filteredCc.length !== prof.ccList.length) {
+                      prof.ccList = filteredCc;
+                      changed = true;
+                    }
+                  }
+                }
+                if (changed) {
+                  await fetch(`${url}/rest/v1/rma_settings?key=eq.test_email_recipients_by_type`, {
+                    method: 'PATCH',
+                    headers,
+                    body: JSON.stringify({ value: nextVal })
+                  });
+                }
+              }
+            }
+          }
+
           // Clean up any auto-generated Test Mode RMA Editor invites created for targetRmas
           for (const rmaNum of targetRmas) {
             await fetch(
@@ -624,7 +733,16 @@ export async function cleanupTestRecords(
           }
         } catch {}
       },
-      { targetRmas: rmas, targetClaims: claims, targetCms: cms, url: supaUrl, key: anonKey }
+      {
+        targetRmas: rmas,
+        targetClaims: claims,
+        targetCms: cms,
+        targetSuppliers: suppliers,
+        targetBarcodes: barcodes,
+        shouldResetTestRecs: Boolean(resetTestRecipients),
+        url: supaUrl,
+        key: anonKey
+      }
     )
     .catch(() => {});
 }

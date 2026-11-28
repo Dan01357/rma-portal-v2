@@ -2654,6 +2654,7 @@ export default function SettingsTab({
       <SupplierDirectoryModal
         isOpen={isDirectoryOpen}
         onClose={() => setIsDirectoryOpen(false)}
+        isTestMode={isTestMode}
       />
 
     </div>

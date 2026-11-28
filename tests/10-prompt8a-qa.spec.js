@@ -502,7 +502,10 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
 
       guard.assertClean('Suite 10 Test A Multi-Item QR, RTV Zero Store Branch, No Manual Buttons');
     } finally {
-      await cleanupTestRecords(page, { rmaNumbers: createdRmas });
+      await cleanupTestRecords(page, {
+        rmaNumbers: createdRmas,
+        supplierNames: ['PW Test Supplier A', 'PW Test Supplier B', 'PW Test Supplier Alpha', 'PW Test Supplier Beta', 'PW Test Supplier Updated']
+      });
       guard.detach();
     }
   });
@@ -529,9 +532,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           sku: 'SKU-GAINS-1',
           name: 'Playwright Batch Item One',
           productName: 'Playwright Batch Item One',
-          supplier_name: 'Gains Group Inc',
-          supplierName: 'Gains Group Inc',
-          supplier: 'Gains Group Inc',
+          supplier_name: 'PW Test Supplier Alpha',
+          supplierName: 'PW Test Supplier Alpha',
+          supplier: 'PW Test Supplier Alpha',
           quantity: 2,
           unit_name: 'pc',
           unit: 'pc',
@@ -548,9 +551,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           sku: 'SKU-MARINA-2',
           name: 'Playwright Batch Item Two',
           productName: 'Playwright Batch Item Two',
-          supplier_name: 'Marina Sales Inc',
-          supplierName: 'Marina Sales Inc',
-          supplier: 'Marina Sales Inc',
+          supplier_name: 'PW Test Supplier Beta',
+          supplierName: 'PW Test Supplier Beta',
+          supplier: 'PW Test Supplier Beta',
           quantity: 4,
           unit_name: 'case',
           unit: 'case',
@@ -585,7 +588,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
             total_items: 2,
             total_quantity: 6,
             unit_name: 'mixed',
-            supplier_name: 'Gains Group Inc',
+            supplier_name: 'PW Test Supplier Alpha',
             store_branch: 'Playwright Branch 8A',
             price: 0,
             price_with_vat: 0,
@@ -677,7 +680,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
         hasRmaItemsTable = rmaItemInsert.ok();
       }
 
-      // 1. Build 2-item Test Mode mirror .xlsx workbook (Gains Group Inc & Marina Sales Inc)
+      // 1. Build 2-item Test Mode mirror .xlsx workbook (PW Test Supplier Alpha & PW Test Supplier Beta)
       const originalXlsxBuf = Buffer.from(
         buildRmaAlertXlsxBytes(seedInfo.parentRow, {
           subject: `[TEST] [RMA Alert] ${rmaNumber}: Batch Return Manifest`
@@ -686,22 +689,22 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       const originalXml = readXlsxXmlCombined(originalXlsxBuf);
       expect(originalXml).toContain('Serial No.');
       expect(originalXml).toContain('Supplier Name');
-      expect(originalXml).toContain('Gains Group Inc');
-      expect(originalXml).toContain('Marina Sales Inc');
+      expect(originalXml).toContain('PW Test Supplier Alpha');
+      expect(originalXml).toContain('PW Test Supplier Beta');
 
-      // 2. Edit ONLY Item 1's Supplier Name inside MANIFEST LINE ITEMS to Suy Sing Commercial Corp
-      // Notice first occurrence of Gains Group Inc may be top-level Value cell; replace the manifest row cell specifically
+      // 2. Edit ONLY Item 1's Supplier Name inside MANIFEST LINE ITEMS to PW Test Supplier Updated
+      // Notice first occurrence of PW Test Supplier Alpha may be top-level Value cell; replace the manifest row cell specifically
       const origEntries = parseZipEntriesFromBuffer(originalXlsxBuf);
       const origSheetXml = origEntries.get('xl/worksheets/sheet1.xml').toString('utf8');
       const manifestMarkerIdx = origSheetXml.indexOf('MANIFEST LINE ITEMS');
       expect(manifestMarkerIdx).toBeGreaterThan(-1);
       const beforeManifest = origSheetXml.slice(0, manifestMarkerIdx);
       const manifestAndAfter = origSheetXml.slice(manifestMarkerIdx).replace(
-        '<t>Gains Group Inc</t>',
-        '<t>Suy Sing Commercial Corp</t>'
+        '<t>PW Test Supplier Alpha</t>',
+        '<t>PW Test Supplier Updated</t>'
       );
-      expect(manifestAndAfter).toContain('<t>Suy Sing Commercial Corp</t>');
-      expect(manifestAndAfter).toContain('<t>Marina Sales Inc</t>');
+      expect(manifestAndAfter).toContain('<t>PW Test Supplier Updated</t>');
+      expect(manifestAndAfter).toContain('<t>PW Test Supplier Beta</t>');
 
       const repackedFiles = [];
       for (const [fname, fbuf] of origEntries.entries()) {
@@ -719,8 +722,8 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       expect(parsedPreview.rmaNumber).toBe(rmaNumber);
       expect(parsedPreview.isTestHint).toBe(true);
       expect(parsedPreview.manifestUpdates).toHaveLength(2);
-      expect(parsedPreview.manifestUpdates[0].supplier_name).toBe('Suy Sing Commercial Corp');
-      expect(parsedPreview.manifestUpdates[1].supplier_name).toBe('Marina Sales Inc');
+      expect(parsedPreview.manifestUpdates[0].supplier_name).toBe('PW Test Supplier Updated');
+      expect(parsedPreview.manifestUpdates[1].supplier_name).toBe('PW Test Supplier Beta');
 
       // 3. Ingest edited .xlsx via /api/send-email?action=ingest-xlsx-reply
       const ingestRes = await page.evaluate(
@@ -770,13 +773,13 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       expect(updatedParent).toBeTruthy();
       expect(updatedParent.ai_document_metadata?.is_test).toBe(true);
       expect(String(updatedParent.notes || '')).toContain('[TEST_MODE]');
-      expect(updatedParent.items[0].supplier_name).toBe('Suy Sing Commercial Corp');
-      expect(updatedParent.items[1].supplier_name).toBe('Marina Sales Inc');
+      expect(updatedParent.items[0].supplier_name).toBe('PW Test Supplier Updated');
+      expect(updatedParent.items[1].supplier_name).toBe('PW Test Supplier Beta');
 
       const child1 = updatedChildren.find((c) => c.barcode === '4800001110001');
       const child2 = updatedChildren.find((c) => c.barcode === '4800002220002');
-      expect(child1?.supplier_name).toBe('Suy Sing Commercial Corp');
-      expect(child2?.supplier_name).toBe('Marina Sales Inc');
+      expect(child1?.supplier_name).toBe('PW Test Supplier Updated');
+      expect(child2?.supplier_name).toBe('PW Test Supplier Beta');
       expect(String(child1?.notes || '')).toContain('[TEST_MODE]');
 
       if (hasRmaItemsTable && seedInfo.token) {
@@ -788,8 +791,8 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           const rmaItems = await itemsRes.json();
           const ri1 = rmaItems.find((x) => x.barcode === '4800001110001');
           const ri2 = rmaItems.find((x) => x.barcode === '4800002220002');
-          expect(ri1?.supplier_name).toBe('Suy Sing Commercial Corp');
-          expect(ri2?.supplier_name).toBe('Marina Sales Inc');
+          expect(ri1?.supplier_name).toBe('PW Test Supplier Updated');
+          expect(ri2?.supplier_name).toBe('PW Test Supplier Beta');
         }
       }
 
@@ -802,8 +805,8 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       const batchRow = page.locator('tr', { hasText: rmaNumber }).first();
       await expect(batchRow).toBeVisible({ timeout: 20_000 });
       await batchRow.locator('button:has-text("Manifest")').first().click();
-      await expect(page.getByText('Suy Sing Commercial Corp').first()).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByText('Marina Sales Inc').first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('PW Test Supplier Updated').first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('PW Test Supplier Beta').first()).toBeVisible({ timeout: 10_000 });
 
       // Assert ?action=sync-email-replies returns structured 200 JSON safely under Admin auth
       const syncCheck = await page.evaluate(async () => {
@@ -864,7 +867,10 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           { url: supaUrl, key: anonKey, targetRmas: createdRmas }
         )
         .catch(() => {});
-      await cleanupTestRecords(page, { rmaNumbers: createdRmas });
+      await cleanupTestRecords(page, {
+        rmaNumbers: createdRmas,
+        supplierNames: ['PW Test Supplier A', 'PW Test Supplier B', 'PW Test Supplier Alpha', 'PW Test Supplier Beta', 'PW Test Supplier Updated']
+      });
       guard.detach();
     }
   });
@@ -909,7 +915,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await page.locator('input[placeholder*="Oishi Prawn Crackers" i]').first().fill('Mixed Batch Item One');
       await page.locator('input[type="date"]').first().fill(isoDateDaysOffset(45));
       await qtyInput.fill('2');
-      await itemSupplierInput.fill('Supplier A');
+      await itemSupplierInput.fill('PW Test Supplier A');
       await itemPhotoInput.setInputFiles({ name: 'mix1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
       await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: /Add Another Item to Return/i }).click();
@@ -921,12 +927,12 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await queuedQty1.fill('5');
       await expect(page.getByText(/Total batch quantity updates automatically \(5 pcs across 1 item\)/i)).toBeVisible();
 
-      // Add Item 2 with a DIFFERENT supplier ("Suysing") & Qty 3 directly via active form
+      // Add Item 2 with a DIFFERENT supplier ("PW Test Supplier B") & Qty 3 directly via active form
       await barcodeInput.fill(`PW-MIXED-2-${uniq}`);
       await page.locator('input[placeholder*="Oishi Prawn Crackers" i]').first().fill('Mixed Batch Item Two');
       await page.locator('input[type="date"]').first().fill(isoDateDaysOffset(60));
       await qtyInput.fill('3');
-      await itemSupplierInput.fill('Suysing');
+      await itemSupplierInput.fill('PW Test Supplier B');
       await itemPhotoInput.setInputFiles({ name: 'mix2.png', mimeType: 'image/png', buffer: PNG_BUFFER });
       await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
 
@@ -980,9 +986,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           sku: `SKU-SUPA-${uniq}`,
           name: 'RTV Mixed Item Alpha',
           productName: 'RTV Mixed Item Alpha',
-          supplier_name: 'Supplier A',
-          supplierName: 'Supplier A',
-          supplier: 'Supplier A',
+          supplier_name: 'PW Test Supplier A',
+          supplierName: 'PW Test Supplier A',
+          supplier: 'PW Test Supplier A',
           quantity: 5,
           unit_name: 'pc',
           unit: 'pc',
@@ -998,9 +1004,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           sku: `SKU-SUYS-${uniq}`,
           name: 'RTV Mixed Item Beta',
           productName: 'RTV Mixed Item Beta',
-          supplier_name: 'Suysing',
-          supplierName: 'Suysing',
-          supplier: 'Suysing',
+          supplier_name: 'PW Test Supplier B',
+          supplierName: 'PW Test Supplier B',
+          supplier: 'PW Test Supplier B',
           quantity: 3,
           unit_name: 'pc',
           unit: 'pc',
@@ -1043,7 +1049,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
               total_items: 1,
               total_quantity: 1,
               unit_name: 'pc',
-              supplier_name: 'Supplier A',
+              supplier_name: 'PW Test Supplier A',
               store_branch: 'Test Branch 1',
               reason: 'Damaged Box / Crushed Packaging',
               notes: '[TEST_MODE] Strict Single 1'
@@ -1059,7 +1065,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
               total_items: 1,
               total_quantity: 2,
               unit_name: 'pc',
-              supplier_name: 'Suysing',
+              supplier_name: 'PW Test Supplier B',
               store_branch: 'Test Branch 2',
               reason: 'Damaged Box / Crushed Packaging',
               notes: '[TEST_MODE] Strict Single 2'
@@ -1089,7 +1095,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
             total_items: 2,
             total_quantity: 8,
             unit_name: 'pc',
-            supplier_name: 'Multiple Suppliers (Supplier A, Suysing)',
+            supplier_name: 'Multiple Suppliers (PW Test Supplier A, PW Test Supplier B)',
             store_branch: 'PW Customer Branch',
             reason: 'Multi-Item Defect (2 items)',
             items: custItems,
@@ -1140,7 +1146,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
             total_items: 2,
             total_quantity: 8,
             unit_name: 'pc',
-            supplier_name: 'Multiple Suppliers (Supplier A, Suysing)',
+            supplier_name: 'Multiple Suppliers (PW Test Supplier A, PW Test Supplier B)',
             store_branch: null,
             reason: 'Multi-Item Defect (2 items)',
             items,
@@ -1193,7 +1199,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       expect(seedExtra.pOk).toBe(true);
       expect(seedExtra.portalParent?.quantity).toBe(8);
       expect(seedExtra.portalParent?.total_quantity).toBe(8);
-      expect(seedExtra.portalParent?.supplier_name).toBe('Multiple Suppliers (Supplier A, Suysing)');
+      expect(seedExtra.portalParent?.supplier_name).toBe('Multiple Suppliers (PW Test Supplier A, PW Test Supplier B)');
       expect(seedExtra.portalParent?.ai_document_metadata?.follow_up?.enabled).toBe(true);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1201,13 +1207,13 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
 
-      // Verify Customer Batch RMA persisted with Qty 8 (5+3) & Multiple Suppliers (Supplier A, Suysing)
+      // Verify Customer Batch RMA persisted with Qty 8 (5+3) & Multiple Suppliers (PW Test Supplier A, PW Test Supplier B)
       const searchCust = page.locator('input[placeholder*="Search" i]').first();
       await searchCust.fill(custBatchRma);
       const mixedRow = page.locator('tr', { hasText: custBatchRma }).first();
       await expect(mixedRow).toBeVisible({ timeout: 20_000 });
       await expect(mixedRow).toContainText('8 pcs');
-      await expect(mixedRow).toContainText(/Multiple Suppliers \(Supplier A, Suysing\)/i);
+      await expect(mixedRow).toContainText(/Multiple Suppliers \(PW Test Supplier A, PW Test Supplier B\)/i);
 
       // Verify Cleaned-up Portal Batch Edit UI (QuickRMAActionModal): merged Edit Details & Documents, collapsed Advanced accordion, editable Qty + Name + Branch + per-item Supplier (no duplicate Supplier Email in Customer Hub), UOM-grouped totals, sticky Save Changes
       await mixedRow.getByRole('button', { name: /Details|Inspect|Split Qty/i }).first().click();
@@ -1231,7 +1237,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await expect(quickModal.locator('input[aria-label="Batch item 1 unit"]')).toHaveValue('pc');
       await expect(quickModal.locator('input[aria-label="Batch item 1 SKU"]')).toBeVisible();
       await expect(quickModal.locator('input[aria-label="Batch item 1 unit price"]')).toBeVisible();
-      await expect(quickModal.locator('input[aria-label="Batch item 2 supplier"]')).toHaveValue('Suysing');
+      await expect(quickModal.locator('input[aria-label="Batch item 2 supplier"]')).toHaveValue('PW Test Supplier B');
       await quickModal.getByRole('button', { name: /Save Changes/i }).click();
       await expect(quickModal.getByText('Total: 9 pcs')).toBeVisible({ timeout: 15_000 });
       await quickModal.getByRole('button', { name: /Done \/ Close/i }).click();
@@ -1280,8 +1286,8 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       const rtvRowBeta = page.locator('tr', { hasText: 'RTV Mixed Item Beta' }).first();
       await expect(rtvRowAlpha).toBeVisible({ timeout: 15_000 });
       await expect(rtvRowBeta).toBeVisible({ timeout: 15_000 });
-      await expect(rtvRowAlpha).toContainText('Supplier A');
-      await expect(rtvRowBeta).toContainText('Suysing');
+      await expect(rtvRowAlpha).toContainText('PW Test Supplier A');
+      await expect(rtvRowBeta).toContainText('PW Test Supplier B');
 
       await rtvRowAlpha.locator('input[type="checkbox"]').first().check();
       await rtvRowBeta.locator('input[type="checkbox"]').first().check();
@@ -1303,7 +1309,7 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       await rtvQuickModal.getByRole('button', { name: /Edit Details & Documents/i }).click();
       await expect(rtvQuickModal.locator('input[aria-label="Store or customer branch"]')).toHaveCount(0);
       await expect(rtvQuickModal.locator('input[aria-label="Batch item 1 supplier email To"]')).toBeVisible();
-      await rtvQuickModal.locator('input[aria-label="Batch item 1 supplier email To"]').fill('claims-supa@pingcon-test.local');
+      await rtvQuickModal.locator('input[aria-label="Batch item 1 supplier email To"]').fill('pw-claims-supa@pingcon-test.local');
       await rtvQuickModal.getByRole('button', { name: /Save Changes/i }).click();
       await expect(rtvQuickModal.getByRole('button', { name: /Edit Details & Documents/i })).toBeVisible({ timeout: 15_000 });
       await expect(rtvQuickModal.getByText('Total: 8 pcs').first()).toBeVisible({ timeout: 15_000 });
@@ -1383,9 +1389,9 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
       expect(afterParent?.quantity).toBe(10);
       expect(afterParent?.total_quantity).toBe(10);
       expect(afterParent?.items[0]?.quantity).toBe(7);
-      expect(afterParent?.items[0]?.supplier_name).toBe('Supplier A');
+      expect(afterParent?.items[0]?.supplier_name).toBe('PW Test Supplier A');
       expect(afterParent?.items[1]?.quantity).toBe(3);
-      expect(afterParent?.items[1]?.supplier_name).toBe('Suysing');
+      expect(afterParent?.items[1]?.supplier_name).toBe('PW Test Supplier B');
 
       guard.assertClean('Suite 10 Test C Editable Batch Qty, Mixed Suppliers, & Persistent QR Toggle');
     } finally {
@@ -1408,7 +1414,10 @@ test.describe('Suite 10: Prompt 8A Comprehensive QA (QR Toggle & Print Isolation
           { url: supaUrl, key: anonKey, targetRmas: createdRmas }
         )
         .catch(() => {});
-      await cleanupTestRecords(page, { rmaNumbers: createdRmas });
+      await cleanupTestRecords(page, {
+        rmaNumbers: createdRmas,
+        supplierNames: ['PW Test Supplier A', 'PW Test Supplier B', 'PW Test Supplier Alpha', 'PW Test Supplier Beta', 'PW Test Supplier Updated']
+      });
       guard.detach();
     }
   });

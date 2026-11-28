@@ -11,3 +11,5 @@ video/
 tests/.auth/
 playwright-report/
 test-results/
+
+.env*

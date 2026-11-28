@@ -278,7 +278,9 @@ export default function SimpleSupplierRtvWizardModal({
   const [wizardReports, setWizardReports] = useState([]);
   const [bundleSearchQuery, setBundleSearchQuery] = useState('');
   const [showBundleDropdown, setShowBundleDropdown] = useState(false);
-  const [directoryContacts, setDirectoryContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
+  const [directoryContacts, setDirectoryContacts] = useState(() =>
+    supplierDirectoryService.getCachedDirectory({ isTestMode: rawBatchReports.some((r) => isTestRecord(r)) })
+  );
   const [selectedOption, setSelectedOption] = useState(null);
   const [supplierName, setSupplierName] = useState('');
   const [supplierEmailTo, setSupplierEmailTo] = useState('');
@@ -307,15 +309,6 @@ export default function SimpleSupplierRtvWizardModal({
   const [savedBatchReports, setSavedBatchReports] = useState(null);
   const [showA4Form, setShowA4Form] = useState(false);
   const [cameraSlotKey, setCameraSlotKey] = useState(null);
-
-  useEffect(() => {
-    const syncDir = (e) => {
-      if (Array.isArray(e?.detail)) setDirectoryContacts(e.detail);
-      else setDirectoryContacts(supplierDirectoryService.getCachedDirectory());
-    };
-    window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
-    return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
-  }, []);
 
   // Known suppliers list & customer/store branch list for autocomplete datalists
   const supplierSuggestions = useMemo(() => {
@@ -374,6 +367,7 @@ export default function SimpleSupplierRtvWizardModal({
     if (!isOpen || !targetReport) return;
     let isMounted = true;
     clearObjectUrls();
+    const activeBatchSnapshot = rawBatchReportsRef.current || [];
 
     const meta = (targetReport.ai_document_metadata && typeof targetReport.ai_document_metadata === 'object')
       ? targetReport.ai_document_metadata
@@ -424,15 +418,21 @@ export default function SimpleSupplierRtvWizardModal({
       ];
     const initialSupplier = partyCandidates.find((s) => !isPendingSupplierName(s)) || '';
     const cleanInitSupplier = String(initialSupplier).trim();
-    const dirInitial = cleanInitSupplier ? supplierDirectoryService.findBySupplierName(cleanInitSupplier) : null;
+    const modalIsTest = activeBatchSnapshot.some((r) => isTestRecord(r));
+    const dirInitial = (reportIsSupplier && cleanInitSupplier)
+      ? supplierDirectoryService.findBySupplierName(cleanInitSupplier, { isTestMode: modalIsTest })
+      : null;
+    setDirectoryContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modalIsTest }));
     setSupplierName(cleanInitSupplier);
     setSupplierEmailTo(pickup.supplier_email_to || dirInitial?.email_to || '');
     setSupplierEmailCc(pickup.supplier_email_cc || dirInitial?.email_cc || '');
     setConfirmUnifySupplier(false);
 
-    supplierDirectoryService.loadDirectory().then((dirList) => {
-      if (!isMounted || !cleanInitSupplier || !Array.isArray(dirList)) return;
-      const freshMatch = supplierDirectoryService.findBySupplierName(cleanInitSupplier);
+    supplierDirectoryService.loadDirectory({ isTestMode: modalIsTest }).then((dirList) => {
+      if (!isMounted || !Array.isArray(dirList)) return;
+      setDirectoryContacts(dirList);
+      if (!reportIsSupplier || !cleanInitSupplier) return;
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanInitSupplier, { isTestMode: modalIsTest });
       if (freshMatch) {
         setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
         setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
@@ -448,7 +448,6 @@ export default function SimpleSupplierRtvWizardModal({
     setDriverLicenseNo(pickup.driver_license_no || '');
     setTruckPlate(pickup.truck_plate || '');
 
-    const activeBatchSnapshot = rawBatchReportsRef.current || [];
     setWizardReports(activeBatchSnapshot);
     setBundleSearchQuery('');
     setShowBundleDropdown(false);
@@ -562,6 +561,28 @@ export default function SimpleSupplierRtvWizardModal({
     [workingBatchReports]
   );
 
+  const partyStreamIsSupplier = (workingBatchReports[0] || primaryInputReport)?.rma_type === 'supplier_outbound';
+  const partyListIsTest = wizardCurrentIsTest;
+
+  useEffect(() => {
+    const syncDir = (e) => {
+      const detail = e?.detail;
+      if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        if (Boolean(detail.isTestMode) !== Boolean(partyListIsTest)) return;
+        if (Array.isArray(detail.list)) {
+          setDirectoryContacts(detail.list);
+          return;
+        }
+      } else if (Array.isArray(detail)) {
+        setDirectoryContacts(detail);
+        return;
+      }
+      setDirectoryContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: partyListIsTest }));
+    };
+    window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+    return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+  }, [partyListIsTest]);
+
   const activeBatchIdsSet = useMemo(() => {
     return new Set(
       workingBatchReports
@@ -621,7 +642,8 @@ export default function SimpleSupplierRtvWizardModal({
   const handlePartyNameChange = (nextVal) => {
     setSupplierName(nextVal);
     if (errorMsg) setErrorMsg('');
-    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    if (!partyStreamIsSupplier) return;
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: wizardCurrentIsTest });
     if (dirMatch) {
       setSupplierEmailTo((prev) => (prev.trim() ? prev : (dirMatch.email_to || '')));
       setSupplierEmailCc((prev) => (prev.trim() ? prev : (dirMatch.email_cc || '')));
@@ -921,7 +943,7 @@ export default function SimpleSupplierRtvWizardModal({
             ...repPickup,
             disposition: optionId,
             disposition_label: opt.title,
-            supplier_name: effectiveSupplier,
+            supplier_name: isSupplierStream ? effectiveSupplier : (!isPendingSupplierName(rep.supplier_name) ? rep.supplier_name : ''),
             ...(isSupplierStream ? {} : { customer_name: cleanSupplier || repPickup.customer_name || rep.store_branch || '' }),
             supplier_email_to: supplierEmailTo.trim(),
             supplier_email_cc: supplierEmailCc.trim(),
@@ -1200,7 +1222,7 @@ export default function SimpleSupplierRtvWizardModal({
           disposition_label: activeOpt.title,
           claim_number: resolvedClaimNumber || null,
           consolidated_rma_numbers: batchRmaNumbers,
-          supplier_name: cleanSupplier,
+          supplier_name: isSupplierStream ? cleanSupplier : (!isPendingSupplierName(rep.supplier_name) ? rep.supplier_name : ''),
           ...(isSupplierStream ? {} : { customer_name: cleanSupplier }),
           supplier_email_to: cleanEmailTo,
           supplier_email_cc: cleanEmailCc,

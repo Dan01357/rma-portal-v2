@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
+  PW_TEST_SUPPLIER,
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
@@ -122,7 +123,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
 
       // Option 1: Customer Credit Memo / Return Handover wait-only + Driver Pickup screen navigation
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.locator('input[placeholder*="Customer / Branch" i], input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Live Outlet');
+      await page.locator('input[placeholder*="Customer / Branch" i], input[placeholder*="Customer / Store Branch Name" i]').fill('PW Test Live Outlet');
       await page.locator('#wizard-processed-by-step1').fill('Playwright Live Processor');
       await page.getByRole('button', { name: /Customer Credit Memo \/ Return Handover/i }).click();
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
@@ -228,19 +229,22 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
     let sharedClaimNumber = null;
 
     try {
-      // Seed 2 identical-SKU RMAs (Suy Sing Commercial Corp from VERIFIED_BARCODE) + 1 non-catalog RMA ('Other Guard Vendor')
+      // Seed 2 identical-SKU PW-only RMAs (PW Test Supplier Corp) + 1 non-catalog RMA ('Other Guard Vendor')
+      const pwBatchBc = `PW-BAT-${String(Date.now()).slice(-6)}`;
       sup1A = await seedTestModeRma(page, {
         stream: 'supplier',
         photoCount: 1,
         expiryDays: 60,
-        supplierOrCompany: 'Suy Sing Commercial Corp',
+        barcode: pwBatchBc,
+        supplierOrCompany: PW_TEST_SUPPLIER,
         quantity: 3
       });
       sup1B = await seedTestModeRma(page, {
         stream: 'supplier',
         photoCount: 1,
         expiryDays: 60,
-        supplierOrCompany: 'Suy Sing Commercial Corp',
+        barcode: pwBatchBc,
+        supplierOrCompany: PW_TEST_SUPPLIER,
         quantity: 2
       });
       sup2Diff = await seedTestModeRma(page, {
@@ -255,7 +259,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await navigateAdminSidebar(page, 'sandbox');
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
 
-      // 1. Single-Supplier Guard check: select sup1A (Suy Sing Commercial Corp) + sup2Diff (Other Guard Vendor)
+      // 1. Single-Supplier Guard check: select sup1A (PW Test Supplier Corp) + sup2Diff (Other Guard Vendor)
       await page.locator('input[placeholder*="Search" i]').first().fill('RMA-TEST-');
       const rowA = page.locator('tr', { hasText: sup1A }).first();
       const rowDiff = page.locator('tr', { hasText: sup2Diff }).first();
@@ -272,22 +276,23 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await expect(page.getByText(/Single-Supplier Guard:/i).first()).toBeVisible();
       await page.locator('button[aria-label="Close modal"]').first().click();
 
-      // Clear selection & filter Supplier dropdown to 'Suy Sing Commercial Corp' -> exercise 1-click "Select All Unclaimed"
+      // Clear selection & filter Supplier dropdown to PW_TEST_SUPPLIER -> exercise 1-click "Select All Unclaimed"
       const deselectBtn = page.getByRole('button', { name: 'Clear', exact: true }).first();
       if (await deselectBtn.isVisible().catch(() => false)) await deselectBtn.click();
 
       const supplierDropdown = page.locator('select').first();
-      const hasSupplierOpt = await supplierDropdown.evaluate((el) =>
-        Array.from(el.options).some((o) => o.value.includes('Suy Sing Commercial Corp') || o.text.includes('Suy Sing Commercial Corp'))
+      const hasSupplierOpt = await supplierDropdown.evaluate(
+        (el, targetSup) => Array.from(el.options).some((o) => o.value.includes(targetSup) || o.text.includes(targetSup)),
+        PW_TEST_SUPPLIER
       );
       if (hasSupplierOpt) {
-        const optVal = await supplierDropdown.evaluate((el) => {
-          const opt = Array.from(el.options).find((o) => o.value.includes('Suy Sing Commercial Corp') || o.text.includes('Suy Sing Commercial Corp'));
+        const optVal = await supplierDropdown.evaluate((el, targetSup) => {
+          const opt = Array.from(el.options).find((o) => o.value.includes(targetSup) || o.text.includes(targetSup));
           return opt ? opt.value : '';
-        });
+        }, PW_TEST_SUPPLIER);
         if (optVal) await supplierDropdown.selectOption(optVal);
       } else {
-        await page.locator('input[placeholder*="Search" i]').first().fill('Suy Sing Commercial Corp');
+        await page.locator('input[placeholder*="Search" i]').first().fill(PW_TEST_SUPPLIER);
       }
 
       const selectUnclaimedBtn = page.getByRole('button', { name: /Select All Unclaimed for/i }).first();
@@ -314,8 +319,8 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await expect(page.getByText(/Total:\s*0\/50 photos/i)).toBeVisible();
       await expect(page.locator('#wizard-processed-by-step2')).toHaveValue('');
 
-      await page.locator('input[placeholder*="claims@supplier.com" i]').fill('batch-claims@example.com');
-      await page.locator('input[placeholder*="rep@supplier.com" i]').fill('batch-ap@example.com');
+      await page.locator('input[placeholder*="claims@supplier.com" i]').fill('pw-batch-claims@pingcon-test.local');
+      await page.locator('input[placeholder*="rep@supplier.com" i]').fill('pw-batch-ap@pingcon-test.local');
 
       const chooseFilesInputs = page.locator('input[type="file"][accept="image/*"][multiple]');
       const multiCount = await chooseFilesInputs.count();
@@ -450,7 +455,8 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
     } finally {
       await cleanupTestRecords(page, {
         rmaNumbers: [sup1A, sup1B, sup2Diff],
-        claimNumbers: [sharedClaimNumber]
+        claimNumbers: [sharedClaimNumber],
+        supplierNames: [PW_TEST_SUPPLIER, 'Other Guard Vendor']
       });
       guard.detach();
     }

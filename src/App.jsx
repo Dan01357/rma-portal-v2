@@ -373,9 +373,11 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
 
-  // Load saved per-email recipient profiles, supplier directory & matrix config from Supabase on mount
+  const [supplierDirSyncTick, setSupplierDirSyncTick] = useState(0);
+
+  // Load saved per-email recipient profiles, supplier directory (Live + Sandbox when active) & matrix config from Supabase on mount
   useEffect(() => {
-    supplierDirectoryService.loadDirectory().catch(() => {});
+    supplierDirectoryService.loadDirectory({ isTestMode: false }).catch(() => {});
     notificationService.loadAllEmailProfilesFromDb()
       .then(({ testSandboxEmail: dbSandbox }) => {
         if (dbSandbox) {
@@ -387,9 +389,17 @@ export default function App() {
     const syncSandbox = () => {
       setTestSandboxEmail(notificationService.getTestSandboxEmail());
     };
+    const syncDir = () => {
+      setSupplierDirSyncTick((n) => n + 1);
+    };
     window.addEventListener('rma-settings-changed', syncSandbox);
-    return () => window.removeEventListener('rma-settings-changed', syncSandbox);
+    window.addEventListener('rma-supplier-directory-changed', syncDir);
+    return () => {
+      window.removeEventListener('rma-settings-changed', syncSandbox);
+      window.removeEventListener('rma-supplier-directory-changed', syncDir);
+    };
   }, []);
+
   const [staffList, setStaffList] = useState([]);
 
   // Credit Memos State
@@ -896,6 +906,12 @@ export default function App() {
       return false;
     }
   });
+
+  useEffect(() => {
+    if (isTestMode || currentUser?.role === 'super_admin') {
+      supplierDirectoryService.loadDirectory({ isTestMode: true }).catch(() => {});
+    }
+  }, [isTestMode, currentUser?.role]);
 
   // Derived portal stream & environment flags (honors invited Test Mode Sandbox links safely)
   const effectiveIsTestMode = Boolean(isTestMode || gateSession?.is_test);
@@ -5074,7 +5090,7 @@ export default function App() {
                   products: savedProductsList.length,
                   allLiveReports: liveReportsList.length,
                   archiveTrash: archivedReportsList.length + trashedReportsList.length,
-                  supplierContacts: supplierDirectoryService.getCachedDirectory().length,
+                  supplierContacts: (supplierDirSyncTick >= 0 ? supplierDirectoryService.getCachedDirectory({ isTestMode }).length : 0),
                   locations: getWarehouseLocations().length,
                   staff: staffList.length || 25,
                   sandbox: testReportsList.length
@@ -5517,6 +5533,7 @@ export default function App() {
                     <SupplierDirectoryModal
                       isOpen={true}
                       isEmbeddedPage={true}
+                      isTestMode={isTestMode}
                       onClose={() => setAdminActiveTab('supplier_claims')}
                       onShowToast={showToast}
                     />

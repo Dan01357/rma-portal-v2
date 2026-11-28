@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
+  PW_TEST_SUPPLIER,
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
@@ -101,7 +102,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         stream: 'supplier',
         photoCount: 1,
         expiryDays: 60,
-        supplierOrCompany: 'Monde Nissin Corp'
+        supplierOrCompany: PW_TEST_SUPPLIER
       });
 
       await gotoAdmin(page);
@@ -457,7 +458,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       seededSupplierRma = null;
       guard.assertClean('suite 03 hubs, sandbox, manifest drawer, queue confirms & archive/trash');
     } finally {
-      await cleanupTestRecords(page, { rmaNumbers: [seededManifestRma, seededSupplierRma] });
+      await cleanupTestRecords(page, { rmaNumbers: [seededManifestRma, seededSupplierRma], supplierNames: [PW_TEST_SUPPLIER] });
       guard.detach();
     }
   });

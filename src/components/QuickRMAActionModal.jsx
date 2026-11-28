@@ -798,14 +798,15 @@ export default function QuickRMAActionModal({
         set.add(s);
       }
     });
-    (supplierDirectoryService.getCachedDirectory() || []).forEach(c => {
+    const modeIsTest = Boolean(report && isTestRecord(report));
+    (supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }) || []).forEach(c => {
       const s = (c.supplier_name || '').trim();
       if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     return Array.from(set).sort();
-  }, [savedProductsList, recentReportsList]);
+  }, [savedProductsList, recentReportsList, report]);
 
   const handleUpdateEditableManifestItem = (idx, patch) => {
     setEditableManifestItems((prev) => {
@@ -863,16 +864,17 @@ export default function QuickRMAActionModal({
       setAdminPoNumber(report.po_number || meta.po_number || '');
       setAdminStoreBranch(report.store_branch || '');
       setAdminSupplierName(resolvedInitSupplier);
+      const modeIsTest = Boolean(isTestRecord(report));
       const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
       const itemEmailsMap = (followUpMeta.item_emails && typeof followUpMeta.item_emails === 'object') ? followUpMeta.item_emails : {};
       const dirMatch = (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier))
-        ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier)
+        ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier, { isTestMode: modeIsTest })
         : null;
       setAdminSupplierEmailTo(followUpMeta.supplier_email_to || pickup.supplier_email_to || dirMatch?.email_to || '');
       setAdminSupplierEmailCc(followUpMeta.supplier_email_cc || pickup.supplier_email_cc || dirMatch?.email_cc || '');
-      supplierDirectoryService.loadDirectory().then(() => {
+      supplierDirectoryService.loadDirectory({ isTestMode: modeIsTest }).then(() => {
         if (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier)) {
-          const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier);
+          const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier, { isTestMode: modeIsTest });
           if (refreshed) {
             setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (refreshed.email_to || ''));
             setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (refreshed.email_cc || ''));
@@ -881,7 +883,7 @@ export default function QuickRMAActionModal({
         setEditableManifestItems((prev) => prev.map((row) => {
           const sup = String(row.supplier_name || '').trim();
           if (!sup || isPlaceholderSup(sup)) return row;
-          const m = supplierDirectoryService.findBySupplierName(sup);
+          const m = supplierDirectoryService.findBySupplierName(sup, { isTestMode: modeIsTest });
           if (!m) return row;
           return {
             ...row,
@@ -907,7 +909,7 @@ export default function QuickRMAActionModal({
         : (Array.isArray(report.items) ? report.items : []);
       const mappedManifest = baseManifestList.map((it, idx) => {
         const rawSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(resolvedInitSupplier) ? resolvedInitSupplier : '') || '';
-        const itemDir = (rawSup && !isPlaceholderSup(rawSup)) ? supplierDirectoryService.findBySupplierName(rawSup) : null;
+        const itemDir = (rawSup && !isPlaceholderSup(rawSup)) ? supplierDirectoryService.findBySupplierName(rawSup, { isTestMode: modeIsTest }) : null;
         const itMetaFu = (it.ai_document_metadata?.follow_up && typeof it.ai_document_metadata.follow_up === 'object')
           ? it.ai_document_metadata.follow_up
           : {};
@@ -993,7 +995,7 @@ export default function QuickRMAActionModal({
     const sup = String(item.supplierName || item.supplier_name || item.supplier || '').trim();
     if (sup && !/^(pending assignment|unassigned|warehouse|n\/a)$/i.test(sup)) {
       setAdminSupplierName(sup);
-      const dirMatch = supplierDirectoryService.findBySupplierName(sup);
+      const dirMatch = supplierDirectoryService.findBySupplierName(sup, { isTestMode: Boolean(report && isTestRecord(report)) });
       if (dirMatch) {
         setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
         setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
@@ -1484,15 +1486,19 @@ export default function QuickRMAActionModal({
         ...(updatedItems ? { items: updatedItems } : {})
       };
 
+      const saveIsTest = Boolean((adminIsTest !== null && adminIsTest !== undefined) ? adminIsTest : isTestRecord(report));
       if (isSupplierEditStream && !isManifestReport && isRealSupplierName(cleanSupplier) && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: cleanSupplier,
-          supplier_email_to: cleanSupplierEmailTo,
-          supplier_email_cc: cleanSupplierEmailCc
-        }).catch(() => {});
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: cleanSupplier,
+            supplier_email_to: cleanSupplierEmailTo,
+            supplier_email_cc: cleanSupplierEmailCc
+          },
+          { isTestMode: saveIsTest }
+        ).catch(() => {});
       } else if (isSupplierEditStream && dirUpserts.length > 0) {
         dirUpserts.forEach((entry) => {
-          supplierDirectoryService.upsertFromSubmission(entry).catch(() => {});
+          supplierDirectoryService.upsertFromSubmission(entry, { isTestMode: saveIsTest }).catch(() => {});
         });
       }
 
@@ -2228,7 +2234,7 @@ export default function QuickRMAActionModal({
                                         value={it.supplier_name || ''}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          const dirMatch = supplierDirectoryService.findBySupplierName(val);
+                                          const dirMatch = supplierDirectoryService.findBySupplierName(val, { isTestMode: Boolean(report && isTestRecord(report)) });
                                           handleUpdateEditableManifestItem(idx, {
                                             supplier_name: val,
                                             supplierName: val,
@@ -2453,7 +2459,7 @@ export default function QuickRMAActionModal({
                               onChange={(e) => {
                                 const nextVal = e.target.value;
                                 setAdminSupplierName(nextVal);
-                                const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+                                const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: Boolean(report && isTestRecord(report)) });
                                 if (dirMatch) {
                                   setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
                                   setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));

@@ -1423,9 +1423,17 @@ export const catalogService = {
       if (!existingFollowUpMeta.started_at) {
         existingFollowUpMeta.started_at = nowIso;
       }
-      // Auto-populate known Supplier Directory emails when available so daily cron can send right away
+      // Auto-populate known Supplier Directory emails when available so daily cron can send right away (strictly isolated Live vs Test)
       if (!existingFollowUpMeta.supplier_email_to) {
         try {
+          const submissionIsTest = isTestRecord({
+            rma_number: rmaNumber,
+            notes,
+            is_test: ai_document_metadata?.is_test,
+            test_mode: ai_document_metadata?.test_mode,
+            ai_document_metadata
+          });
+          await supplierDirectoryService.loadDirectory({ isTestMode: submissionIsTest }).catch(() => {});
           const itemSuppliers = hasItems ? extractDistinctSuppliersFromItems(items) : [];
           const candidateSups = itemSuppliers.length > 0
             ? itemSuppliers
@@ -1433,7 +1441,7 @@ export const catalogService = {
           const dirToSet = new Set();
           const dirCcSet = new Set();
           candidateSups.forEach((sup) => {
-            const match = supplierDirectoryService.findBySupplierName(sup);
+            const match = supplierDirectoryService.findBySupplierName(sup, { isTestMode: submissionIsTest });
             if (match?.email_to) {
               String(match.email_to).split(/[,;\s]+/).forEach((e) => { if (e.includes('@')) dirToSet.add(e.trim().toLowerCase()); });
             }
@@ -3426,12 +3434,18 @@ export const catalogService = {
       const supForDir = updates.supplier_name || existing?.supplier_name;
       const toForDir = updatedMeta?.supplier_pickup?.supplier_email_to;
       const ccForDir = updatedMeta?.supplier_pickup?.supplier_email_cc;
-      if (supForDir && (toForDir || ccForDir)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: supForDir,
-          supplier_email_to: toForDir,
-          supplier_email_cc: ccForDir
-        }).catch(() => {});
+      const effectiveStream = updates.rma_type || existing?.rma_type || '';
+      const dispLower = String(updates.disposition || payload?.disposition || '').toLowerCase();
+      const isSupplierRtvAction = effectiveStream === 'supplier_outbound' && !dispLower.startsWith('customer_');
+      if (isSupplierRtvAction && supForDir && (toForDir || ccForDir)) {
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: supForDir,
+            supplier_email_to: toForDir,
+            supplier_email_cc: ccForDir
+          },
+          { isTestMode: recordIsTest }
+        ).catch(() => {});
       }
     } catch {}
 
@@ -3564,11 +3578,14 @@ export const catalogService = {
     try {
       const supForDir = cleanSupplier || existing?.supplier_name;
       if (supForDir && (toEmailStr || ccEmailStr)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: supForDir,
-          supplier_email_to: toEmailStr,
-          supplier_email_cc: ccEmailStr
-        }).catch(() => {});
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: supForDir,
+            supplier_email_to: toEmailStr,
+            supplier_email_cc: ccEmailStr
+          },
+          { isTestMode: recordIsTest }
+        ).catch(() => {});
       }
     } catch {}
     this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });

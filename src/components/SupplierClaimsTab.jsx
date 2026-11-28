@@ -2284,6 +2284,7 @@ export default function SupplierClaimsTab({
       <SupplierDirectoryModal
         isOpen={isDirectoryOpen}
         onClose={() => setIsDirectoryOpen(false)}
+        isTestMode={isTestMode}
       />
 
     </div>

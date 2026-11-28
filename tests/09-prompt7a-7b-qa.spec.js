@@ -462,7 +462,11 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
           await notificationService.resetEmailProfileToDefaults('manual_matrix', true);
         }).catch(() => {});
       }
-      await cleanupTestRecords(page, { rmaNumbers: createdRmas, creditMemoNumbers: createdCms });
+      await cleanupTestRecords(page, {
+        rmaNumbers: createdRmas,
+        creditMemoNumbers: createdCms,
+        resetTestRecipients: true
+      });
       guard.detach();
     }
   });
@@ -621,14 +625,14 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       const setSupBtn = quickModal.getByRole('button', { name: /\+ Set Supplier & Email/i }).first();
       await expect(setSupBtn).toBeVisible({ timeout: 10_000 });
       await setSupBtn.click();
-      await page.locator('#followup-modal-supplier-input').fill('Reset Preservation Supplier');
-      await page.locator('input[aria-label="Supplier Primary Email(s) (TO)"]').fill('preserve-to@supplier-test.local');
-      await page.locator('input[aria-label="Supplier CC Email(s) (Optional)"]').fill('preserve-cc@supplier-test.local');
+      await page.locator('#followup-modal-supplier-input').fill('PW Test Reset Preservation Supplier');
+      await page.locator('input[aria-label="Supplier Primary Email(s) (TO)"]').fill('pw-preserve-to@pingcon-test.local');
+      await page.locator('input[aria-label="Supplier CC Email(s) (Optional)"]').fill('pw-preserve-cc@pingcon-test.local');
       await page.getByRole('button', { name: /Save Supplier & Email/i }).click();
-      await expect(page.getByText(/Saved supplier "Reset Preservation Supplier"/i)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/Saved supplier "PW Test Reset Preservation Supplier"/i)).toBeVisible({ timeout: 10_000 });
       await page.locator('button[aria-label="Close supplier follow-up modal"]').click();
       await expect(page.locator('#followup-modal-supplier-input')).toBeHidden({ timeout: 10_000 });
-      await expect(quickModal.getByText('Reset Preservation Supplier').first()).toBeVisible({ timeout: 10_000 });
+      await expect(quickModal.getByText('PW Test Reset Preservation Supplier').first()).toBeVisible({ timeout: 10_000 });
 
       // Open 4-Choice Window from Quick Actions -> Scrap the RMA -> verify Scrapped outcome -> Reset Timeline -> verify Pending + Day 0 + Supplier preserved
       await quickModal.getByRole('button', { name: /Open 4-Choice \/ Pickup Window/i }).click();
@@ -655,7 +659,7 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       await expect(quickModal.getByText(/Day 0/i).first()).toBeVisible();
       await expect(quickModal.getByText(/Pending Pickup/i).first()).toBeVisible();
       await expect(quickModal.getByText(/Step 2: Waiting For Pickup/i).first()).toBeVisible();
-      await expect(quickModal.getByText('Reset Preservation Supplier').first()).toBeVisible();
+      await expect(quickModal.getByText('PW Test Reset Preservation Supplier').first()).toBeVisible();
       await quickModal.getByRole('button', { name: /Done \/ Close/i }).click();
 
       // Confirm row status badge shows Pending (YYYY-MM-DD HH:mm)
@@ -665,7 +669,10 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
 
       guard.assertClean('suite 09 pinpoint GPS, Live Cam, Multi-QR Sheet & Full Reset');
     } finally {
-      await cleanupTestRecords(page, { rmaNumbers: sessionRmas });
+      await cleanupTestRecords(page, {
+        rmaNumbers: sessionRmas,
+        supplierNames: ['PW Test Reset Preservation Supplier']
+      });
       guard.detach();
     }
   });

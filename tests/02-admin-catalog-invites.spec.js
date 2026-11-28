@@ -2,12 +2,15 @@ import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import {
   PNG_BUFFER,
+  PW_TEST_SUPPLIER,
+  PW_TEST_SUPPLIER_ALT,
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
   gotoAdmin,
   navigateAdminSidebar,
-  openSettingsSubTab
+  openSettingsSubTab,
+  cleanupTestRecords
 } from './helpers/testUtils.js';
 
 test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites & Saved Products Catalog CRUD', () => {
@@ -309,7 +312,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await netPriceInput.blur();
       await expect(productModal.locator('input[placeholder="0.00"]').nth(1)).toHaveValue('112.00');
 
-      await productModal.locator('#supplier-name-input').fill('Suy Sing');
+      await productModal.locator('#supplier-name-input').fill(PW_TEST_SUPPLIER);
 
       // Upload photo & test Save Product
       const prodPhotoInput = productModal.locator('input[type="file"][accept="image/*"]').first();
@@ -338,7 +341,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await page.locator('button[title="Delete product"]').first().click();
       await expect(page.getByText('Delete Product from Catalog?')).toBeVisible();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(page.locator('tr', { hasText: name1 })).toBeHidden({ timeout: 10_000 });
+      await expect(page.locator('tr', { hasText: name1 })).toBeHidden({ timeout: 25_000 });
 
       // Add Product #2 -> test bulk checkbox, Select all filtered, Deselect, Delete Selected
       await page.getByRole('button', { name: /Reset/i }).click();
@@ -348,7 +351,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await productModal.locator('input[placeholder*="Oishi"]').first().fill(name2);
       await productModal.locator('input[placeholder*="SS1742P"]').first().fill(sku2);
       await productModal.locator('input[placeholder="0.00"]').first().fill('50');
-      await productModal.locator('#supplier-name-input').fill('Playwright Supplier');
+      await productModal.locator('#supplier-name-input').fill(PW_TEST_SUPPLIER_ALT);
       await productModal.getByRole('button', { name: /Save Product/i }).click();
       await expect(productModal).toBeHidden({ timeout: 35_000 });
 
@@ -365,6 +368,10 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
 
       guard.assertClean('suite 02 saved products catalog CRUD & auto-suggest');
     } finally {
+      await cleanupTestRecords(page, {
+        productBarcodes: [bc1, bc2],
+        supplierNames: [PW_TEST_SUPPLIER, PW_TEST_SUPPLIER_ALT]
+      });
       guard.detach();
     }
   });

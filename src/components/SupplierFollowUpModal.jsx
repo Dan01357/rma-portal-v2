@@ -43,9 +43,15 @@ export default function SupplierFollowUpModal({
   const [isClosing, setIsClosing] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
+  const recordIsTest = useMemo(
+    () => Boolean(isTestMode || (report && isTestRecord(report))),
+    [isTestMode, report]
+  );
+
   useEffect(() => {
     if (!isOpen || !report) return;
     let active = true;
+    const modeIsTest = Boolean(isTestMode || isTestRecord(report));
     const party = resolveReportPartyAndEmails(report, catalogProducts);
     const defaultCfg = notificationService.getDailyFollowUpConfig();
     const wf = computeFourStepWorkflow(report, catalogProducts, {
@@ -53,7 +59,7 @@ export default function SupplierFollowUpModal({
       testStepIntervalSeconds: defaultCfg.testStepIntervalSeconds
     });
     const cleanSup = isPlaceholderSupplier(party.supplierName) ? '' : party.supplierName;
-    const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup) : null;
+    const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup, { isTestMode: modeIsTest }) : null;
 
     setSupplierName(cleanSup);
     setSupplierEmailTo(party.supplierEmailTo || dirMatch?.email_to || '');
@@ -61,9 +67,9 @@ export default function SupplierFollowUpModal({
     setFollowUpEnabled(Boolean(wf.followUpEnabled));
     setFeedback(null);
 
-    supplierDirectoryService.loadDirectory().then(() => {
+    supplierDirectoryService.loadDirectory({ isTestMode: modeIsTest }).then(() => {
       if (!active || !cleanSup) return;
-      const freshMatch = supplierDirectoryService.findBySupplierName(cleanSup);
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanSup, { isTestMode: modeIsTest });
       if (freshMatch) {
         setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
         setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
@@ -74,12 +80,7 @@ export default function SupplierFollowUpModal({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, report?.id, report?.rma_number]);
-
-  const recordIsTest = useMemo(
-    () => Boolean(isTestMode || (report && isTestRecord(report))),
-    [isTestMode, report]
-  );
+  }, [isOpen, report?.id, report?.rma_number, isTestMode]);
 
   const wfPreview = useMemo(() => {
     if (!report) return null;
@@ -113,7 +114,7 @@ export default function SupplierFollowUpModal({
 
   const handleSupplierNameChange = (nextVal) => {
     setSupplierName(nextVal);
-    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: recordIsTest });
     if (dirMatch) {
       setSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
       setSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
@@ -136,11 +137,14 @@ export default function SupplierFollowUpModal({
         followUpEnabled,
         actorName
       });
-      await supplierDirectoryService.upsertFromSubmission({
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim()
-      }).catch(() => { });
+      await supplierDirectoryService.upsertFromSubmission(
+        {
+          supplier_name: cleanSup,
+          supplier_email_to: supplierEmailTo.trim(),
+          supplier_email_cc: supplierEmailCc.trim()
+        },
+        { isTestMode: recordIsTest }
+      ).catch(() => { });
       setFeedback({
         type: 'success',
         message: `Saved supplier "${cleanSup}" and contact email(s)${followUpEnabled ? ' — 10-Calendar-Day follow-up countdown active.' : ' — Auto daily follow-up paused.'}`

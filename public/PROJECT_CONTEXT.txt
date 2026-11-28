@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-28T03:02:54.871Z
+Generated At: 2026-11-28T04:31:15.967Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -174,7 +174,8 @@ rma-portal-v2/
 │   │   │   │   ├── printIsolatedElement.js
 │   │   │   │   ├── qrDownload.js
 │   │   │   │   ├── rmaAlertXlsx.js
-│   │   │   │   └── rmaHelpers.js
+│   │   │   │   ├── rmaHelpers.js
+│   │   │   │   └── supplierDirectoryHelpers.js
 │   │   ├── App.jsx
 │   │   ├── index.css
 │   │   ├── main.jsx
@@ -186,6 +187,8 @@ rma-portal-v2/
 │   │   │   │   └── admin.json
 │   │   ├── helpers/
 │   │   │   │   └── testUtils.js
+│   │   ├── unit/
+│   │   │   │   └── supplierDirectoryIsolation.test.mjs
 │   │   ├── 01-public-intake.spec.js
 │   │   ├── 02-admin-catalog-invites.spec.js
 │   │   ├── 03-hubs-and-sandbox.spec.js
@@ -8989,22 +8992,29 @@ import {
   buildAutoDisposedEmailContent
 } from '../../src/utils/followUpWorkflow.js';
 
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  normalizeSupplierDirectoryKey,
+  parseSupplierDirectoryValue
+} from '../../src/utils/supplierDirectoryHelpers.js';
+
 const EMAIL_RECIPIENTS_KEY = 'email_recipients';
 const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
 const TEST_EMAIL_RECIPIENTS_KEY = 'test_email_recipients';
 const TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY = 'test_email_recipients_by_type';
 const DAILY_FOLLOWUP_CONFIG_KEY = 'daily_followup_config';
 const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
-const SUPPLIER_DIRECTORY_KEY = 'supplier_directory_store';
+const SUPPLIER_DIRECTORY_KEY = SUPPLIER_DIRECTORY_SETTINGS_KEY;
 
 function normalizeDirKey(name) {
-  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return normalizeSupplierDirectoryKey(name);
 }
 
 function buildDirectoryLookupMap(rawDir) {
   const map = new Map();
-  if (!Array.isArray(rawDir)) return map;
-  for (const entry of rawDir) {
+  const list = parseSupplierDirectoryValue(rawDir);
+  for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue;
     const k = normalizeDirKey(entry.supplier_name || entry.supplierName);
     if (!k) continue;
@@ -9117,7 +9127,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY,
         DAILY_FOLLOWUP_CONFIG_KEY,
         TEST_SANDBOX_EMAIL_KEY,
-        SUPPLIER_DIRECTORY_KEY
+        SUPPLIER_DIRECTORY_KEY,
+        TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY
       ]);
 
     if (Array.isArray(settingsRows)) {
@@ -9207,7 +9218,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   const followUpProfile = recipientsByType?.supplier_followup || {};
   const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to ?? followUpProfile?.toList);
   const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc ?? followUpProfile?.ccList);
-  const directoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
+  const liveDirectoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
+  const testDirectoryMap = buildDirectoryLookupMap(settingsMap.get(TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY));
 
   // Isolated Test Mode recipient profiles (never leaks Live recipients or Live defaults)
   const testGlobalRecipients = settingsMap.get(TEST_EMAIL_RECIPIENTS_KEY);
@@ -9481,7 +9493,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         continue;
       }
 
-      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && directoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
+      const activeDirectoryMap = effectiveTestRecord ? testDirectoryMap : liveDirectoryMap;
+      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && activeDirectoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
       const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
       const itemDirTo = [];
       const itemDirCc = [];
@@ -9494,7 +9507,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         }
       }
       for (const sup of itemSuppliers) {
-        const match = directoryMap.get(normalizeDirKey(sup));
+        const match = activeDirectoryMap.get(normalizeDirKey(sup));
         if (match) {
           match.emailToList.forEach((e) => itemDirTo.push(e));
           match.emailCcList.forEach((e) => itemDirCc.push(e));
@@ -10582,6 +10595,13 @@ import {
   isMixedSuppliersSummary,
   isRealSupplierName
 } from '../../src/utils/rmaHelpers.js';
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  getSupplierDirectorySettingsKey,
+  parseSupplierDirectoryValue,
+  isBlockedLiveDirectoryContact
+} from '../../src/utils/supplierDirectoryHelpers.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -11133,7 +11153,8 @@ export async function applyRmaXlsxUpdates({
         'test_email_recipients',
         'test_email_recipients_by_type',
         'test_sandbox_email',
-        'supplier_directory_store',
+        SUPPLIER_DIRECTORY_SETTINGS_KEY,
+        TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
         'customer_rma_invites_store'
       ])
   ]);
@@ -11579,18 +11600,21 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  // Upsert Supplier Directory entry if supplier email(s) updated
+  // Upsert Supplier Directory entry if supplier email(s) updated (strictly isolated Live vs Test + Live placeholder guard)
   const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
   const effectiveSupTo = nextFollowUp.supplier_email_to || '';
   const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
-  if (effectiveSupplier && !isMixedSuppliersSummary(effectiveSupplier) && isRealSupplierName(effectiveSupplier) && (effectiveSupTo || effectiveSupCc)) {
+  if (
+    effectiveSupplier &&
+    !isMixedSuppliersSummary(effectiveSupplier) &&
+    isRealSupplierName(effectiveSupplier) &&
+    (effectiveSupTo || effectiveSupCc) &&
+    (existingIsTest || !isBlockedLiveDirectoryContact(effectiveSupplier, effectiveSupTo, effectiveSupCc))
+  ) {
     try {
-      const dirRow = (settingsRows || []).find((s) => s.key === 'supplier_directory_store');
-      let dirList = [];
-      if (dirRow?.value) {
-        const parsedDir = typeof dirRow.value === 'string' ? JSON.parse(dirRow.value) : dirRow.value;
-        if (Array.isArray(parsedDir)) dirList = parsedDir;
-      }
+      const dirKey = getSupplierDirectorySettingsKey(existingIsTest);
+      const dirRow = (settingsRows || []).find((s) => s.key === dirKey);
+      let dirList = parseSupplierDirectoryValue(dirRow?.value);
       const lower = effectiveSupplier.toLowerCase();
       const idx = dirList.findIndex((e) => String(e?.supplier_name || '').trim().toLowerCase() === lower);
       const nextEntry = {
@@ -11602,7 +11626,7 @@ export async function applyRmaXlsxUpdates({
       };
       if (idx >= 0) dirList[idx] = { ...dirList[idx], ...nextEntry };
       else dirList.push(nextEntry);
-      await supabase.from('rma_settings').upsert({ key: 'supplier_directory_store', value: JSON.stringify(dirList) }, { onConflict: 'key' });
+      await supabase.from('rma_settings').upsert({ key: dirKey, value: dirList, updated_at: nowIso }, { onConflict: 'key' });
     } catch {}
   }
 
@@ -16389,9 +16413,11 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
 
-  // Load saved per-email recipient profiles, supplier directory & matrix config from Supabase on mount
+  const [supplierDirSyncTick, setSupplierDirSyncTick] = useState(0);
+
+  // Load saved per-email recipient profiles, supplier directory (Live + Sandbox when active) & matrix config from Supabase on mount
   useEffect(() => {
-    supplierDirectoryService.loadDirectory().catch(() => {});
+    supplierDirectoryService.loadDirectory({ isTestMode: false }).catch(() => {});
     notificationService.loadAllEmailProfilesFromDb()
       .then(({ testSandboxEmail: dbSandbox }) => {
         if (dbSandbox) {
@@ -16403,9 +16429,17 @@ export default function App() {
     const syncSandbox = () => {
       setTestSandboxEmail(notificationService.getTestSandboxEmail());
     };
+    const syncDir = () => {
+      setSupplierDirSyncTick((n) => n + 1);
+    };
     window.addEventListener('rma-settings-changed', syncSandbox);
-    return () => window.removeEventListener('rma-settings-changed', syncSandbox);
+    window.addEventListener('rma-supplier-directory-changed', syncDir);
+    return () => {
+      window.removeEventListener('rma-settings-changed', syncSandbox);
+      window.removeEventListener('rma-supplier-directory-changed', syncDir);
+    };
   }, []);
+
   const [staffList, setStaffList] = useState([]);
 
   // Credit Memos State
@@ -16912,6 +16946,12 @@ export default function App() {
       return false;
     }
   });
+
+  useEffect(() => {
+    if (isTestMode || currentUser?.role === 'super_admin') {
+      supplierDirectoryService.loadDirectory({ isTestMode: true }).catch(() => {});
+    }
+  }, [isTestMode, currentUser?.role]);
 
   // Derived portal stream & environment flags (honors invited Test Mode Sandbox links safely)
   const effectiveIsTestMode = Boolean(isTestMode || gateSession?.is_test);
@@ -21090,7 +21130,7 @@ export default function App() {
                   products: savedProductsList.length,
                   allLiveReports: liveReportsList.length,
                   archiveTrash: archivedReportsList.length + trashedReportsList.length,
-                  supplierContacts: supplierDirectoryService.getCachedDirectory().length,
+                  supplierContacts: (supplierDirSyncTick >= 0 ? supplierDirectoryService.getCachedDirectory({ isTestMode }).length : 0),
                   locations: getWarehouseLocations().length,
                   staff: staffList.length || 25,
                   sandbox: testReportsList.length
@@ -21533,6 +21573,7 @@ export default function App() {
                     <SupplierDirectoryModal
                       isOpen={true}
                       isEmbeddedPage={true}
+                      isTestMode={isTestMode}
                       onClose={() => setAdminActiveTab('supplier_claims')}
                       onShowToast={showToast}
                     />
@@ -41417,14 +41458,15 @@ export default function QuickRMAActionModal({
         set.add(s);
       }
     });
-    (supplierDirectoryService.getCachedDirectory() || []).forEach(c => {
+    const modeIsTest = Boolean(report && isTestRecord(report));
+    (supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }) || []).forEach(c => {
       const s = (c.supplier_name || '').trim();
       if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     return Array.from(set).sort();
-  }, [savedProductsList, recentReportsList]);
+  }, [savedProductsList, recentReportsList, report]);
 
   const handleUpdateEditableManifestItem = (idx, patch) => {
     setEditableManifestItems((prev) => {
@@ -41482,16 +41524,17 @@ export default function QuickRMAActionModal({
       setAdminPoNumber(report.po_number || meta.po_number || '');
       setAdminStoreBranch(report.store_branch || '');
       setAdminSupplierName(resolvedInitSupplier);
+      const modeIsTest = Boolean(isTestRecord(report));
       const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
       const itemEmailsMap = (followUpMeta.item_emails && typeof followUpMeta.item_emails === 'object') ? followUpMeta.item_emails : {};
       const dirMatch = (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier))
-        ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier)
+        ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier, { isTestMode: modeIsTest })
         : null;
       setAdminSupplierEmailTo(followUpMeta.supplier_email_to || pickup.supplier_email_to || dirMatch?.email_to || '');
       setAdminSupplierEmailCc(followUpMeta.supplier_email_cc || pickup.supplier_email_cc || dirMatch?.email_cc || '');
-      supplierDirectoryService.loadDirectory().then(() => {
+      supplierDirectoryService.loadDirectory({ isTestMode: modeIsTest }).then(() => {
         if (resolvedInitSupplier && !isMixedSuppliersSummary(resolvedInitSupplier)) {
-          const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier);
+          const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier, { isTestMode: modeIsTest });
           if (refreshed) {
             setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (refreshed.email_to || ''));
             setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (refreshed.email_cc || ''));
@@ -41500,7 +41543,7 @@ export default function QuickRMAActionModal({
         setEditableManifestItems((prev) => prev.map((row) => {
           const sup = String(row.supplier_name || '').trim();
           if (!sup || isPlaceholderSup(sup)) return row;
-          const m = supplierDirectoryService.findBySupplierName(sup);
+          const m = supplierDirectoryService.findBySupplierName(sup, { isTestMode: modeIsTest });
           if (!m) return row;
           return {
             ...row,
@@ -41526,7 +41569,7 @@ export default function QuickRMAActionModal({
         : (Array.isArray(report.items) ? report.items : []);
       const mappedManifest = baseManifestList.map((it, idx) => {
         const rawSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(resolvedInitSupplier) ? resolvedInitSupplier : '') || '';
-        const itemDir = (rawSup && !isPlaceholderSup(rawSup)) ? supplierDirectoryService.findBySupplierName(rawSup) : null;
+        const itemDir = (rawSup && !isPlaceholderSup(rawSup)) ? supplierDirectoryService.findBySupplierName(rawSup, { isTestMode: modeIsTest }) : null;
         const itMetaFu = (it.ai_document_metadata?.follow_up && typeof it.ai_document_metadata.follow_up === 'object')
           ? it.ai_document_metadata.follow_up
           : {};
@@ -41612,7 +41655,7 @@ export default function QuickRMAActionModal({
     const sup = String(item.supplierName || item.supplier_name || item.supplier || '').trim();
     if (sup && !/^(pending assignment|unassigned|warehouse|n\/a)$/i.test(sup)) {
       setAdminSupplierName(sup);
-      const dirMatch = supplierDirectoryService.findBySupplierName(sup);
+      const dirMatch = supplierDirectoryService.findBySupplierName(sup, { isTestMode: Boolean(report && isTestRecord(report)) });
       if (dirMatch) {
         setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
         setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
@@ -42103,15 +42146,19 @@ export default function QuickRMAActionModal({
         ...(updatedItems ? { items: updatedItems } : {})
       };
 
+      const saveIsTest = Boolean((adminIsTest !== null && adminIsTest !== undefined) ? adminIsTest : isTestRecord(report));
       if (isSupplierEditStream && !isManifestReport && isRealSupplierName(cleanSupplier) && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: cleanSupplier,
-          supplier_email_to: cleanSupplierEmailTo,
-          supplier_email_cc: cleanSupplierEmailCc
-        }).catch(() => {});
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: cleanSupplier,
+            supplier_email_to: cleanSupplierEmailTo,
+            supplier_email_cc: cleanSupplierEmailCc
+          },
+          { isTestMode: saveIsTest }
+        ).catch(() => {});
       } else if (isSupplierEditStream && dirUpserts.length > 0) {
         dirUpserts.forEach((entry) => {
-          supplierDirectoryService.upsertFromSubmission(entry).catch(() => {});
+          supplierDirectoryService.upsertFromSubmission(entry, { isTestMode: saveIsTest }).catch(() => {});
         });
       }
 
@@ -42847,7 +42894,7 @@ export default function QuickRMAActionModal({
                                         value={it.supplier_name || ''}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          const dirMatch = supplierDirectoryService.findBySupplierName(val);
+                                          const dirMatch = supplierDirectoryService.findBySupplierName(val, { isTestMode: Boolean(report && isTestRecord(report)) });
                                           handleUpdateEditableManifestItem(idx, {
                                             supplier_name: val,
                                             supplierName: val,
@@ -43072,7 +43119,7 @@ export default function QuickRMAActionModal({
                               onChange={(e) => {
                                 const nextVal = e.target.value;
                                 setAdminSupplierName(nextVal);
-                                const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+                                const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: Boolean(report && isTestRecord(report)) });
                                 if (dirMatch) {
                                   setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
                                   setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
@@ -52260,6 +52307,7 @@ export default function SettingsTab({
       <SupplierDirectoryModal
         isOpen={isDirectoryOpen}
         onClose={() => setIsDirectoryOpen(false)}
+        isTestMode={isTestMode}
       />
 
     </div>
@@ -52549,7 +52597,9 @@ export default function SimpleSupplierRtvWizardModal({
   const [wizardReports, setWizardReports] = useState([]);
   const [bundleSearchQuery, setBundleSearchQuery] = useState('');
   const [showBundleDropdown, setShowBundleDropdown] = useState(false);
-  const [directoryContacts, setDirectoryContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
+  const [directoryContacts, setDirectoryContacts] = useState(() =>
+    supplierDirectoryService.getCachedDirectory({ isTestMode: rawBatchReports.some((r) => isTestRecord(r)) })
+  );
   const [selectedOption, setSelectedOption] = useState(null);
   const [supplierName, setSupplierName] = useState('');
   const [supplierEmailTo, setSupplierEmailTo] = useState('');
@@ -52578,15 +52628,6 @@ export default function SimpleSupplierRtvWizardModal({
   const [savedBatchReports, setSavedBatchReports] = useState(null);
   const [showA4Form, setShowA4Form] = useState(false);
   const [cameraSlotKey, setCameraSlotKey] = useState(null);
-
-  useEffect(() => {
-    const syncDir = (e) => {
-      if (Array.isArray(e?.detail)) setDirectoryContacts(e.detail);
-      else setDirectoryContacts(supplierDirectoryService.getCachedDirectory());
-    };
-    window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
-    return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
-  }, []);
 
   // Known suppliers list & customer/store branch list for autocomplete datalists
   const supplierSuggestions = useMemo(() => {
@@ -52645,6 +52686,7 @@ export default function SimpleSupplierRtvWizardModal({
     if (!isOpen || !targetReport) return;
     let isMounted = true;
     clearObjectUrls();
+    const activeBatchSnapshot = rawBatchReportsRef.current || [];
 
     const meta = (targetReport.ai_document_metadata && typeof targetReport.ai_document_metadata === 'object')
       ? targetReport.ai_document_metadata
@@ -52695,15 +52737,21 @@ export default function SimpleSupplierRtvWizardModal({
       ];
     const initialSupplier = partyCandidates.find((s) => !isPendingSupplierName(s)) || '';
     const cleanInitSupplier = String(initialSupplier).trim();
-    const dirInitial = cleanInitSupplier ? supplierDirectoryService.findBySupplierName(cleanInitSupplier) : null;
+    const modalIsTest = activeBatchSnapshot.some((r) => isTestRecord(r));
+    const dirInitial = (reportIsSupplier && cleanInitSupplier)
+      ? supplierDirectoryService.findBySupplierName(cleanInitSupplier, { isTestMode: modalIsTest })
+      : null;
+    setDirectoryContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modalIsTest }));
     setSupplierName(cleanInitSupplier);
     setSupplierEmailTo(pickup.supplier_email_to || dirInitial?.email_to || '');
     setSupplierEmailCc(pickup.supplier_email_cc || dirInitial?.email_cc || '');
     setConfirmUnifySupplier(false);
 
-    supplierDirectoryService.loadDirectory().then((dirList) => {
-      if (!isMounted || !cleanInitSupplier || !Array.isArray(dirList)) return;
-      const freshMatch = supplierDirectoryService.findBySupplierName(cleanInitSupplier);
+    supplierDirectoryService.loadDirectory({ isTestMode: modalIsTest }).then((dirList) => {
+      if (!isMounted || !Array.isArray(dirList)) return;
+      setDirectoryContacts(dirList);
+      if (!reportIsSupplier || !cleanInitSupplier) return;
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanInitSupplier, { isTestMode: modalIsTest });
       if (freshMatch) {
         setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
         setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
@@ -52719,7 +52767,6 @@ export default function SimpleSupplierRtvWizardModal({
     setDriverLicenseNo(pickup.driver_license_no || '');
     setTruckPlate(pickup.truck_plate || '');
 
-    const activeBatchSnapshot = rawBatchReportsRef.current || [];
     setWizardReports(activeBatchSnapshot);
     setBundleSearchQuery('');
     setShowBundleDropdown(false);
@@ -52833,6 +52880,28 @@ export default function SimpleSupplierRtvWizardModal({
     [workingBatchReports]
   );
 
+  const partyStreamIsSupplier = (workingBatchReports[0] || primaryInputReport)?.rma_type === 'supplier_outbound';
+  const partyListIsTest = wizardCurrentIsTest;
+
+  useEffect(() => {
+    const syncDir = (e) => {
+      const detail = e?.detail;
+      if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        if (Boolean(detail.isTestMode) !== Boolean(partyListIsTest)) return;
+        if (Array.isArray(detail.list)) {
+          setDirectoryContacts(detail.list);
+          return;
+        }
+      } else if (Array.isArray(detail)) {
+        setDirectoryContacts(detail);
+        return;
+      }
+      setDirectoryContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: partyListIsTest }));
+    };
+    window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+    return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+  }, [partyListIsTest]);
+
   const activeBatchIdsSet = useMemo(() => {
     return new Set(
       workingBatchReports
@@ -52892,7 +52961,8 @@ export default function SimpleSupplierRtvWizardModal({
   const handlePartyNameChange = (nextVal) => {
     setSupplierName(nextVal);
     if (errorMsg) setErrorMsg('');
-    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    if (!partyStreamIsSupplier) return;
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: wizardCurrentIsTest });
     if (dirMatch) {
       setSupplierEmailTo((prev) => (prev.trim() ? prev : (dirMatch.email_to || '')));
       setSupplierEmailCc((prev) => (prev.trim() ? prev : (dirMatch.email_cc || '')));
@@ -53192,7 +53262,7 @@ export default function SimpleSupplierRtvWizardModal({
             ...repPickup,
             disposition: optionId,
             disposition_label: opt.title,
-            supplier_name: effectiveSupplier,
+            supplier_name: isSupplierStream ? effectiveSupplier : (!isPendingSupplierName(rep.supplier_name) ? rep.supplier_name : ''),
             ...(isSupplierStream ? {} : { customer_name: cleanSupplier || repPickup.customer_name || rep.store_branch || '' }),
             supplier_email_to: supplierEmailTo.trim(),
             supplier_email_cc: supplierEmailCc.trim(),
@@ -53471,7 +53541,7 @@ export default function SimpleSupplierRtvWizardModal({
           disposition_label: activeOpt.title,
           claim_number: resolvedClaimNumber || null,
           consolidated_rma_numbers: batchRmaNumbers,
-          supplier_name: cleanSupplier,
+          supplier_name: isSupplierStream ? cleanSupplier : (!isPendingSupplierName(rep.supplier_name) ? rep.supplier_name : ''),
           ...(isSupplierStream ? {} : { customer_name: cleanSupplier }),
           supplier_email_to: cleanEmailTo,
           supplier_email_cc: cleanEmailCc,
@@ -57903,6 +57973,7 @@ export default function SupplierClaimsTab({
       <SupplierDirectoryModal
         isOpen={isDirectoryOpen}
         onClose={() => setIsDirectoryOpen(false)}
+        isTestMode={isTestMode}
       />
 
     </div>
@@ -57953,11 +58024,13 @@ export default function SupplierDirectoryModal({
   isOpen,
   onClose,
   onShowToast = null,
-  isEmbeddedPage = false
+  isEmbeddedPage = false,
+  isTestMode = false
 }) {
   // Always declare ALL React hooks unconditionally before any early returns
   const isDesktopMd = useIsDesktopMd();
-  const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
+  const modeIsTest = Boolean(isTestMode);
+  const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -57968,15 +58041,22 @@ export default function SupplierDirectoryModal({
 
   useEffect(() => {
     const syncHandler = (e) => {
-      if (Array.isArray(e?.detail)) {
-        setContacts(e.detail);
-      } else {
-        setContacts(supplierDirectoryService.getCachedDirectory());
+      const detail = e?.detail;
+      if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        if (Boolean(detail.isTestMode) !== modeIsTest) return;
+        if (Array.isArray(detail.list)) {
+          setContacts(detail.list);
+          return;
+        }
+      } else if (Array.isArray(detail)) {
+        setContacts(detail);
+        return;
       }
+      setContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
     };
     window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncHandler);
     return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncHandler);
-  }, []);
+  }, [modeIsTest]);
 
   useEffect(() => {
     if (!isOpen && !isEmbeddedPage) return;
@@ -57984,9 +58064,10 @@ export default function SupplierDirectoryModal({
     setFeedback(null);
     setShowForm(false);
     setForm(EMPTY_FORM);
+    setContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
     setIsLoading(true);
     supplierDirectoryService
-      .loadDirectory()
+      .loadDirectory({ isTestMode: modeIsTest })
       .then((list) => {
         if (active && Array.isArray(list)) {
           setContacts(list);
@@ -57998,7 +58079,7 @@ export default function SupplierDirectoryModal({
     return () => {
       active = false;
     };
-  }, [isOpen, isEmbeddedPage]);
+  }, [isOpen, isEmbeddedPage, modeIsTest]);
 
   const filteredContacts = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -58050,12 +58131,13 @@ export default function SupplierDirectoryModal({
     setFeedback(null);
     try {
       const { saved, directory } = await supplierDirectoryService.upsertContact(form, {
-        explicitEdit: true
+        explicitEdit: true,
+        isTestMode: modeIsTest
       });
       setContacts(directory);
       setShowForm(false);
       setForm(EMPTY_FORM);
-      const msg = `Saved contact "${saved.supplier_name}" to Supplier Emails Directory.`;
+      const msg = `Saved contact "${saved.supplier_name}" to ${modeIsTest ? 'Sandbox' : 'Live'} Supplier Emails Directory.`;
       setFeedback({ type: 'success', message: msg });
       onShowToast?.(msg, 'success');
     } catch (err) {
@@ -58066,11 +58148,11 @@ export default function SupplierDirectoryModal({
   };
 
   const handleDelete = async (contact) => {
-    if (!window.confirm(`Delete "${contact.supplier_name}" from Supplier Emails Directory?`)) return;
+    if (!window.confirm(`Delete "${contact.supplier_name}" from ${modeIsTest ? 'Sandbox ' : ''}Supplier Emails Directory?`)) return;
     setDeletingId(contact.id || contact.supplier_name);
     setFeedback(null);
     try {
-      const updatedList = await supplierDirectoryService.deleteContact(contact.id || contact.supplier_name);
+      const updatedList = await supplierDirectoryService.deleteContact(contact.id || contact.supplier_name, { isTestMode: modeIsTest });
       setContacts(updatedList);
       const msg = `Removed "${contact.supplier_name}" from directory.`;
       setFeedback({ type: 'success', message: msg });
@@ -58116,6 +58198,13 @@ export default function SupplierDirectoryModal({
                 <h2 className="text-sm sm:text-base font-black tracking-tight truncate">
                   Supplier Emails Directory
                 </h2>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                  modeIsTest
+                    ? 'bg-amber-200 dark:bg-amber-950 text-amber-900 dark:text-amber-300 border border-amber-400'
+                    : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300'
+                }`}>
+                  {modeIsTest ? '🧪 Sandbox Isolated' : '🟢 Live Production'}
+                </span>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black font-mono">
                   {contacts.length} Saved Supplier{contacts.length === 1 ? '' : 's'}
                 </span>
@@ -58483,9 +58572,15 @@ export default function SupplierFollowUpModal({
   const [isClosing, setIsClosing] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
+  const recordIsTest = useMemo(
+    () => Boolean(isTestMode || (report && isTestRecord(report))),
+    [isTestMode, report]
+  );
+
   useEffect(() => {
     if (!isOpen || !report) return;
     let active = true;
+    const modeIsTest = Boolean(isTestMode || isTestRecord(report));
     const party = resolveReportPartyAndEmails(report, catalogProducts);
     const defaultCfg = notificationService.getDailyFollowUpConfig();
     const wf = computeFourStepWorkflow(report, catalogProducts, {
@@ -58493,7 +58588,7 @@ export default function SupplierFollowUpModal({
       testStepIntervalSeconds: defaultCfg.testStepIntervalSeconds
     });
     const cleanSup = isPlaceholderSupplier(party.supplierName) ? '' : party.supplierName;
-    const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup) : null;
+    const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup, { isTestMode: modeIsTest }) : null;
 
     setSupplierName(cleanSup);
     setSupplierEmailTo(party.supplierEmailTo || dirMatch?.email_to || '');
@@ -58501,9 +58596,9 @@ export default function SupplierFollowUpModal({
     setFollowUpEnabled(Boolean(wf.followUpEnabled));
     setFeedback(null);
 
-    supplierDirectoryService.loadDirectory().then(() => {
+    supplierDirectoryService.loadDirectory({ isTestMode: modeIsTest }).then(() => {
       if (!active || !cleanSup) return;
-      const freshMatch = supplierDirectoryService.findBySupplierName(cleanSup);
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanSup, { isTestMode: modeIsTest });
       if (freshMatch) {
         setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
         setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
@@ -58514,12 +58609,7 @@ export default function SupplierFollowUpModal({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, report?.id, report?.rma_number]);
-
-  const recordIsTest = useMemo(
-    () => Boolean(isTestMode || (report && isTestRecord(report))),
-    [isTestMode, report]
-  );
+  }, [isOpen, report?.id, report?.rma_number, isTestMode]);
 
   const wfPreview = useMemo(() => {
     if (!report) return null;
@@ -58553,7 +58643,7 @@ export default function SupplierFollowUpModal({
 
   const handleSupplierNameChange = (nextVal) => {
     setSupplierName(nextVal);
-    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal, { isTestMode: recordIsTest });
     if (dirMatch) {
       setSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
       setSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
@@ -58576,11 +58666,14 @@ export default function SupplierFollowUpModal({
         followUpEnabled,
         actorName
       });
-      await supplierDirectoryService.upsertFromSubmission({
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim()
-      }).catch(() => { });
+      await supplierDirectoryService.upsertFromSubmission(
+        {
+          supplier_name: cleanSup,
+          supplier_email_to: supplierEmailTo.trim(),
+          supplier_email_cc: supplierEmailCc.trim()
+        },
+        { isTestMode: recordIsTest }
+      ).catch(() => { });
       setFeedback({
         type: 'success',
         message: `Saved supplier "${cleanSup}" and contact email(s)${followUpEnabled ? ' — 10-Calendar-Day follow-up countdown active.' : ' — Auto daily follow-up paused.'}`
@@ -64953,9 +65046,17 @@ export const catalogService = {
       if (!existingFollowUpMeta.started_at) {
         existingFollowUpMeta.started_at = nowIso;
       }
-      // Auto-populate known Supplier Directory emails when available so daily cron can send right away
+      // Auto-populate known Supplier Directory emails when available so daily cron can send right away (strictly isolated Live vs Test)
       if (!existingFollowUpMeta.supplier_email_to) {
         try {
+          const submissionIsTest = isTestRecord({
+            rma_number: rmaNumber,
+            notes,
+            is_test: ai_document_metadata?.is_test,
+            test_mode: ai_document_metadata?.test_mode,
+            ai_document_metadata
+          });
+          await supplierDirectoryService.loadDirectory({ isTestMode: submissionIsTest }).catch(() => {});
           const itemSuppliers = hasItems ? extractDistinctSuppliersFromItems(items) : [];
           const candidateSups = itemSuppliers.length > 0
             ? itemSuppliers
@@ -64963,7 +65064,7 @@ export const catalogService = {
           const dirToSet = new Set();
           const dirCcSet = new Set();
           candidateSups.forEach((sup) => {
-            const match = supplierDirectoryService.findBySupplierName(sup);
+            const match = supplierDirectoryService.findBySupplierName(sup, { isTestMode: submissionIsTest });
             if (match?.email_to) {
               String(match.email_to).split(/[,;\s]+/).forEach((e) => { if (e.includes('@')) dirToSet.add(e.trim().toLowerCase()); });
             }
@@ -66956,12 +67057,18 @@ export const catalogService = {
       const supForDir = updates.supplier_name || existing?.supplier_name;
       const toForDir = updatedMeta?.supplier_pickup?.supplier_email_to;
       const ccForDir = updatedMeta?.supplier_pickup?.supplier_email_cc;
-      if (supForDir && (toForDir || ccForDir)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: supForDir,
-          supplier_email_to: toForDir,
-          supplier_email_cc: ccForDir
-        }).catch(() => {});
+      const effectiveStream = updates.rma_type || existing?.rma_type || '';
+      const dispLower = String(updates.disposition || payload?.disposition || '').toLowerCase();
+      const isSupplierRtvAction = effectiveStream === 'supplier_outbound' && !dispLower.startsWith('customer_');
+      if (isSupplierRtvAction && supForDir && (toForDir || ccForDir)) {
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: supForDir,
+            supplier_email_to: toForDir,
+            supplier_email_cc: ccForDir
+          },
+          { isTestMode: recordIsTest }
+        ).catch(() => {});
       }
     } catch {}
 
@@ -67094,11 +67201,14 @@ export const catalogService = {
     try {
       const supForDir = cleanSupplier || existing?.supplier_name;
       if (supForDir && (toEmailStr || ccEmailStr)) {
-        supplierDirectoryService.upsertFromSubmission({
-          supplier_name: supForDir,
-          supplier_email_to: toEmailStr,
-          supplier_email_cc: ccEmailStr
-        }).catch(() => {});
+        supplierDirectoryService.upsertFromSubmission(
+          {
+            supplier_name: supForDir,
+            supplier_email_to: toEmailStr,
+            supplier_email_cc: ccEmailStr
+          },
+          { isTestMode: recordIsTest }
+        ).catch(() => {});
       }
     } catch {}
     this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });
@@ -72593,50 +72703,40 @@ export const supplierClaimService = {
 
 --- START FILE: src/services/supplierDirectoryService.js ---
 import { supabase } from '../supabaseClient';
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  SUPPLIER_DIRECTORY_STORAGE_KEY,
+  TEST_SUPPLIER_DIRECTORY_STORAGE_KEY,
+  isPlaceholderSupplierName,
+  normalizeSupplierDirectoryKey,
+  getSupplierDirectorySettingsKey,
+  getSupplierDirectoryStorageKey,
+  parseSupplierDirectoryValue,
+  splitDirectoryEmails,
+  isBlockedLiveDirectoryContact
+} from '../utils/supplierDirectoryHelpers';
 
-export const SUPPLIER_DIRECTORY_SETTINGS_KEY = 'supplier_directory_store';
-export const SUPPLIER_DIRECTORY_STORAGE_KEY = 'rma_portal_supplier_directory_store';
+export {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  SUPPLIER_DIRECTORY_STORAGE_KEY,
+  TEST_SUPPLIER_DIRECTORY_STORAGE_KEY
+};
 export const SUPPLIER_DIRECTORY_EVENT = 'rma-supplier-directory-changed';
 
-const PLACEHOLDER_SUPPLIERS = new Set([
-  '',
-  'pending',
-  'pending assignment',
-  'unassigned',
-  'warehouse',
-  'n/a',
-  'none',
-  'unknown'
-]);
-
-function isPlaceholderName(name) {
-  return PLACEHOLDER_SUPPLIERS.has(String(name || '').trim().toLowerCase());
-}
-
 export function normalizeSupplierKey(name) {
-  return String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+  return normalizeSupplierDirectoryKey(name);
 }
 
 function normalizeEmailString(raw) {
-  if (!raw) return '';
-  const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;\n]+/);
-  const unique = new Set();
-  for (const part of arr) {
-    const clean = String(part || '').trim().toLowerCase();
-    if (clean && clean.includes('@') && clean.includes('.')) {
-      unique.add(clean);
-    }
-  }
-  return Array.from(unique).join(', ');
+  return splitDirectoryEmails(raw).join(', ');
 }
 
 function normalizeContactRecord(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const cleanName = String(entry.supplier_name || entry.supplierName || '').trim();
-  if (isPlaceholderName(cleanName)) return null;
+  if (isPlaceholderSupplierName(cleanName)) return null;
   const emailTo = normalizeEmailString(entry.email_to || entry.supplier_email_to || entry.to || '');
   const emailCc = normalizeEmailString(entry.email_cc || entry.supplier_email_cc || entry.cc || '');
   const contactPerson = String(entry.contact_person || entry.contactPerson || '').trim();
@@ -72655,12 +72755,15 @@ function normalizeContactRecord(entry) {
   };
 }
 
-function normalizeDirectoryList(raw) {
-  if (!Array.isArray(raw)) return [];
+function normalizeDirectoryList(raw, { isTestMode = false } = {}) {
+  const arr = parseSupplierDirectoryValue(raw);
   const map = new Map();
-  for (const item of raw) {
+  for (const item of arr) {
     const norm = normalizeContactRecord(item);
     if (!norm) continue;
+    if (!isTestMode && isBlockedLiveDirectoryContact(norm.supplier_name, norm.email_to, norm.email_cc)) {
+      continue;
+    }
     const k = normalizeSupplierKey(norm.supplier_name);
     const existing = map.get(k);
     if (!existing) {
@@ -72679,26 +72782,49 @@ function normalizeDirectoryList(raw) {
   return Array.from(map.values()).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
 }
 
-function writeLocalCache(list) {
+function writeLocalCache(list, isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const storageKey = getSupplierDirectoryStorageKey(modeFlag);
   try {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(SUPPLIER_DIRECTORY_STORAGE_KEY, JSON.stringify(list));
-      window.dispatchEvent(new CustomEvent(SUPPLIER_DIRECTORY_EVENT, { detail: list }));
+      localStorage.setItem(storageKey, JSON.stringify(list));
+      window.dispatchEvent(
+        new CustomEvent(SUPPLIER_DIRECTORY_EVENT, {
+          detail: { isTestMode: modeFlag, list }
+        })
+      );
     }
   } catch (err) {
     console.warn('[supplierDirectoryService] Cache write warning:', err?.message || err);
   }
 }
 
-async function persistDirectoryToDb(list) {
-  const normalized = normalizeDirectoryList(list);
-  writeLocalCache(normalized);
+async function fetchDirectoryFromDb(isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const settingsKey = getSupplierDirectorySettingsKey(modeFlag);
+  const { data, error } = await supabase
+    .from('rma_settings')
+    .select('value')
+    .eq('key', settingsKey)
+    .maybeSingle();
+
+  if (!error && data && (Array.isArray(data.value) || typeof data.value === 'string')) {
+    return normalizeDirectoryList(data.value, { isTestMode: modeFlag });
+  }
+  return null;
+}
+
+async function persistDirectoryToDb(list, isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const settingsKey = getSupplierDirectorySettingsKey(modeFlag);
+  const normalized = normalizeDirectoryList(list, { isTestMode: modeFlag });
+  writeLocalCache(normalized, modeFlag);
   try {
     const { error } = await supabase
       .from('rma_settings')
       .upsert(
         {
-          key: SUPPLIER_DIRECTORY_SETTINGS_KEY,
+          key: settingsKey,
           value: normalized,
           updated_at: new Date().toISOString()
         },
@@ -72714,41 +72840,39 @@ async function persistDirectoryToDb(list) {
 }
 
 export const supplierDirectoryService = {
-  getCachedDirectory() {
+  getCachedDirectory({ isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
+    const storageKey = getSupplierDirectoryStorageKey(modeFlag);
     try {
       if (typeof window !== 'undefined') {
-        const raw = localStorage.getItem(SUPPLIER_DIRECTORY_STORAGE_KEY);
+        const raw = localStorage.getItem(storageKey);
         if (raw) {
-          return normalizeDirectoryList(JSON.parse(raw));
+          return normalizeDirectoryList(raw, { isTestMode: modeFlag });
         }
       }
     } catch {}
     return [];
   },
 
-  async loadDirectory() {
+  async loadDirectory({ isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     try {
-      const { data, error } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-
-      if (!error && data && Array.isArray(data.value)) {
-        const normalized = normalizeDirectoryList(data.value);
-        writeLocalCache(normalized);
-        return normalized;
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      if (Array.isArray(dbList)) {
+        writeLocalCache(dbList, modeFlag);
+        return dbList;
       }
     } catch (err) {
       console.warn('[supplierDirectoryService] Load warning:', err?.message || err);
     }
-    return this.getCachedDirectory();
+    return this.getCachedDirectory({ isTestMode: modeFlag });
   },
 
-  findBySupplierName(name) {
+  findBySupplierName(name, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const key = normalizeSupplierKey(name);
-    if (!key || isPlaceholderName(key)) return null;
-    const list = this.getCachedDirectory();
+    if (!key || isPlaceholderSupplierName(key)) return null;
+    const list = this.getCachedDirectory({ isTestMode: modeFlag });
     const exact = list.find((c) => normalizeSupplierKey(c.supplier_name) === key);
     if (exact) return exact;
     const compactKey = key.replace(/[^a-z0-9]/g, '');
@@ -72756,9 +72880,10 @@ export const supplierDirectoryService = {
     return list.find((c) => normalizeSupplierKey(c.supplier_name).replace(/[^a-z0-9]/g, '') === compactKey) || null;
   },
 
-  async upsertContact(contact = {}, { explicitEdit = true } = {}) {
+  async upsertContact(contact = {}, { explicitEdit = true, isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const cleanName = String(contact.supplier_name || contact.supplierName || '').trim();
-    if (isPlaceholderName(cleanName)) {
+    if (isPlaceholderSupplierName(cleanName)) {
       throw new Error('Please enter a valid Supplier / Company Name.');
     }
     const emailTo = normalizeEmailString(contact.email_to ?? contact.supplier_email_to ?? '');
@@ -72766,20 +72891,18 @@ export const supplierDirectoryService = {
     const contactPerson = String(contact.contact_person ?? contact.contactPerson ?? '').trim();
     const notes = String(contact.notes ?? '').trim();
 
+    // Never permit placeholder/test emails or test supplier names into Live Supplier Directory
+    if (!modeFlag && isBlockedLiveDirectoryContact(cleanName, emailTo, emailCc)) {
+      if (!explicitEdit) return null;
+      throw new Error('Test or placeholder supplier names/emails (@example.com, *.local) cannot be saved in the Live Supplier Directory. Enable Test Mode Sandbox instead.');
+    }
+
     let current = [];
     try {
-      const { data } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-      if (data && Array.isArray(data.value)) {
-        current = normalizeDirectoryList(data.value);
-      } else {
-        current = this.getCachedDirectory();
-      }
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      current = Array.isArray(dbList) ? dbList : this.getCachedDirectory({ isTestMode: modeFlag });
     } catch {
-      current = this.getCachedDirectory();
+      current = this.getCachedDirectory({ isTestMode: modeFlag });
     }
 
     const targetKey = normalizeSupplierKey(cleanName);
@@ -72803,18 +72926,22 @@ export const supplierDirectoryService = {
       nextList.push(merged);
     }
 
-    const persisted = await persistDirectoryToDb(nextList);
+    const persisted = await persistDirectoryToDb(nextList, modeFlag);
     return {
       saved: persisted.find((c) => normalizeSupplierKey(c.supplier_name) === targetKey) || merged,
       directory: persisted
     };
   },
 
-  async upsertFromSubmission({ supplier_name, supplier_email_to, supplier_email_cc }) {
+  async upsertFromSubmission({ supplier_name, supplier_email_to, supplier_email_cc }, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const cleanName = String(supplier_name || '').trim();
     const emailTo = normalizeEmailString(supplier_email_to || '');
     const emailCc = normalizeEmailString(supplier_email_cc || '');
-    if (isPlaceholderName(cleanName) || (!emailTo && !emailCc)) {
+    if (isPlaceholderSupplierName(cleanName) || (!emailTo && !emailCc)) {
+      return null;
+    }
+    if (!modeFlag && isBlockedLiveDirectoryContact(cleanName, emailTo, emailCc)) {
       return null;
     }
     return this.upsertContact(
@@ -72823,31 +72950,28 @@ export const supplierDirectoryService = {
         email_to: emailTo,
         email_cc: emailCc
       },
-      { explicitEdit: false }
+      { explicitEdit: false, isTestMode: modeFlag }
     );
   },
 
-  async deleteContact(idOrName) {
+  async deleteContact(idOrName, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const rawKey = normalizeSupplierKey(idOrName);
     const idTarget = String(idOrName || '').trim();
-    if (!idTarget) return this.getCachedDirectory();
+    if (!idTarget) return this.getCachedDirectory({ isTestMode: modeFlag });
 
-    let current = this.getCachedDirectory();
+    let current = this.getCachedDirectory({ isTestMode: modeFlag });
     try {
-      const { data } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-      if (data && Array.isArray(data.value)) {
-        current = normalizeDirectoryList(data.value);
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      if (Array.isArray(dbList)) {
+        current = dbList;
       }
     } catch {}
 
     const filtered = current.filter(
       (c) => c.id !== idTarget && normalizeSupplierKey(c.supplier_name) !== rawKey
     );
-    return persistDirectoryToDb(filtered);
+    return persistDirectoryToDb(filtered, modeFlag);
   }
 };
 
@@ -81948,3 +82072,142 @@ export function formatTestEmailSubject(subject, isTestMode = false) {
 
 
 --- END FILE: src/utils/rmaHelpers.js ---
+
+--- START FILE: src/utils/supplierDirectoryHelpers.js ---
+export const SUPPLIER_DIRECTORY_SETTINGS_KEY = 'supplier_directory_store';
+export const TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY = 'test_supplier_directory_store';
+export const SUPPLIER_DIRECTORY_STORAGE_KEY = 'rma_portal_supplier_directory_store';
+export const TEST_SUPPLIER_DIRECTORY_STORAGE_KEY = 'rma_portal_test_supplier_directory_store';
+
+const PLACEHOLDER_SUPPLIER_NAMES = new Set([
+  '',
+  'pending',
+  'pending assignment',
+  'unassigned',
+  'warehouse',
+  'n/a',
+  'none',
+  'unknown'
+]);
+
+const BLOCKED_LIVE_SUPPLIER_PATTERNS = [
+  /^pw\s+test\b/i,
+  /^playwright\b/i,
+  /^reset preservation supplier$/i,
+  /^supplier\s+[ab]$/i,
+  /^other guard vendor$/i
+];
+
+const BLOCKED_LIVE_EMAIL_DOMAINS = [
+  'example.com',
+  'example.org',
+  'example.net',
+  'testgmail.com'
+];
+
+const BLOCKED_LIVE_EMAIL_PREFIXES = [
+  'pw-test-',
+  'pw-invite-',
+  'vendor-claims@',
+  'vendor-cc@',
+  'batch-claims@',
+  'batch-ap@',
+  'preserve-to@',
+  'preserve-cc@',
+  'claims-supa@',
+  'reply-claims@',
+  'vendor-fu@',
+  'cc-fu@'
+];
+
+export function isPlaceholderSupplierName(name) {
+  return PLACEHOLDER_SUPPLIER_NAMES.has(String(name || '').trim().toLowerCase());
+}
+
+export function normalizeSupplierDirectoryKey(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+export function getSupplierDirectorySettingsKey(isTestMode = false) {
+  return isTestMode ? TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY : SUPPLIER_DIRECTORY_SETTINGS_KEY;
+}
+
+export function getSupplierDirectoryStorageKey(isTestMode = false) {
+  return isTestMode ? TEST_SUPPLIER_DIRECTORY_STORAGE_KEY : SUPPLIER_DIRECTORY_STORAGE_KEY;
+}
+
+/**
+ * Safely parses `rma_settings.value` whether Supabase returns a native JSONB array
+ * or a serialized JSON array string (preventing accidental cache overwrite on string values).
+ */
+export function parseSupplierDirectoryValue(rawValue) {
+  if (Array.isArray(rawValue)) return rawValue;
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Splits a comma/semicolon/newline-separated string or array of emails into lowercase valid emails.
+ */
+export function splitDirectoryEmails(raw) {
+  if (!raw) return [];
+  const parts = Array.isArray(raw) ? raw : String(raw).split(/[,;\s\n]+/);
+  const out = [];
+  const seen = new Set();
+  for (const part of parts) {
+    const clean = String(part || '').trim().toLowerCase();
+    if (clean && clean.includes('@') && clean.includes('.') && !seen.has(clean)) {
+      seen.add(clean);
+      out.push(clean);
+    }
+  }
+  return out;
+}
+
+/**
+ * Detects reserved/placeholder/test emails that must never pollute Live Production directories.
+ */
+export function isPlaceholderOrTestEmail(rawEmail) {
+  const emails = splitDirectoryEmails(rawEmail);
+  if (emails.length === 0) return false;
+  return emails.some((email) => {
+    const atIdx = email.lastIndexOf('@');
+    if (atIdx < 1) return false;
+    const domain = email.slice(atIdx + 1);
+    if (
+      domain.endsWith('.local') ||
+      domain.endsWith('.test') ||
+      domain.endsWith('.example') ||
+      BLOCKED_LIVE_EMAIL_DOMAINS.includes(domain)
+    ) {
+      return true;
+    }
+    if (/^pw-ed\d+-/i.test(email)) return true;
+    return BLOCKED_LIVE_EMAIL_PREFIXES.some((prefix) => email.startsWith(prefix));
+  });
+}
+
+export function isBlockedLiveDirectoryName(supplierName) {
+  const clean = String(supplierName || '').trim();
+  if (!clean || isPlaceholderSupplierName(clean)) return true;
+  return BLOCKED_LIVE_SUPPLIER_PATTERNS.some((re) => re.test(clean));
+}
+
+export function isBlockedLiveDirectoryContact(supplierName, emailTo = '', emailCc = '') {
+  if (isBlockedLiveDirectoryName(supplierName)) return true;
+  return isPlaceholderOrTestEmail(emailTo) || isPlaceholderOrTestEmail(emailCc);
+}
+
+--- END FILE: src/utils/supplierDirectoryHelpers.js ---

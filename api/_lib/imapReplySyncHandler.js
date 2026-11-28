@@ -9,6 +9,13 @@ import {
   isMixedSuppliersSummary,
   isRealSupplierName
 } from '../../src/utils/rmaHelpers.js';
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  getSupplierDirectorySettingsKey,
+  parseSupplierDirectoryValue,
+  isBlockedLiveDirectoryContact
+} from '../../src/utils/supplierDirectoryHelpers.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -560,7 +567,8 @@ export async function applyRmaXlsxUpdates({
         'test_email_recipients',
         'test_email_recipients_by_type',
         'test_sandbox_email',
-        'supplier_directory_store',
+        SUPPLIER_DIRECTORY_SETTINGS_KEY,
+        TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
         'customer_rma_invites_store'
       ])
   ]);
@@ -1006,18 +1014,21 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  // Upsert Supplier Directory entry if supplier email(s) updated
+  // Upsert Supplier Directory entry if supplier email(s) updated (strictly isolated Live vs Test + Live placeholder guard)
   const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
   const effectiveSupTo = nextFollowUp.supplier_email_to || '';
   const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
-  if (effectiveSupplier && !isMixedSuppliersSummary(effectiveSupplier) && isRealSupplierName(effectiveSupplier) && (effectiveSupTo || effectiveSupCc)) {
+  if (
+    effectiveSupplier &&
+    !isMixedSuppliersSummary(effectiveSupplier) &&
+    isRealSupplierName(effectiveSupplier) &&
+    (effectiveSupTo || effectiveSupCc) &&
+    (existingIsTest || !isBlockedLiveDirectoryContact(effectiveSupplier, effectiveSupTo, effectiveSupCc))
+  ) {
     try {
-      const dirRow = (settingsRows || []).find((s) => s.key === 'supplier_directory_store');
-      let dirList = [];
-      if (dirRow?.value) {
-        const parsedDir = typeof dirRow.value === 'string' ? JSON.parse(dirRow.value) : dirRow.value;
-        if (Array.isArray(parsedDir)) dirList = parsedDir;
-      }
+      const dirKey = getSupplierDirectorySettingsKey(existingIsTest);
+      const dirRow = (settingsRows || []).find((s) => s.key === dirKey);
+      let dirList = parseSupplierDirectoryValue(dirRow?.value);
       const lower = effectiveSupplier.toLowerCase();
       const idx = dirList.findIndex((e) => String(e?.supplier_name || '').trim().toLowerCase() === lower);
       const nextEntry = {
@@ -1029,7 +1040,7 @@ export async function applyRmaXlsxUpdates({
       };
       if (idx >= 0) dirList[idx] = { ...dirList[idx], ...nextEntry };
       else dirList.push(nextEntry);
-      await supabase.from('rma_settings').upsert({ key: 'supplier_directory_store', value: JSON.stringify(dirList) }, { onConflict: 'key' });
+      await supabase.from('rma_settings').upsert({ key: dirKey, value: dirList, updated_at: nowIso }, { onConflict: 'key' });
     } catch {}
   }
 

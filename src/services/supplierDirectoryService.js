@@ -1,48 +1,38 @@
 import { supabase } from '../supabaseClient';
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  SUPPLIER_DIRECTORY_STORAGE_KEY,
+  TEST_SUPPLIER_DIRECTORY_STORAGE_KEY,
+  isPlaceholderSupplierName,
+  normalizeSupplierDirectoryKey,
+  getSupplierDirectorySettingsKey,
+  getSupplierDirectoryStorageKey,
+  parseSupplierDirectoryValue,
+  splitDirectoryEmails,
+  isBlockedLiveDirectoryContact
+} from '../utils/supplierDirectoryHelpers';
 
-export const SUPPLIER_DIRECTORY_SETTINGS_KEY = 'supplier_directory_store';
-export const SUPPLIER_DIRECTORY_STORAGE_KEY = 'rma_portal_supplier_directory_store';
+export {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  SUPPLIER_DIRECTORY_STORAGE_KEY,
+  TEST_SUPPLIER_DIRECTORY_STORAGE_KEY
+};
 export const SUPPLIER_DIRECTORY_EVENT = 'rma-supplier-directory-changed';
 
-const PLACEHOLDER_SUPPLIERS = new Set([
-  '',
-  'pending',
-  'pending assignment',
-  'unassigned',
-  'warehouse',
-  'n/a',
-  'none',
-  'unknown'
-]);
-
-function isPlaceholderName(name) {
-  return PLACEHOLDER_SUPPLIERS.has(String(name || '').trim().toLowerCase());
-}
-
 export function normalizeSupplierKey(name) {
-  return String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+  return normalizeSupplierDirectoryKey(name);
 }
 
 function normalizeEmailString(raw) {
-  if (!raw) return '';
-  const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;\n]+/);
-  const unique = new Set();
-  for (const part of arr) {
-    const clean = String(part || '').trim().toLowerCase();
-    if (clean && clean.includes('@') && clean.includes('.')) {
-      unique.add(clean);
-    }
-  }
-  return Array.from(unique).join(', ');
+  return splitDirectoryEmails(raw).join(', ');
 }
 
 function normalizeContactRecord(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const cleanName = String(entry.supplier_name || entry.supplierName || '').trim();
-  if (isPlaceholderName(cleanName)) return null;
+  if (isPlaceholderSupplierName(cleanName)) return null;
   const emailTo = normalizeEmailString(entry.email_to || entry.supplier_email_to || entry.to || '');
   const emailCc = normalizeEmailString(entry.email_cc || entry.supplier_email_cc || entry.cc || '');
   const contactPerson = String(entry.contact_person || entry.contactPerson || '').trim();
@@ -61,12 +51,15 @@ function normalizeContactRecord(entry) {
   };
 }
 
-function normalizeDirectoryList(raw) {
-  if (!Array.isArray(raw)) return [];
+function normalizeDirectoryList(raw, { isTestMode = false } = {}) {
+  const arr = parseSupplierDirectoryValue(raw);
   const map = new Map();
-  for (const item of raw) {
+  for (const item of arr) {
     const norm = normalizeContactRecord(item);
     if (!norm) continue;
+    if (!isTestMode && isBlockedLiveDirectoryContact(norm.supplier_name, norm.email_to, norm.email_cc)) {
+      continue;
+    }
     const k = normalizeSupplierKey(norm.supplier_name);
     const existing = map.get(k);
     if (!existing) {
@@ -85,26 +78,49 @@ function normalizeDirectoryList(raw) {
   return Array.from(map.values()).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
 }
 
-function writeLocalCache(list) {
+function writeLocalCache(list, isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const storageKey = getSupplierDirectoryStorageKey(modeFlag);
   try {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(SUPPLIER_DIRECTORY_STORAGE_KEY, JSON.stringify(list));
-      window.dispatchEvent(new CustomEvent(SUPPLIER_DIRECTORY_EVENT, { detail: list }));
+      localStorage.setItem(storageKey, JSON.stringify(list));
+      window.dispatchEvent(
+        new CustomEvent(SUPPLIER_DIRECTORY_EVENT, {
+          detail: { isTestMode: modeFlag, list }
+        })
+      );
     }
   } catch (err) {
     console.warn('[supplierDirectoryService] Cache write warning:', err?.message || err);
   }
 }
 
-async function persistDirectoryToDb(list) {
-  const normalized = normalizeDirectoryList(list);
-  writeLocalCache(normalized);
+async function fetchDirectoryFromDb(isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const settingsKey = getSupplierDirectorySettingsKey(modeFlag);
+  const { data, error } = await supabase
+    .from('rma_settings')
+    .select('value')
+    .eq('key', settingsKey)
+    .maybeSingle();
+
+  if (!error && data && (Array.isArray(data.value) || typeof data.value === 'string')) {
+    return normalizeDirectoryList(data.value, { isTestMode: modeFlag });
+  }
+  return null;
+}
+
+async function persistDirectoryToDb(list, isTestMode = false) {
+  const modeFlag = Boolean(isTestMode);
+  const settingsKey = getSupplierDirectorySettingsKey(modeFlag);
+  const normalized = normalizeDirectoryList(list, { isTestMode: modeFlag });
+  writeLocalCache(normalized, modeFlag);
   try {
     const { error } = await supabase
       .from('rma_settings')
       .upsert(
         {
-          key: SUPPLIER_DIRECTORY_SETTINGS_KEY,
+          key: settingsKey,
           value: normalized,
           updated_at: new Date().toISOString()
         },
@@ -120,41 +136,39 @@ async function persistDirectoryToDb(list) {
 }
 
 export const supplierDirectoryService = {
-  getCachedDirectory() {
+  getCachedDirectory({ isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
+    const storageKey = getSupplierDirectoryStorageKey(modeFlag);
     try {
       if (typeof window !== 'undefined') {
-        const raw = localStorage.getItem(SUPPLIER_DIRECTORY_STORAGE_KEY);
+        const raw = localStorage.getItem(storageKey);
         if (raw) {
-          return normalizeDirectoryList(JSON.parse(raw));
+          return normalizeDirectoryList(raw, { isTestMode: modeFlag });
         }
       }
     } catch {}
     return [];
   },
 
-  async loadDirectory() {
+  async loadDirectory({ isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     try {
-      const { data, error } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-
-      if (!error && data && Array.isArray(data.value)) {
-        const normalized = normalizeDirectoryList(data.value);
-        writeLocalCache(normalized);
-        return normalized;
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      if (Array.isArray(dbList)) {
+        writeLocalCache(dbList, modeFlag);
+        return dbList;
       }
     } catch (err) {
       console.warn('[supplierDirectoryService] Load warning:', err?.message || err);
     }
-    return this.getCachedDirectory();
+    return this.getCachedDirectory({ isTestMode: modeFlag });
   },
 
-  findBySupplierName(name) {
+  findBySupplierName(name, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const key = normalizeSupplierKey(name);
-    if (!key || isPlaceholderName(key)) return null;
-    const list = this.getCachedDirectory();
+    if (!key || isPlaceholderSupplierName(key)) return null;
+    const list = this.getCachedDirectory({ isTestMode: modeFlag });
     const exact = list.find((c) => normalizeSupplierKey(c.supplier_name) === key);
     if (exact) return exact;
     const compactKey = key.replace(/[^a-z0-9]/g, '');
@@ -162,9 +176,10 @@ export const supplierDirectoryService = {
     return list.find((c) => normalizeSupplierKey(c.supplier_name).replace(/[^a-z0-9]/g, '') === compactKey) || null;
   },
 
-  async upsertContact(contact = {}, { explicitEdit = true } = {}) {
+  async upsertContact(contact = {}, { explicitEdit = true, isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const cleanName = String(contact.supplier_name || contact.supplierName || '').trim();
-    if (isPlaceholderName(cleanName)) {
+    if (isPlaceholderSupplierName(cleanName)) {
       throw new Error('Please enter a valid Supplier / Company Name.');
     }
     const emailTo = normalizeEmailString(contact.email_to ?? contact.supplier_email_to ?? '');
@@ -172,20 +187,18 @@ export const supplierDirectoryService = {
     const contactPerson = String(contact.contact_person ?? contact.contactPerson ?? '').trim();
     const notes = String(contact.notes ?? '').trim();
 
+    // Never permit placeholder/test emails or test supplier names into Live Supplier Directory
+    if (!modeFlag && isBlockedLiveDirectoryContact(cleanName, emailTo, emailCc)) {
+      if (!explicitEdit) return null;
+      throw new Error('Test or placeholder supplier names/emails (@example.com, *.local) cannot be saved in the Live Supplier Directory. Enable Test Mode Sandbox instead.');
+    }
+
     let current = [];
     try {
-      const { data } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-      if (data && Array.isArray(data.value)) {
-        current = normalizeDirectoryList(data.value);
-      } else {
-        current = this.getCachedDirectory();
-      }
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      current = Array.isArray(dbList) ? dbList : this.getCachedDirectory({ isTestMode: modeFlag });
     } catch {
-      current = this.getCachedDirectory();
+      current = this.getCachedDirectory({ isTestMode: modeFlag });
     }
 
     const targetKey = normalizeSupplierKey(cleanName);
@@ -209,18 +222,22 @@ export const supplierDirectoryService = {
       nextList.push(merged);
     }
 
-    const persisted = await persistDirectoryToDb(nextList);
+    const persisted = await persistDirectoryToDb(nextList, modeFlag);
     return {
       saved: persisted.find((c) => normalizeSupplierKey(c.supplier_name) === targetKey) || merged,
       directory: persisted
     };
   },
 
-  async upsertFromSubmission({ supplier_name, supplier_email_to, supplier_email_cc }) {
+  async upsertFromSubmission({ supplier_name, supplier_email_to, supplier_email_cc }, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const cleanName = String(supplier_name || '').trim();
     const emailTo = normalizeEmailString(supplier_email_to || '');
     const emailCc = normalizeEmailString(supplier_email_cc || '');
-    if (isPlaceholderName(cleanName) || (!emailTo && !emailCc)) {
+    if (isPlaceholderSupplierName(cleanName) || (!emailTo && !emailCc)) {
+      return null;
+    }
+    if (!modeFlag && isBlockedLiveDirectoryContact(cleanName, emailTo, emailCc)) {
       return null;
     }
     return this.upsertContact(
@@ -229,30 +246,27 @@ export const supplierDirectoryService = {
         email_to: emailTo,
         email_cc: emailCc
       },
-      { explicitEdit: false }
+      { explicitEdit: false, isTestMode: modeFlag }
     );
   },
 
-  async deleteContact(idOrName) {
+  async deleteContact(idOrName, { isTestMode = false } = {}) {
+    const modeFlag = Boolean(isTestMode);
     const rawKey = normalizeSupplierKey(idOrName);
     const idTarget = String(idOrName || '').trim();
-    if (!idTarget) return this.getCachedDirectory();
+    if (!idTarget) return this.getCachedDirectory({ isTestMode: modeFlag });
 
-    let current = this.getCachedDirectory();
+    let current = this.getCachedDirectory({ isTestMode: modeFlag });
     try {
-      const { data } = await supabase
-        .from('rma_settings')
-        .select('value')
-        .eq('key', SUPPLIER_DIRECTORY_SETTINGS_KEY)
-        .maybeSingle();
-      if (data && Array.isArray(data.value)) {
-        current = normalizeDirectoryList(data.value);
+      const dbList = await fetchDirectoryFromDb(modeFlag);
+      if (Array.isArray(dbList)) {
+        current = dbList;
       }
     } catch {}
 
     const filtered = current.filter(
       (c) => c.id !== idTarget && normalizeSupplierKey(c.supplier_name) !== rawKey
     );
-    return persistDirectoryToDb(filtered);
+    return persistDirectoryToDb(filtered, modeFlag);
   }
 };

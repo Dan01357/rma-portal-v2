@@ -29,22 +29,29 @@ import {
   buildAutoDisposedEmailContent
 } from '../../src/utils/followUpWorkflow.js';
 
+import {
+  SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY,
+  normalizeSupplierDirectoryKey,
+  parseSupplierDirectoryValue
+} from '../../src/utils/supplierDirectoryHelpers.js';
+
 const EMAIL_RECIPIENTS_KEY = 'email_recipients';
 const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
 const TEST_EMAIL_RECIPIENTS_KEY = 'test_email_recipients';
 const TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY = 'test_email_recipients_by_type';
 const DAILY_FOLLOWUP_CONFIG_KEY = 'daily_followup_config';
 const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
-const SUPPLIER_DIRECTORY_KEY = 'supplier_directory_store';
+const SUPPLIER_DIRECTORY_KEY = SUPPLIER_DIRECTORY_SETTINGS_KEY;
 
 function normalizeDirKey(name) {
-  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return normalizeSupplierDirectoryKey(name);
 }
 
 function buildDirectoryLookupMap(rawDir) {
   const map = new Map();
-  if (!Array.isArray(rawDir)) return map;
-  for (const entry of rawDir) {
+  const list = parseSupplierDirectoryValue(rawDir);
+  for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue;
     const k = normalizeDirKey(entry.supplier_name || entry.supplierName);
     if (!k) continue;
@@ -157,7 +164,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY,
         DAILY_FOLLOWUP_CONFIG_KEY,
         TEST_SANDBOX_EMAIL_KEY,
-        SUPPLIER_DIRECTORY_KEY
+        SUPPLIER_DIRECTORY_KEY,
+        TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY
       ]);
 
     if (Array.isArray(settingsRows)) {
@@ -247,7 +255,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   const followUpProfile = recipientsByType?.supplier_followup || {};
   const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to ?? followUpProfile?.toList);
   const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc ?? followUpProfile?.ccList);
-  const directoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
+  const liveDirectoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
+  const testDirectoryMap = buildDirectoryLookupMap(settingsMap.get(TEST_SUPPLIER_DIRECTORY_SETTINGS_KEY));
 
   // Isolated Test Mode recipient profiles (never leaks Live recipients or Live defaults)
   const testGlobalRecipients = settingsMap.get(TEST_EMAIL_RECIPIENTS_KEY);
@@ -521,7 +530,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         continue;
       }
 
-      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && directoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
+      const activeDirectoryMap = effectiveTestRecord ? testDirectoryMap : liveDirectoryMap;
+      const dirContact = (!isMixedSuppliersSummary(wf.party.supplierName) && activeDirectoryMap.get(normalizeDirKey(wf.party.supplierName))) || null;
       const itemSuppliers = Array.isArray(report.items) ? extractDistinctSuppliersFromItems(report.items) : [];
       const itemDirTo = [];
       const itemDirCc = [];
@@ -534,7 +544,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         }
       }
       for (const sup of itemSuppliers) {
-        const match = directoryMap.get(normalizeDirKey(sup));
+        const match = activeDirectoryMap.get(normalizeDirKey(sup));
         if (match) {
           match.emailToList.forEach((e) => itemDirTo.push(e));
           match.emailCcList.forEach((e) => itemDirCc.push(e));

@@ -39,11 +39,13 @@ export default function SupplierDirectoryModal({
   isOpen,
   onClose,
   onShowToast = null,
-  isEmbeddedPage = false
+  isEmbeddedPage = false,
+  isTestMode = false
 }) {
   // Always declare ALL React hooks unconditionally before any early returns
   const isDesktopMd = useIsDesktopMd();
-  const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
+  const modeIsTest = Boolean(isTestMode);
+  const [contacts, setContacts] = useState(() => supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -54,15 +56,22 @@ export default function SupplierDirectoryModal({
 
   useEffect(() => {
     const syncHandler = (e) => {
-      if (Array.isArray(e?.detail)) {
-        setContacts(e.detail);
-      } else {
-        setContacts(supplierDirectoryService.getCachedDirectory());
+      const detail = e?.detail;
+      if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        if (Boolean(detail.isTestMode) !== modeIsTest) return;
+        if (Array.isArray(detail.list)) {
+          setContacts(detail.list);
+          return;
+        }
+      } else if (Array.isArray(detail)) {
+        setContacts(detail);
+        return;
       }
+      setContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
     };
     window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncHandler);
     return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncHandler);
-  }, []);
+  }, [modeIsTest]);
 
   useEffect(() => {
     if (!isOpen && !isEmbeddedPage) return;
@@ -70,9 +79,10 @@ export default function SupplierDirectoryModal({
     setFeedback(null);
     setShowForm(false);
     setForm(EMPTY_FORM);
+    setContacts(supplierDirectoryService.getCachedDirectory({ isTestMode: modeIsTest }));
     setIsLoading(true);
     supplierDirectoryService
-      .loadDirectory()
+      .loadDirectory({ isTestMode: modeIsTest })
       .then((list) => {
         if (active && Array.isArray(list)) {
           setContacts(list);
@@ -84,7 +94,7 @@ export default function SupplierDirectoryModal({
     return () => {
       active = false;
     };
-  }, [isOpen, isEmbeddedPage]);
+  }, [isOpen, isEmbeddedPage, modeIsTest]);
 
   const filteredContacts = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -136,12 +146,13 @@ export default function SupplierDirectoryModal({
     setFeedback(null);
     try {
       const { saved, directory } = await supplierDirectoryService.upsertContact(form, {
-        explicitEdit: true
+        explicitEdit: true,
+        isTestMode: modeIsTest
       });
       setContacts(directory);
       setShowForm(false);
       setForm(EMPTY_FORM);
-      const msg = `Saved contact "${saved.supplier_name}" to Supplier Emails Directory.`;
+      const msg = `Saved contact "${saved.supplier_name}" to ${modeIsTest ? 'Sandbox' : 'Live'} Supplier Emails Directory.`;
       setFeedback({ type: 'success', message: msg });
       onShowToast?.(msg, 'success');
     } catch (err) {
@@ -152,11 +163,11 @@ export default function SupplierDirectoryModal({
   };
 
   const handleDelete = async (contact) => {
-    if (!window.confirm(`Delete "${contact.supplier_name}" from Supplier Emails Directory?`)) return;
+    if (!window.confirm(`Delete "${contact.supplier_name}" from ${modeIsTest ? 'Sandbox ' : ''}Supplier Emails Directory?`)) return;
     setDeletingId(contact.id || contact.supplier_name);
     setFeedback(null);
     try {
-      const updatedList = await supplierDirectoryService.deleteContact(contact.id || contact.supplier_name);
+      const updatedList = await supplierDirectoryService.deleteContact(contact.id || contact.supplier_name, { isTestMode: modeIsTest });
       setContacts(updatedList);
       const msg = `Removed "${contact.supplier_name}" from directory.`;
       setFeedback({ type: 'success', message: msg });
@@ -202,6 +213,13 @@ export default function SupplierDirectoryModal({
                 <h2 className="text-sm sm:text-base font-black tracking-tight truncate">
                   Supplier Emails Directory
                 </h2>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                  modeIsTest
+                    ? 'bg-amber-200 dark:bg-amber-950 text-amber-900 dark:text-amber-300 border border-amber-400'
+                    : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300'
+                }`}>
+                  {modeIsTest ? '🧪 Sandbox Isolated' : '🟢 Live Production'}
+                </span>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black font-mono">
                   {contacts.length} Saved Supplier{contacts.length === 1 ? '' : 's'}
                 </span>
